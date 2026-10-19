@@ -1,0 +1,11 @@
+{
+    "display_name": "Scene Archivist",
+    "loading_order": 100,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Mira",
+    "version": "1.0.0",
+    "homePage": ""
+}

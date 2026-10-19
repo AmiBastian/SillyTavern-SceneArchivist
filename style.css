@@ -1,0 +1,113 @@
+.sa-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.sa-row > label { min-width: 140px; }
+.sa-row input[type="text"], .sa-row input[type="number"], .sa-row select { flex: 1; min-width: 120px; }
+.sa-section { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--SmartThemeBorderColor); }
+.sa-hint { opacity: 0.7; font-size: 0.9em; margin: 2px 0 6px; }
+.sa-status { margin-top: 8px; font-size: 0.95em; }
+.sa-status .sa-ok::before { content: "✔ "; color: #5cb85c; }
+.sa-status .sa-warn::before { content: "▲ "; color: #e0a800; }
+.sa-status .sa-bad::before { content: "✖ "; color: #d9534f; }
+.sa-status li { list-style: none; margin: 3px 0; }
+.sa-status ul { padding-left: 0; margin: 4px 0; }
+.sa-review { text-align: left; }
+.sa-review h3 { margin: 4px 0 8px; }
+.sa-review details { border: 1px solid var(--SmartThemeBorderColor); border-radius: 8px; margin: 8px 0; padding: 6px 10px; }
+.sa-review summary { cursor: pointer; display: flex; gap: 8px; align-items: center; }
+.sa-review textarea { width: 100%; min-height: 140px; margin-top: 6px; font-family: monospace; font-size: 0.85em; }
+.sa-review input.sa-keys { width: 100%; margin-top: 6px; }
+.sa-review .sa-badge { font-size: 0.75em; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--SmartThemeBorderColor); opacity: 0.8; }
+.sa-review .sa-warnline { color: #e0a800; margin: 4px 0; }
+.sa-review .sa-note { opacity: 0.75; font-size: 0.9em; margin: 4px 0 8px; }
+
+.sa-ledgerrow { margin: 2px 0; }
+.sa-struck { text-decoration: line-through; opacity: 0.7; }
+.sa-ledgerlink { cursor: pointer; text-decoration: underline; opacity: 0.8; margin-left: 6px; }
+.sa-viewrow { margin: 2px 0; font-size: 0.92em; }
+
+/* panel look */
+.sa-panel, .sa-panel * { box-sizing: border-box; max-width: 100%; }
+.sa-panel textarea, .sa-panel select, .sa-panel input.text_pole { min-width: 0; }
+.sa-ver { opacity: 0.55; font-size: 0.8em; margin-left: 6px; }
+.sa-hero { padding: 8px 10px; border: 1px solid var(--SmartThemeBorderColor); border-radius: 14px; background: rgba(127, 127, 127, 0.08); margin: 6px 0 10px; }
+.sa-card { border: 1px solid var(--SmartThemeBorderColor); border-radius: 14px; margin: 6px 0; padding: 0 12px; background: rgba(127, 127, 127, 0.05); }
+.sa-card > summary { cursor: pointer; padding: 9px 2px; font-family: inherit; font-weight: 600; list-style: none; }
+.sa-card > summary::-webkit-details-marker { display: none; }
+.sa-card > summary::after { content: '\25BE'; float: right; opacity: 0.55; transition: transform 0.15s; }
+.sa-card[open] > summary::after { transform: rotate(180deg); }
+.sa-card[open] > summary { border-bottom: 1px dashed var(--SmartThemeBorderColor); margin-bottom: 6px; }
+.sa-body { padding-bottom: 8px; }
+.sa-sub { font-weight: 600; opacity: 0.85; margin: 10px 0 2px; }
+.sa-main .sa-run { flex: 2 1 160px; font-size: 1.05em; padding: 8px 14px; border-radius: 14px; }
+.sa-main .menu_button { border-radius: 14px; }
+.sa-mini .menu_button { font-size: 0.85em; padding: 3px 10px; border-radius: 14px; }
+.sa-panel .sa-row > label { min-width: 120px; }
+
+/* narrow screens: everything wraps, nothing forces sideways scrolling */
+@media (max-width: 600px) {
+  .sa-panel .sa-row { flex-wrap: wrap; }
+  .sa-panel .sa-row > label { flex: 1 0 100%; }
+  .sa-panel .sa-row > select, .sa-panel .sa-row > input.text_pole { flex: 1 1 100%; width: 100%; }
+  .sa-panel .sa-row > input.menu_button { flex: 1 1 auto; }
+  .sa-review, .sa-review * { max-width: 100%; }
+  .sa-review textarea { width: 100%; }
+}
+
+/* Title used by the current panel and docked layout. */
+.sa-title { font-weight: 700; font-size: 1.1em; margin: 2px 2px 8px; }
+#sa_drawer .sa-title { display: none; }
+
+/* Workbench: neutral host colors, clear sections and an intentional reading width. */
+.sa-panel { width: 100%; margin: 0 auto; max-width: 1040px; text-align: left; }
+.sa-popwrap { width: 100%; }
+.sa-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr)); gap: 4px; margin: 12px 0 8px; }
+.sa-tabs button { font: inherit; color: inherit; background: transparent; border: 1px solid var(--SmartThemeBorderColor, #777); border-radius: 8px; padding: 9px 2px; font-size: 0.92em; cursor: pointer; white-space: nowrap; }
+.sa-tabs button[aria-selected="true"] { background: rgba(127,127,127,.2); box-shadow: inset 0 -3px 0 currentColor; font-weight: 700; }
+.sa-tabs button:focus-visible, .sa-panel button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.sa-pane[hidden] { display: none !important; }
+.sa-dashboard { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; padding: 8px; font-size: .9em; opacity: .85; }
+.sa-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px 16px; margin: 10px 0; }
+.sa-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.sa-field > span { font-size: .9em; opacity: .85; }
+.sa-field .text_pole { width: 100%; margin: 0; }
+.sa-panel .menu_button { white-space: normal; }
+.sa-panel .sa-row .menu_button { flex: 0 1 auto; }
+.sa-panel .sa-row { justify-content: flex-start; }
+.sa-panel .sa-hero > .sa-main, .sa-panel .sa-hero > .sa-mini { justify-content: center; }
+.sa-job { border: 1px solid var(--SmartThemeBorderColor, #777); background: rgba(127,127,127,.08); border-radius: 10px; padding: 10px 12px; margin: 8px 0 12px; }
+.sa-job progress { display: block; width: 100%; height: 6px; margin: 10px 0; accent-color: currentColor; }
+.sa-result { border-top: 1px solid var(--SmartThemeBorderColor, #777); padding: 12px 0; overflow-wrap: anywhere; }
+.sa-result p { margin: 6px 0; }
+.sa-result-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.sa-result-head label { flex: 1; min-width: 0; }
+.sa-badge { display: inline-block; border: 1px solid var(--SmartThemeBorderColor, #777); border-radius: 6px; padding: 2px 6px; font-size: .78em; }
+.sa-prose, .sa-review pre { white-space: pre-wrap; overflow-wrap: anywhere; text-align: left; line-height: 1.55; }
+.sa-review pre { max-height: 500px; overflow-y: auto; font-size: .85em; }
+.sa-protections { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin: 12px 0; }
+.sa-panel .checkbox_label { margin: 8px 0; align-items: flex-start; }
+.sa-ledgerrow { border-bottom: 1px solid var(--SmartThemeBorderColor, #777); padding: 8px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.sa-warnline { color: var(--warning-color, #d6a34e); }
+#sa_custom_unit { max-width: 260px; }
+@media (max-width: 600px) {
+  .sa-tabs { grid-template-columns: repeat(3, minmax(0,1fr)); }
+  .sa-grid, .sa-protections { grid-template-columns: minmax(0,1fr); }
+  .sa-panel .sa-row .menu_button { flex: 1 1 auto; }
+  .sa-panel .sa-main .sa-run { flex: 1 1 100%; }
+  .sa-panel .sa-card { padding: 0 10px; border-radius: 10px; }
+  .sa-review .sa-grid { grid-template-columns: minmax(0,1fr); }
+}
+
+/* Center the two action rows without changing form-field alignment. */
+.sa-hero > .sa-main, .sa-hero > .sa-mini { justify-content: center; }
+.sa-hero > .sa-main > .sa-run { flex: 0 1 auto; }
+
+/* buttons: one consistent, rectangular look, never wrapped into blobs */
+.sa-panel .sa-row { gap: 8px; align-items: center; }
+.sa-panel .menu_button { white-space: nowrap; width: auto; min-width: 0; margin: 0; padding: 7px 14px; border-radius: 8px; line-height: 1.25; text-align: center; font-size: 0.95em; flex: 0 0 auto; }
+.sa-panel .sa-row .menu_button:hover, .sa-panel .menu_button:hover { transform: none; }
+.sa-hero .sa-main { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.sa-hero .sa-main .menu_button { width: 100%; padding: 11px 14px; font-size: 1em; font-weight: 600; border-radius: 8px; }
+.sa-hero .sa-mini { display: grid; grid-template-columns: repeat(auto-fit, minmax(105px, 1fr)); gap: 6px; }
+.sa-hero .sa-mini .menu_button { width: 100%; font-size: 0.88em; padding: 6px 8px; border-radius: 8px; }
+.sa-body > .sa-hero { border: 0; background: none; box-shadow: none; padding: 0; margin: 0; }
+.sa-card > summary { font-weight: 600; }
+@media (max-width: 600px) { .sa-panel .menu_button { white-space: normal; flex: 1 1 auto; } }
