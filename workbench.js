@@ -1,5 +1,6 @@
 import * as M from './memory-engine.js';
 import * as Core from './core.js';
+import { BulkRun } from './bulk-jobs.js';
 
 const html = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const button = (action, label, extra = '') => `<button type="button" class="menu_button" data-sa-action="${action}" ${extra}>${label}</button>`;
@@ -10,17 +11,19 @@ const flat = (it, unit) => it.a == null ? it.text : `[${it.b != null && it.b !==
 
 export const WORKBENCH_DEFAULTS = {
     budget: 6000, requestBudget: 18000, autoCondense: 'off', trigger: 'units', afterUnits: 10,
-    afterDays: 30, pressureTokens: 16000, batchSize: 6, recapLabel: 'Arc', recapMode: 'recap',
+    afterDays: 30, pressureTokens: 16000, batchSize: 6, charactersPerBatch: 4, reviewMode: 'end', recapLabel: 'Arc', recapMode: 'recap',
     continuityAuto: false, recapOnReturn: false, recapAfterHours: 24, semantic: false,
 };
 
 export class Workbench {
     constructor(host) {
-        this.h = host; this.books = {}; this.entries = []; this.selected = new Set();
+        this.h = host; this.baseHost = host; this.books = {}; this.entries = []; this.selected = new Set();
         this.held = new Set(); this.details = new Set(); this.semanticHits = new Set(); this.vectorScan = false; this.lastBudget = null; this.tokenCache = new Map();
         this.currentTab = 'archive'; this.loading = false; this.activeIdentity = ''; this.sourceContext = null;
-        this.queue = new M.JobQueue({ state: () => this.state(), persist: () => this.persist(),
-            perform: (j, s) => this.perform(j, s), commit: (j, s) => this.commitStep(j, s), notify: () => this.renderJob() });
+        this.queue = new M.JobQueue({ state: () => this.liveState(), persist: () => this.persist(),
+            perform: (j, s) => this.inBulk(j, () => this.perform(j, s)),
+            commit: (j, s) => this.inBulk(j, () => this.commitStep(j, s)),
+            extend: j => this.extendBulk(j), finish: j => new BulkRun(this, j).finish(), notify: () => this.renderJob() });
     }
 
     options() {
@@ -29,9 +32,11 @@ export class Workbench {
         for (const [k, v] of Object.entries(WORKBENCH_DEFAULTS)) if (!(k in settings.workbench)) settings.workbench[k] = v;
         return settings.workbench;
     }
-    state() { return (this.h.meta().workbench ??= { storyId: M.uid(), coverage: {}, telemetry: { requests: 0, input: 0, output: 0 }, applied: [] }); }
+    liveState() { return (this.baseHost.meta().workbench ??= { storyId: M.uid(), coverage: {}, telemetry: { requests: 0, input: 0, output: 0 }, applied: [] }); }
+    state() { return this.bulkRun ? this.bulkRun.data.meta.workbench : this.liveState(); }
+    async inBulk(job, fn) { return job.options.bulk ? new BulkRun(this, job).run(fn) : fn(); }
     identity() { return String(this.h.context().chatId || this.h.context().chatMetadata?.chat_id || this.h.meta().workbench?.storyId || ''); }
-    async persist() { this.h.assert(); await this.h.saveMeta(); }
+    async persist() { this.baseHost.assert(); await this.baseHost.saveMeta(); }
     async withLock(fn) {
         if (!this.h.begin()) throw new Error('An operation is already running. Pause or finish it first.');
         try { await this.ensureBranch(); return await fn(); } finally { this.h.end(); }
@@ -41,7 +46,7 @@ export class Workbench {
         const cost = M.tokens(req.system || '') + M.tokens(req.prompt || '');
         const limit = Math.max(2000, Number(this.options().requestBudget) || 18000);
         if (cost > limit) throw new Error(`${label} needs about ${cost} input tokens, above the ${limit} request limit. Use a smaller selection or increase the request limit in Settings.`);
-        const st = this.state(), meter = (st.telemetry ??= { requests: 0, input: 0, output: 0 });
+        const st = this.liveState(), meter = (st.telemetry ??= { requests: 0, input: 0, output: 0 });
         meter.requests++; meter.input += cost; meter.last = { label, at: M.now(), input: cost, state: 'requesting' };
         await this.persist();
         try {
@@ -170,6 +175,7 @@ export class Workbench {
         }
         if (stepId) this.state().applied = M.unique([...(this.state().applied ?? []), stepId]);
         this.state().lastWrite = { at: M.now(), reason, books: Object.keys(books) };
+        await this.h.refreshInfo?.();
         await this.persist(); await this.loadBooks(); await this.render();
     }
 
@@ -200,10 +206,11 @@ export class Workbench {
     }
 
     async review(changes, title = 'Review changes', note = '') {
+        if (this.bulkRun) return true;
         const root = document.createElement('div'); root.className = 'sa-review';
         root.innerHTML = `<h3>${html(title)}</h3><p class="sa-note">${html(note || 'Review the result before it is saved. The old content remains in revision history.')}</p>`;
         for (const c of changes) {
-            const d = document.createElement('details'); d.open = true;
+            const d = document.createElement('details'); d.open = changes.length <= 4;
             d.innerHTML = `<summary><b>${html(c.title || 'Proposed result')}</b><span class="sa-badge">${M.tokens(c.before || '')} → ${M.tokens(c.content || '')} estimated tokens</span></summary><label>Proposed text<textarea class="text_pole" rows="9"></textarea></label><details><summary>Original text</summary><pre></pre></details>`;
             d.querySelector('textarea').value = c.content || ''; d.querySelector('pre').textContent = c.before || '(new record)';
             root.append(d); c.node = d;
@@ -237,7 +244,6 @@ export class Workbench {
         }
         root.querySelector('#sa_range_from')?.closest('.sa-row')?.remove();
         root.querySelector('#sa_mem_run')?.closest('.sa-row')?.remove(); // the Characters card above has the memory buttons
-        root.querySelector('#sa_cond_above')?.closest('.sa-row')?.remove();
         root.querySelector('#sa_run').value = '✨ Summarize new, a quickie';
         root.querySelector('#sa_thorough').value = '💋 Archive thoroughly';
         { const ma = root.querySelector('#sa_mem_all'); if (ma) ma.value = 'Read all unprocessed'; }
@@ -253,7 +259,7 @@ export class Workbench {
         this.panes.characters.insertAdjacentHTML('beforeend', card('📖 Dear diary, behave yourself', `<p class="sa-hint">Pick someone from your story and the day to write about. Optionally pick a lorebook that holds their personality. The diary uses only what that character knows by that day. Diaries are creative writing and stay out of memory injection by default.</p><label class="sa-field"><span>Character</span><select class="text_pole" data-sa-field="diaryCharacter"></select></label><label class="sa-field"><span>Day to write about</span><select class="text_pole" data-sa-field="diaryUnit"></select></label><label class="sa-field"><span>Personality lorebook, optional</span><select class="text_pole" data-sa-field="diaryBook"></select></label>${field('diaryName', 'Different name for their memories, only if needed')}${field('diaryDate', 'Diary date, only if the day has none')}<label class="sa-field"><span>Style note, optional</span><textarea class="text_pole" data-sa-field="diaryStyle" rows="3" placeholder="Private, candid, a little dramatic..."></textarea></label><div class="sa-row">${button('diary', '📖 Write their little secrets')}</div>`, false));
         this.panes.search.insertAdjacentHTML('afterbegin', card('🔎 Search, evidence and continuity', `<p class="sa-hint">Ask uses relevant records across this story’s books. Source buttons open the original details, even when a recap is loaded.</p><div class="sa-row"><input class="text_pole" data-sa-field="question" placeholder="Ask, or enter a claim to check" aria-label="Archive question or continuity claim">${button('ask', 'Ask the archive')}${button('continuity', 'Check this claim')}${button('continuityAll', 'Check recent continuity')}</div><div id="sa-evidence-results" aria-live="polite"></div>`));
         this.panes.search.insertAdjacentHTML('beforeend', card('💰 Memory budget and loading reasons', `<div id="sa-budget-view"></div>`, false));
-        this.panes.settings.insertAdjacentHTML('afterbegin', card('🛠️ Story memory settings', `<div class="sa-grid">${this.optionField('budget', 'Total injected memory tokens', 'number')}${this.optionField('requestBudget', 'Maximum input tokens per side request', 'number')}${this.optionField('batchSize', 'Units per memory or condensation batch', 'number')}</div><label class="checkbox_label"><input type="checkbox" data-sa-option="continuityAuto"><span>Check continuity after new replies, findings only</span></label><label class="checkbox_label"><input type="checkbox" data-sa-option="recapOnReturn"><span>Offer a dated recap when returning to this story</span></label>${this.optionField('recapAfterHours', 'Hours before offering a return recap', 'number')}<div id="sa-telemetry" class="sa-hint"></div>`));
+        this.panes.settings.insertAdjacentHTML('afterbegin', card('🛠️ Story memory settings', `<div class="sa-grid">${this.optionField('budget', 'Total injected memory tokens', 'number')}${this.optionField('requestBudget', 'Maximum input tokens per side request', 'number')}${this.optionField('batchSize', 'Units per archive condensation or extraction batch', 'number')}${this.optionField('charactersPerBatch', 'Characters per memory audit request, up to 8', 'number')}<label class="sa-field"><span>Review bulk results</span><select class="text_pole" data-sa-option="reviewMode"><option value="end">Together at the end</option><option value="step">After each step</option></select></label></div><p class="sa-hint">Together at the end runs the whole job before one combined review. Requests stay within your input limit. Canceling keeps prepared results for Resume / review.</p><label class="checkbox_label"><input type="checkbox" data-sa-option="continuityAuto"><span>Check continuity after new replies, findings only</span></label><label class="checkbox_label"><input type="checkbox" data-sa-option="recapOnReturn"><span>Offer a dated recap when returning to this story</span></label>${this.optionField('recapAfterHours', 'Hours before offering a return recap', 'number')}<div id="sa-telemetry" class="sa-hint"></div>`));
         this.panes.settings.insertAdjacentHTML('beforeend', card('💾 Backups and workflow presets', `<p class="sa-hint">A story backup includes its archive, character memories, recaps, dependencies, revisions, jobs and workflow settings. Imports show a preview and create separate books. Connection profiles stay on your device.</p><div class="sa-row">${button('exportStory', 'Export complete story')}${button('importStory', 'Import or restore story')}${button('exportWorkflow', 'Export workflow preset')}${button('importWorkflow', 'Import workflow preset')}${button('importLog', 'Import a plain Scene Log')}</div><input data-sa-field="file" type="file" accept=".json,.md,.txt" hidden>`, false));
         this.panes.settings.insertAdjacentHTML('beforeend', card('🧭 Existing SillyTavern vectors', `<label class="checkbox_label"><input type="checkbox" data-sa-option="semantic"><span>Include this story in existing World Info vector matching</span></label><p class="sa-hint">Optional. Enable World Info in SillyTavern’s Vector Storage first. It uses your existing embedding settings. Matching memories still share the same total memory budget.</p>`, false));
         root.addEventListener('click', event => {
@@ -282,7 +288,7 @@ export class Workbench {
         this.syncOptions(); this.showTab('archive'); this.updateUnitLabels(); this.installVectorBridge();
     }
 
-    optionField(key, label, type) { return field(key, label, this.options()[key], type, `data-sa-option="${key}" min="0"`); }
+    optionField(key, label, type) { return field(key, label, this.options()[key], type, `data-sa-option="${key}" ${key === 'charactersPerBatch' ? 'min="1" max="8" step="1"' : 'min="0"'}`); }
     value(key) { return this.root?.querySelector(`[data-sa-field="${key}"]`)?.value ?? ''; }
     checked(key) { return !!this.root?.querySelector(`[data-sa-field="${key}"]`)?.checked; }
     syncOptions() {
@@ -321,6 +327,7 @@ export class Workbench {
         } finally { this.loading = false; this.h.end(); }
     }
     async render() {
+        if (this.bulkRun) return;
         if (!this.root) return;
         this.renderDashboard(); this.renderLibrary(); this.renderJob(); this.renderBudget();
         const pending = M.pendingMemoryUnits(this.entries), units = this.entries.filter(e => M.record(e)?.type === 'unit');
@@ -372,7 +379,8 @@ export class Workbench {
         if (!j) { el.innerHTML = ''; return; }
         const active = !['done', 'canceled'].includes(j.status);
         if (!active) { el.innerHTML = `<p class="sa-hint">Last job: ${html(j.kind)} · ${html(j.status)} · ${j.cursor}/${j.steps.length} steps saved.</p>`; return; }
-        el.innerHTML = `<div class="sa-job"><b>${html(j.kind)}</b> · ${html(j.status)} · ${j.cursor}/${j.steps.length} steps saved<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}${active ? `<div class="sa-row">${button('jobResume', j.status === 'failed' ? 'Retry / review saved result' : 'Resume / review')}${button('jobPause', 'Pause after this request')}${button('jobCancel', 'Cancel remaining steps')}</div>` : ''}</div>`;
+        const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared · ${j.phase === 'review' ? 'ready for one combined review' : j.phase === 'saving' ? 'saving approved changes' : 'story books unchanged until approval'}` : `${j.cursor}/${j.steps.length} steps saved`;
+        el.innerHTML = `<div class="sa-job"><b>${html(j.kind)}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}${active ? `<div class="sa-row">${button('jobResume', j.status === 'failed' ? 'Retry / review saved result' : 'Resume / review')}${button('jobPause', 'Pause after this request')}${button('jobCancel', 'Cancel remaining steps')}</div>` : ''}</div>`;
     }
     renderBudget() {
         const el = this.root?.querySelector('#sa-budget-view'); if (!el) return;
@@ -544,7 +552,35 @@ export class Workbench {
 
     async createJob(kind, steps, options = {}) {
         if (!steps.length) throw new Error('There are no matching sources to process.');
-        return this.withLock(async () => { await this.queue.create(kind, steps, { ...options, archive: this.h.settings().lorebook, storyId: this.state().storyId }); return this.queue.resume(); });
+        const bulk = this.options().reviewMode !== 'step' && ['archive', 'memories', 'memory-audit', 'condense', 'extract', 'trackers'].includes(kind);
+        const followups = kind === 'archive' ? [...(this.state().followups || [])] : [];
+        const pipeline = options.auditAfter ? ['audit'] : followups.flatMap(s => s === 'memories' ? ['memories', 'audit'] : [s]);
+        return this.withLock(async () => {
+            await this.queue.create(kind, steps, { ...options, bulk, pipeline, hasFollowups: pipeline.length > 0, archive: this.h.settings().lorebook, storyId: this.state().storyId });
+            if (bulk && kind === 'archive') { this.state().followups = []; await this.persist(); }
+            return this.queue.resume();
+        });
+    }
+    async extendBulk(job) {
+        return this.inBulk(job, async () => {
+            await this.loadBooks();
+            while (job.options.pipeline?.length) {
+                const stage = job.options.pipeline[0]; let steps = [];
+                if (stage === 'memories') {
+                    const pending = M.pendingMemoryUnits(this.entries);
+                    steps = this.chunks(pending, this.h.settings().memoryDays || 4).map(g => this.inputStep(g, { kind: 'memories' }));
+                } else if (stage === 'audit') {
+                    const entries = this.memoryAuditEntries();
+                    steps = this.auditSteps(entries);
+                } else if (stage === 'trackers') steps = this.trackerSteps(null, true);
+                job.options.pipeline.shift();
+                if (steps.length) {
+                    job.steps.push(...steps.map(payload => ({ id: M.uid(), payload, status: 'pending' })));
+                    job.phase = stage; return true;
+                }
+            }
+            return false;
+        });
     }
     chunks(entries, size = this.options().batchSize) {
         const out = []; let current = [], used = 0;
@@ -632,8 +668,8 @@ export class Workbench {
         const pending = M.pendingMemoryUnits(this.entries, { from, to, redo: from != null || to != null });
         const groups = this.chunks(pending, this.h.settings().memoryDays || 4);
         if (!groups.length) { this.h.notify('Every current source entry has a matching saved memory receipt. Use an explicit unit range to redo it, or Audit to review all character lists.', 'info'); return; }
-        const result = await this.createJob('memories', (all ? groups : groups.slice(0, 1)).map(g => this.inputStep(g)));
-        if (all && result?.status === 'done') return (await this.startMemoryAudit(true)) || result;
+        const result = await this.createJob('memories', (all ? groups : groups.slice(0, 1)).map(g => this.inputStep(g)), { auditAfter: all });
+        if (all && !result?.options.bulk && result?.status === 'done') return (await this.startMemoryAudit(true)) || result;
         return result;
     }
     auditSteps(entries) {
@@ -664,27 +700,62 @@ export class Workbench {
             }
             steps.push(this.inputStep([e], { kind: 'memory-audit', phase: 'final', dependencies: keys }));
         }
-        return steps;
+        if (this.options().reviewMode === 'step') return steps;
+        const cap = Math.max(1, Math.min(8, Number(this.options().charactersPerBatch) || 4));
+        const singles = steps.filter(s => s.phase === 'final' && s.auditBullets);
+        const rest = steps.filter(s => !singles.includes(s));
+        let batch = [], used = 0;
+        const flush = () => {
+            if (!batch.length) return;
+            if (batch.length === 1) rest.push(batch[0]);
+            else rest.push(this.inputStep(batch.map(s => this.find(s.ids[0])), { kind: 'memory-audit-batch', audits: batch.map(s => ({ id: s.ids[0], bullets: s.auditBullets })) }));
+            batch = []; used = 0;
+        };
+        for (const step of singles) {
+            const cost = M.tokens(step.auditBullets.join('\n')) + 200;
+            if (batch.length && (batch.length >= cap || used + cost > limit)) flush();
+            batch.push(step); used += cost;
+        }
+        flush(); return rest;
     }
-    async startMemoryAudit(quiet = false) {
+    organizedMemory(raw, bullets, name) {
+        const result = Core.parseCondenseResponse(raw, bullets);
+        if (!result) throw new Error(`The organized memory list for ${name} was empty, invalid or longer than the original.`);
+        const items = Core.parseMemoryDoc('## ► Memories — X\n' + result.bullets.map(x => '- ' + x).join('\n'));
+        const dates = M.unique(Core.parseMemoryDoc('## ► Memories — X\n' + bullets.map(x => '- ' + x).join('\n')).map(x => x.date));
+        for (const date of dates) if (!result.bullets.some(x => x.includes(date)) && !items.some(x => x.date.includes(date))) throw new Error(`The organized list dropped a source date: ${date}.`);
+        return { content: Core.memoryDocText(name, items, {}, this.h.settings().unit) };
+    }
+    memoryAuditEntries(condense = false) {
+        const above = Math.max(2, Number(this.h.settings().condenseAbove) || 12);
+        return this.entries.filter(e => M.record(e).type === 'memory' && M.record(e).status === 'current' && !M.record(e).protection?.locked && !M.record(e).protection?.exact && !M.record(e).protection?.detailed &&
+            (!condense || Core.memoryEntries({ entries: { [e.uid]: e } }, this.h.settings().unit)[0]?.bullets.length > above));
+    }
+    async startMemoryCondense(quiet = false) { return this.startMemoryAudit(quiet, true); }
+    async startMemoryAudit(quiet = false, condense = false) {
         await this.refresh();
-        const entries = this.entries.filter(e => M.record(e).type === 'memory' && M.record(e).status === 'current' && !M.record(e).protection?.locked && !M.record(e).protection?.exact && !M.record(e).protection?.detailed);
+        const entries = this.memoryAuditEntries(condense);
         if (!entries.length && quiet) return;
+        if (!entries.length) { this.h.notify(condense ? 'No unprotected current character list is longer than the selected threshold.' : 'No unprotected current character memories are available to organize.', 'info'); return; }
         return this.createJob('memory-audit', this.auditSteps(entries));
     }
-    async startTrackers(onlyId = null, quiet = false) {
-        await this.refresh();
+    trackerSteps(onlyId = null, quiet = false) {
         const s = this.h.settings(), list = s.trackers.filter(t => onlyId ? t.id === onlyId : t.enabled);
-        if (!list.length && quiet) return;
+        if (!list.length && quiet) return [];
         if (!list.length) throw new Error('Enable at least one tracker first.');
         const units = this.entries.filter(e => M.record(e)?.type === 'unit' && M.record(e).status === 'current').sort((a, b) => (M.record(a).unit?.number || 0) - (M.record(b).unit?.number || 0)).slice(-Math.max(1, Number(s.trackerDays) || 3));
-        if (!units.length) { if (quiet) return; throw new Error('Archive some story units first.'); }
+        if (!units.length) { if (quiet) return []; throw new Error('Archive some story units first.'); }
         const states = this.entries.filter(e => M.record(e)?.type === 'state' && M.record(e).status === 'current');
         const steps = list.map(tracker => {
             const target = this.entries.find(e => Core.classifyEntry(e)?.type === 'tracker' && Core.classifyEntry(e).name.toLocaleLowerCase() === tracker.name.toLocaleLowerCase());
             if (target && (M.record(target)?.protection?.locked || M.record(target)?.protection?.exact)) return null;
-            return this.inputStep([...units, ...states], { tracker: M.copy(tracker), target: target ? M.record(target).id : '', targetHash: target ? M.hash(target.content) : '' });
+            return this.inputStep([...units, ...states], { kind: 'trackers', tracker: M.copy(tracker), target: target ? M.record(target).id : '', targetHash: target ? M.hash(target.content) : '' });
         }).filter(Boolean);
+        return steps;
+    }
+    async startTrackers(onlyId = null, quiet = false) {
+        await this.refresh();
+        const steps = this.trackerSteps(onlyId, quiet);
         if (!steps.length && quiet) return;
         return this.createJob('trackers', steps);
     }
@@ -794,14 +865,22 @@ export class Workbench {
             const req = { system: `${Core.unitize(this.h.settings().condensePrompt, this.h.settings().unit)}\nRead every supplied memory and organize it. Merge duplicate or repeated meaning. Keep natural, readable character memories with concrete experiences and how they learned things. Keep all consequential events, full dates including years, relevant locations, people, promises and asymmetric knowledge. No jargon, no redundant repeated date prefixes. Never invent knowledge or resolve contradictions without evidence. Do not drop memories because they are old. Return {"memories":["[unit N, full date] natural memory"]}. Ranges are allowed only if the exact first and last dates remain.`,
                 prompt: `CHARACTER ${r.subject || Core.classifyEntry(e).name}\n\n${step.payload.phase === 'map' ? 'COMPLETE AUDIT CHUNK, other chunks are retained separately' : 'COMPLETE MEMORY LIST OR MERGED AUDIT CHUNKS'}\n${bullets.join('\n')}` };
             return this.json({ ...req, maxTokens: Math.max(3000, Math.min(16000, M.tokens(e.content) + 500)) }, raw => {
-                const result = Core.parseCondenseResponse(raw, bullets);
-                if (!result) throw new Error('The organized memory list was empty, invalid or longer than the original.');
-                const items = Core.parseMemoryDoc('## ► Memories — X\n' + result.bullets.map(x => '- ' + x).join('\n'));
-                // Dates cannot vanish when two bullets are combined.
-                const dates = M.unique(Core.parseMemoryDoc('## ► Memories — X\n' + bullets.map(x => '- ' + x).join('\n')).map(x => x.date));
-                for (const date of dates) if (!result.bullets.some(x => x.includes(date)) && !items.some(x => x.date.includes(date))) throw new Error(`The organized list dropped a source date: ${date}.`);
-                return { content: Core.memoryDocText(r.subject || Core.classifyEntry(e).name, items, {}, this.h.settings().unit) };
+                return this.organizedMemory(raw, bullets, r.subject || Core.classifyEntry(e).name);
             }, 'read and organize memories');
+        }
+        if (kind === 'memory-audit-batch') {
+            const audits = step.payload.audits;
+            const names = new Map(inputs.map(e => [M.record(e).id, M.record(e).subject || Core.classifyEntry(e).name]));
+            const req = {
+                system: `${Core.unitize(this.h.settings().condensePrompt, this.h.settings().unit)}\nOrganize each supplied character's complete memory list independently. Merge repeated meaning within that character only. Keep every consequential event, full date and year, place, person, promise, uncertainty and knowledge difference. Never move memories between characters, infer shared knowledge, invent a fact, or discard memories just because they are old. Keep natural sentences and dated unit tags. Return {"characters":[{"id":"exact supplied id","memories":["[unit N, full date] natural memory"]}]}. Include every supplied id exactly once, no additional ids.`,
+                prompt: audits.map(a => `CHARACTER ID ${a.id}\nNAME ${names.get(a.id)}\nCOMPLETE MEMORIES\n${a.bullets.join('\n')}`).join('\n\n'),
+                maxTokens: Math.max(3000, Math.min(16000, audits.reduce((n, a) => n + M.tokens(a.bullets.join('\n')) + 500, 0))),
+            };
+            return this.json(req, raw => {
+                const chars = M.parseJSON(raw)?.characters;
+                if (!Array.isArray(chars) || chars.length !== audits.length || new Set(chars.map(c => c.id)).size !== audits.length || chars.some(c => !names.has(c.id))) throw new Error('The memory batch omitted, duplicated or invented a character id.');
+                return audits.map(a => ({ id: a.id, ...this.organizedMemory(JSON.stringify({ memories: chars.find(c => c.id === a.id).memories }), a.bullets, names.get(a.id)) }));
+            }, 'organize character memory batch');
         }
         if (kind === 'diary') {
             const p = step.payload;
@@ -827,7 +906,7 @@ export class Workbench {
         }
         if (kind === 'archive') {
             if (!M.checkSource(step.payload.source, this.state().storyId, this.h.context().chat || []).valid) throw new Error('The selected transcript changed while the result was waiting for review.');
-            const res = await this.h.acceptArchive(step.output.raw, step.payload.source, step.id);
+            const res = this.bulkRun ? await this.bulkRun.acceptArchive(step.output.raw, step.payload.source, step.id) : await this.h.acceptArchive(step.output.raw, step.payload.source, step.id);
             if (!res) return false;
             await this.h.afterArchive({ from: step.payload.from, to: step.payload.to, stepId: step.id }, res.days, job.options.hide);
             const data = await this.h.load(archiveBook); data.sceneArchivistReceipts = M.unique([...(data.sceneArchivistReceipts ?? []), step.id]); await this.h.save(archiveBook, data);
@@ -896,6 +975,17 @@ export class Workbench {
             M.revise(e, changes[0].content, 'Organize whole character memory list');
             M.invalidate(all(), [M.record(e).id], 'Character memories were organized');
             await this.write(books, bases, 'Memory audit', step.id); return true;
+        }
+        if (kind === 'memory-audit-batch') {
+            const changes = step.output.map(o => {
+                const e = this.entryIn(books, o.id).entry, r = M.record(e);
+                if (r.protection?.locked || r.protection?.exact || r.protection?.detailed || r.status !== 'current') throw new Error('A character memory list became protected or stale. Cancel this run and choose current records.');
+                return { id: o.id, title: M.title(e), before: e.content, content: o.content };
+            });
+            if (!(await this.review(changes, 'Read and organize character memories'))) return false;
+            for (const c of changes) M.revise(this.entryIn(books, c.id).entry, c.content, 'Organize whole character memory list');
+            M.invalidate(all(), changes.map(c => c.id), 'Character memories were organized');
+            await this.write(books, bases, 'Memory audit batch', step.id); return true;
         }
         if (kind === 'diary') {
             const p = step.payload, changes = [{ title: `${p.name}'s diary`, content: step.output.content }];
