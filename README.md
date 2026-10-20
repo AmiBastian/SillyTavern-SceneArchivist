@@ -30,19 +30,15 @@ If your characters can hide a body but cannot remember where they had dinner, we
 
 This guide includes **36 screenshots and three animated walkthroughs**, with MP4 versions linked beside each animation. The captures render the extension's actual interface in a demonstration host using an invented story and scripted model replies. They show how the controls work; they are not recordings of live API calls or Mira's private chats. The overview captures include version 1.0.0; the bulk review and settings captures show the 1.0.1 update. Your SillyTavern theme, fonts, and popup styling can look different.
 
-Keep the **`docs/` folder beside `README.md`** when uploading or sharing the project so the media links stay intact. The extension itself does not need the documentation media to run.
-
 ## Install and make your first archive
 
-1. Close SillyTavern or disable Scene Archivist while replacing an existing installation.
-2. Extract the `Extension-SceneArchivist` folder into `public/scripts/extensions/third-party/`. Keep all the extension's JavaScript files, `style.css`, and `manifest.json` together.
-3. Restart or reload SillyTavern and open a chat.
+1. In SillyTavern, open the **Extensions** panel and click **Install extension**.
+2. Paste [https://github.com/AmiBastian/SillyTavern-SceneArchivist](https://github.com/AmiBastian/SillyTavern-SceneArchivist), leave the branch field at its default, and confirm installation.
+3. Reload SillyTavern after installation and open a chat.
 4. Open the wand menu and choose **Scene Archivist**. **Archive scene** in that menu runs a summary directly.
 5. In **Archive → Your archive**, select a lorebook or enter a new name and press **Create**. Use **Check setup**, then **Attach to chat** if needed.
 6. In **Settings → Prompts**, choose a prompt and its story unit. Check your delivery settings and leave **Review before writing** enabled while setting up.
 7. Summarize a small range, review the result, then inspect it in **Library**. Export a complete story backup once you are happy with the setup.
-
-No npm installation is required to use the extension.
 
 ## Run the whole job, then review
 
@@ -551,10 +547,6 @@ Accepted stages have completion receipts to help prevent duplicate writes after 
 | You need to report a problem | Include extension and SillyTavern versions, steps to reproduce, the exact error, and relevant diagnostics. Remove private story text or credentials before sharing. |
 
 AI output still needs your judgment. Review the dates, who was present, who learned what, and whether the wording says more than the evidence supports. Scene Archivist keeps the paperwork organized; your questionable fictional life choices remain yours.
-
-## Development checks
-
-Run `npm test` in this folder. The included suites cover memory batching, the condensation threshold, dates and character identities, combined review, cancel/resume, serialized recovery, source edits, partial-write retries, and the existing archive and continuity behavior. Browser checks also exercise the actual interface with a simulated SillyTavern host, including a 33-character run and the full archive workflow. These checks use scripted replies, not live provider calls.
 
 ## License
 
