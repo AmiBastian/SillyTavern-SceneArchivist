@@ -1,4 +1,4 @@
-# Scene Archivist 1.0.0
+# Scene Archivist 1.0.1
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -13,6 +13,7 @@ If your characters can hide a body but cannot remember where they had dinner, we
 ## Start here
 
 - [Install and make your first archive](#install-and-make-your-first-archive)
+- [Run the whole job, then review](#run-the-whole-job-then-review)
 - [Find your way around](#find-your-way-around)
 - [Archive exactly what you choose](#archive-exactly-what-you-choose)
 - [Inspect, correct, and protect records](#inspect-correct-and-protect-records)
@@ -27,7 +28,7 @@ If your characters can hide a body but cannot remember where they had dinner, we
 
 ### About the screenshots and videos
 
-This guide includes **34 screenshots and three animated walkthroughs**, with MP4 versions linked beside each animation. The captures render this version's actual extension interface in a demonstration host using an invented story and scripted model replies. They show how the controls work; they are not recordings of live API calls or Mira's private chats. Your SillyTavern theme, fonts, and popup styling can look different.
+This guide includes **36 screenshots and three animated walkthroughs**, with MP4 versions linked beside each animation. The captures render the extension's actual interface in a demonstration host using an invented story and scripted model replies. They show how the controls work; they are not recordings of live API calls or Mira's private chats. The overview captures include version 1.0.0; the bulk review and settings captures show the 1.0.1 update. Your SillyTavern theme, fonts, and popup styling can look different.
 
 Keep the **`docs/` folder beside `README.md`** when uploading or sharing the project so the media links stay intact. The extension itself does not need the documentation media to run.
 
@@ -42,6 +43,35 @@ Keep the **`docs/` folder beside `README.md`** when uploading or sharing the pro
 7. Summarize a small range, review the result, then inspect it in **Library**. Export a complete story backup once you are happy with the setup.
 
 No npm installation is required to use the extension.
+
+## Run the whole job, then review
+
+**Version 1.0.1 defaults to Together at the end.** Start a bulk job and let it process the full selection. Review the proposed records together in one window, edit any text you want, then save. Larger reviews start with the individual records collapsed, so 33 character lists do not immediately become a wall of text.
+
+This applies to scene-summary passes, new character memories and their follow-up audit, character-memory condensation, archive condensation, fact/knowledge extraction, and tracker updates. **Archive thoroughly** can prepare its archive, memory, audit, and enabled tracker stages before that same final review. Story books and message visibility change after approval. Opt-in automatic archive recap creation still runs without a review, and the archive review checkbox still controls archive-only runs.
+
+<details>
+<summary>See the combined review for a 33-character demonstration</summary>
+
+![One combined review containing all 33 character memory lists, with expandable records](docs/media/35-combined-review.png)
+
+Each record has its proposed text and original text. Canceling this review keeps the prepared results; **Resume / review** opens them again without repeating completed requests. **Undo** restores the complete accepted bulk write.
+
+</details>
+
+### Control request size and review timing
+
+![Version 1.0.1 settings for character request size and combined or per-step review](docs/media/36-bulk-settings.png)
+
+In **Settings → Story memory settings**:
+
+- **Review bulk results → Together at the end** is the default. Choose **After each step** for the previous review flow.
+- **Characters per memory audit request** defaults to **4**, with a range of **1 to 8**. Each character keeps a separate list and result. Smaller groups are used when needed to fit the request input limit; unusually long lists are processed in retained chunks.
+- **Units per archive condensation or extraction batch** controls those source batches. **Characters → Memory settings and prompt → Days per batch** (or your chosen unit) controls new-memory source batches.
+
+A whole run can still use several model requests. Grouping suitable character lists reduces repeated request overhead without forcing the entire cast into an oversized response. No need to click Apply 33 bloody times.
+
+**Updating from 1.0.0:** finish or cancel remaining steps in an old paused job before starting a new run. Old jobs retain their original review behavior; newly started jobs use the selected bulk mode. Existing books and saved memories remain in place. Keep all extension files together, including the new `bulk-jobs.js` file.
 
 ## Find your way around
 
@@ -224,7 +254,7 @@ Review the proposed text and expand **Original text** to compare. The estimate s
 
 ![Character memory condensation threshold, action, and editable prompt](docs/media/12-condense-memories.png)
 
-**Condense character memories** works on per-character memory lists. Set **Lists longer than**, then run the action to merge repeated memories while keeping their dates. You can edit or reset its prompt and review the proposed lists before saving.
+**Condense character memories** works on per-character memory lists. Set **Lists longer than** to include only current, unprotected lists with more than that number of memories, then run the action to merge repeated memories while keeping their dates. You can edit or reset its prompt and review the proposed lists before saving.
 
 Use archive condensation for scene records and recaps. Use memory condensation for a character's accumulated experiences. The two controls live together so you can manage both kinds of growth.
 
@@ -250,7 +280,7 @@ Triggers can use the number of newer story units, fictional calendar days passed
 | Action | Use it for |
 | --- | --- |
 | **Next unprocessed batch** | Read the next uncovered sources in manageable batches. |
-| **Read all unprocessed** | Process pending sources across batches, then offer a whole-list audit. |
+| **Read all unprocessed** | Process pending sources across batches and audit the character lists before the combined review. |
 | **Read and organize all memories** | Read complete character lists, merge repeated meaning, and preserve consequential details and knowledge differences. |
 | **Recheck coverage** | Refresh source-by-source progress, including gaps and changed sources. |
 
@@ -399,7 +429,9 @@ Enable **Let the model pick keyed entries before each reply** to make an additio
 | --- | --- |
 | **Total injected memory tokens** | Shared cap for managed memory content sent into a chat reply. |
 | **Maximum input tokens per side request** | Input limit for workbench requests. Oversized inputs stop with an explanation. |
-| **Units per memory or condensation batch** | Group size for those workbench jobs. |
+| **Units per archive condensation or extraction batch** | Source group size for those jobs. |
+| **Characters per memory audit request** | Up to 4 by default, reduced as needed to fit the input limit; configurable from 1 to 8. |
+| **Review bulk results** | Review the complete run together, or review after each step. |
 | **Check continuity after new replies** | Save continuity findings automatically. |
 | **Offer a dated recap when returning** | Offer a return recap after the configured hours away. |
 
@@ -488,11 +520,11 @@ Back up your skeletons. The closet is not version control.
 
 ![Paused archive job offering Resume or review, Pause, and Cancel remaining steps](docs/media/30-job-recovery.png)
 
-Jobs save generated results before review. If you cancel a review, use **Resume / review** to reopen the retained result. **Pause after this request** stops between requests, **Cancel remaining steps** ends the pending work, and a failed job offers **Retry / review saved result**. A saved usable result can be reviewed again without generating it again.
+Bulk jobs retain their generated results and proposed book changes before the combined review. The progress panel distinguishes prepared steps from approved changes being saved. If you cancel a review, use **Resume / review** to reopen the retained result. **Pause after this request** stops between requests, **Cancel remaining steps** ends the pending work, and a failed job offers **Retry / review saved result**. A saved usable result can be reviewed again without generating it again.
 
 Accepted stages have completion receipts to help prevent duplicate writes after a reload or partial failure. **Archive thoroughly** retains its remaining memory and tracker stages when paused. If a queued source changed, cancel that job and choose the corrected sources rather than applying old output blindly.
 
-**Undo** restores the last write's books, metadata, and matching message visibility. It is one write, not an unlimited history of the whole session; newly created empty books may remain. For earlier text, open a record's saved revisions. Reviews also check for intervening source/book edits before accepting a write.
+**Undo** restores the last write's books, metadata, and matching message visibility. It restores the complete accepted bulk run, rather than only its final character; newly created empty books may remain. For earlier text, open a record's saved revisions. Reviews also check for intervening source/book edits before accepting a write.
 
 ## Slash commands
 
@@ -519,3 +551,11 @@ Accepted stages have completion receipts to help prevent duplicate writes after 
 | You need to report a problem | Include extension and SillyTavern versions, steps to reproduce, the exact error, and relevant diagnostics. Remove private story text or credentials before sharing. |
 
 AI output still needs your judgment. Review the dates, who was present, who learned what, and whether the wording says more than the evidence supports. Scene Archivist keeps the paperwork organized; your questionable fictional life choices remain yours.
+
+## Development checks
+
+Run `npm test` in this folder. The included suites cover memory batching, the condensation threshold, dates and character identities, combined review, cancel/resume, serialized recovery, source edits, partial-write retries, and the existing archive and continuity behavior. Browser checks also exercise the actual interface with a simulated SillyTavern host, including a 33-character run and the full archive workflow. These checks use scripted replies, not live provider calls.
+
+## License
+
+Scene Archivist is licensed under the [GNU Affero General Public License v3.0](LICENSE).

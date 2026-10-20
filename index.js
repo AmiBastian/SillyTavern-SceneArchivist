@@ -18,7 +18,7 @@ import { Workbench } from './workbench.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -350,7 +350,12 @@ async function showReview(plan, parsed, lorebookName) {
 function beginUndoWrite() {
     assertCurrentChat();
     const s = settings();
-    const before = clone(chat_metadata[KEY] ?? {});
+    const current = chat_metadata[KEY] ?? {};
+    // Undo cancels the restored job, so its potentially large private draft is
+    // not part of the undo snapshot. The live job keeps it for crash recovery.
+    const wb = current.workbench;
+    const job = wb?.job?.options?.bulk ? { ...wb.job, draft: undefined, steps: wb.job.steps.map(({ output, ...step }) => step) } : wb?.job;
+    const before = clone({ ...current, ...(wb ? { workbench: { ...wb, job } } : {}) });
     delete before.undo;
     const progress = s.memoryProgress?.[s.lorebook];
     pendingUndo = { archive: s.lorebook, before, books: {},
@@ -374,6 +379,7 @@ async function saveUndoSnapshot(name, data) {
     // Save the restore point before changing any lorebook. Failure aborts the write.
     await saveMetadata();
     assertCurrentChat();
+    $('#sa_undo').prop('disabled', !undoBooks().length);
 }
 
 const undoBooks = () => Object.keys(chat_metadata?.[KEY]?.undo?.books ?? {});
@@ -452,21 +458,25 @@ async function commit(plan, parsed, name, expectedHash = '') {
     toastr.success(parts.length ? `Archive updated: ${parts.join(', ')}.` : 'Nothing was changed.');
 }
 
-async function handleOutput(text) {
-    assertCurrentChat();
+async function prepareArchive(text, data) {
     const s = settings();
-    if (!s.lorebook) { toastr.warning('Pick or create a lorebook first.'); return false; }
     const parsed = Core.parseArchivistOutput(text);
     if (!parsed.entries.length && !Object.keys(parsed.states).length) {
-        toastr.error(`I could not find any ${s.unit || 'story unit'} entries or states in that output. Nothing was marked complete.`);
-        console.warn(LOG, 'unparsed output', text);
-        return false;
+        throw new Error(`I could not find any ${s.unit || 'story unit'} entries or states in that output. Nothing was marked complete.`);
     }
-    const data = (await loadWorldInfo(s.lorebook)) ?? { entries: {} };
     const plan = Core.planChanges(data, parsed, coreOpts());
     const stale = Object.values(data.entries ?? {}).filter(e => Core.classifyEntry(e) && !Core.matchesDelivery(e, coreOpts())).length;
     if (stale) plan.warnings.push(`${stale} existing log entries use a different delivery setting. Writing will move them to ${deliveryLabel(coreOpts())}.`);
     await fillKeys(plan, data);
+    return { parsed, plan };
+}
+
+async function handleOutput(text) {
+    assertCurrentChat();
+    const s = settings();
+    if (!s.lorebook) { toastr.warning('Pick or create a lorebook first.'); return false; }
+    const data = (await loadWorldInfo(s.lorebook)) ?? { entries: {} };
+    const { parsed, plan } = await prepareArchive(text, data);
     if (s.review) {
         const ok = await showReview(plan, parsed, s.lorebook);
         if (!ok) { toastr.info('Cancelled. Nothing was written.'); return false; }
@@ -690,7 +700,7 @@ async function showCondenseReview(results) {
 }
 
 async function runCondense(quiet = false) {
-    if (workbench) { try { return await workbench.startMemoryAudit(quiet); } catch (e) { toastr.error(e?.message ?? e); return; } }
+    if (workbench) { try { return await workbench.startMemoryCondense(quiet); } catch (e) { toastr.error(e?.message ?? e); return; } }
     if (busy) { toastr.info('The archivist is already running.'); return; }
     const s = settings();
     if (!s.lorebook) { toastr.warning('Pick or create a lorebook first.'); return; }
@@ -1671,7 +1681,7 @@ jQuery(async () => {
             begin: () => { if (busy) return false; busy = true; operationChat = getContext().chat; operationRevision = chatRevision; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', true); return true; },
             end: () => { busy = false; operationChat = null; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', false); },
             undoStart: beginUndoWrite, snapshot: saveUndoSnapshot, reload: name => { try { reloadEditor(name); } catch { /* editor closed */ } },
-            model: sideCall, tokenCount: getTokenCountAsync, hide: hideChatMessageRange, renderLedger,
+            model: sideCall, tokenCount: getTokenCountAsync, hide: hideChatMessageRange, renderLedger, prepareArchive, refreshInfo: updateInfoLine,
             archiveModel: async (req, range) => settings().archiveMode === 'chat' && !range.explicit
                 ? generateQuietPrompt({ quietPrompt: req.system + '\n\n' + req.prompt, responseLength: Number(settings().maxTokens) > 0 ? Number(settings().maxTokens) : null })
                 : generateRaw({ prompt: req.prompt, systemPrompt: req.system, responseLength: Number(settings().maxTokens) > 0 ? Number(settings().maxTokens) : 6000 }),

@@ -347,11 +347,11 @@ export function tidyMemory(items, { removeExact = false } = {}) {
 export const memoryIdentity = (it, subject = '') => hash([subject.toLocaleLowerCase(), it.a, it.b, it.date, it.text.trim().toLocaleLowerCase()]);
 
 // Portable workflow settings deliberately exclude connection profiles, credentials and destination names.
-export const PRESET_KEYS = ['unit', 'keepDays', 'archiveMode', 'chunkTokens', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt', 'workbench'];
+export const PRESET_KEYS = ['unit', 'keepDays', 'archiveMode', 'chunkTokens', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'condenseAbove', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt', 'workbench'];
 export const workflow = settings => Object.fromEntries(PRESET_KEYS.filter(k => k in settings).map(k => [k, copy(settings[k])]));
 export function validateWorkflow(input) {
     const w = workflow(input || {});
-    const numbers = ['keepDays', 'chunkTokens', 'keepVisible', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'trackerDays'];
+    const numbers = ['keepDays', 'chunkTokens', 'keepVisible', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'condenseAbove', 'trackerDays'];
     const booleans = ['hideArchived', 'review', 'recall', 'memoryAuto', 'trackerAuto'];
     const strings = ['unit', 'archiveMode', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt'];
     for (const key of numbers) if (key in w && (!Number.isFinite(w[key]) || w[key] < 0 || w[key] > 1000000)) throw new Error(`Invalid workflow number: ${key}.`);
@@ -361,15 +361,17 @@ export function validateWorkflow(input) {
     if ('trackers' in w && (!Array.isArray(w.trackers) || w.trackers.some(t => !t || typeof t.id !== 'string' || typeof t.name !== 'string' || typeof t.prompt !== 'string' || typeof t.enabled !== 'boolean'))) throw new Error('The workflow trackers are invalid.');
     if ('workbench' in w) {
         if (!w.workbench || Array.isArray(w.workbench) || typeof w.workbench !== 'object') throw new Error('Invalid memory workflow settings.');
-        const allowed = ['budget', 'requestBudget', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic'];
+        const allowed = ['budget', 'requestBudget', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic'];
         w.workbench = Object.fromEntries(Object.entries(w.workbench).filter(([k]) => allowed.includes(k)));
         for (const [k, v] of Object.entries(w.workbench)) if (!['number', 'string', 'boolean'].includes(typeof v) || (typeof v === 'number' && (!Number.isFinite(v) || v < 0 || v > 1000000))) throw new Error(`Invalid memory workflow value: ${k}.`);
+        if ('reviewMode' in w.workbench && !['end', 'step'].includes(w.workbench.reviewMode)) throw new Error('Invalid bulk review mode.');
+        if ('charactersPerBatch' in w.workbench && (!Number.isInteger(w.workbench.charactersPerBatch) || w.workbench.charactersPerBatch < 1 || w.workbench.charactersPerBatch > 8)) throw new Error('Characters per memory audit request must be an integer from 1 to 8.');
     }
     return w;
 }
 export function makeBundle(books, metadata, settings) {
     const meta = copy(metadata); delete meta.undo;
-    return { sceneArchivistStory: SCHEMA, version: '1.0.0', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
+    return { sceneArchivistStory: SCHEMA, version: '1.0.1', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
 }
 export function parseBundle(raw) {
     const obj = typeof raw === 'string' ? parseJSON(raw) : copy(raw);
@@ -399,8 +401,8 @@ export function parseBundle(raw) {
 
 /** Durable queue. Output is saved before review; the cursor advances only after the handler's durable write. */
 export class JobQueue {
-    constructor({ state, persist, perform, commit, notify = () => {} }) {
-        Object.assign(this, { state, persist, perform, commit, notify });
+    constructor({ state, persist, perform, commit, extend, finish, notify = () => {} }) {
+        Object.assign(this, { state, persist, perform, commit, extend, finish, notify });
         this.running = false;
     }
     async create(kind, steps, options = {}) {
@@ -418,7 +420,18 @@ export class JobQueue {
         this.running = true; job.status = 'running'; delete job.error;
         try {
             await this.persist();
-            while (job.cursor < job.steps.length && job.status === 'running') {
+            while (job.status === 'running') {
+                if (job.cursor === job.steps.length) {
+                    if (job.options.bulk && this.extend && await this.extend(job)) { await this.persist(); continue; }
+                    if (job.status !== 'running') break;
+                    if (job.options.bulk && this.finish && !(await this.finish(job))) {
+                        if (job.status === 'running') job.status = 'paused';
+                        await this.persist(); break;
+                    }
+                    job.status = 'done';
+                    if (job.options.bulk) { delete job.draft; delete job.auditParts; for (const step of job.steps) delete step.output; }
+                    break;
+                }
                 const step = job.steps[job.cursor];
                 if (step.status === 'done') { job.cursor++; continue; }
                 if (step.output == null) {
@@ -429,11 +442,11 @@ export class JobQueue {
                 if (job.status !== 'running') break;
                 // Handlers must detect applied step ids after a crash between book and cursor saves.
                 const accepted = await this.commit(job, step);
-                if (!accepted) { job.status = 'paused'; await this.persist(); break; }
+                if (!accepted) { if (job.status === 'running') job.status = 'paused'; await this.persist(); break; }
                 step.status = 'done'; step.completed = now(); job.cursor++;
-                delete step.output; await this.persist(); this.notify();
+                if (!job.options.bulk) delete step.output;
+                await this.persist(); this.notify();
             }
-            if (job.cursor === job.steps.length && job.status === 'running') job.status = 'done';
         } catch (e) {
             if (!['paused', 'canceled'].includes(job.status)) job.status = 'failed';
             job.error = String(e?.message ?? e);
