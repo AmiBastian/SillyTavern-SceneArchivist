@@ -1,6 +1,7 @@
 import * as M from './memory-engine.js';
 import * as Core from './core.js';
 import { BulkRun } from './bulk-jobs.js';
+import { newVectorRun, observeVectorRequests, vectorStatus, entryReasons } from './vector-diagnostics.js';
 
 const html = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const button = (action, label, extra = '') => `<button type="button" class="menu_button" data-sa-action="${action}" ${extra}>${label}</button>`;
@@ -19,6 +20,7 @@ export class Workbench {
     constructor(host) {
         this.h = host; this.baseHost = host; this.books = {}; this.entries = []; this.selected = new Set();
         this.held = new Set(); this.details = new Set(); this.semanticHits = new Set(); this.vectorScan = false; this.lastBudget = null; this.tokenCache = new Map();
+        this.vectorRun = null; this.vectorQuiet = false; this.activatedIds = new Set(); this.activationKnown = false;
         this.currentTab = 'archive'; this.loading = false; this.activeIdentity = ''; this.sourceContext = null;
         this.queue = new M.JobQueue({ state: () => this.liveState(), persist: () => this.persist(),
             perform: (j, s) => this.inBulk(j, () => this.perform(j, s)),
@@ -385,8 +387,34 @@ export class Workbench {
     renderBudget() {
         const el = this.root?.querySelector('#sa-budget-view'); if (!el) return;
         const b = this.lastBudget;
-        if (!b) { el.textContent = 'Send a reply to see the budget decision. The total applies across this story’s managed books.'; return; }
-        el.innerHTML = `<p><b>${b.used}/${b.budget}</b> memory tokens selected.</p>` + b.accepted.map(c => `<div class="sa-viewrow">${html(M.title(c.entry))} · ${c.cost} · ${html(c.reason)}</div>`).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-viewrow">${html(c.title)} · ${c.tokens} · ${html(c.reason)}</div>`).join('') + '</details>';
+        const selectedVectors = b?.accepted.filter(c => this.semanticHits.has(c.id)).length || 0;
+        const status = vectorStatus(this.vectorRun, { enabled: this.options().semantic,
+            available: typeof globalThis.vectors_rearrangeChat === 'function', selected: selectedVectors });
+        const heading = `<p class="sa-vector-status" role="status"><b>Vector search:</b> ${html(status)}</p>`;
+        if (!b) { el.innerHTML = heading + '<p>Send a normal chat reply to see which memories were selected.</p>'; return; }
+        const textDetails = c => c.matchedTerms?.length ? `<details class="sa-match-details"><summary>Matched text words (${c.matchedTerms.length})</summary><p>${html(c.matchedTerms.join(', '))}</p></details>` : '';
+        const row = c => `<div class="sa-retrieval-entry"><div class="sa-viewrow"><b>${html(M.title(c.entry))}</b> · ${c.cost} tokens<br>${html(entryReasons(c))}${this.activationKnown ? `<br><span>${this.activatedIds.has(c.id) ? 'World Info activation confirmed' : 'Not activated by World Info'}</span>` : ''}</div>${textDetails(c)}</div>`;
+        const selected = new Set(b.accepted.map(c => c.id));
+        const extra = [...this.activatedIds].filter(id => !selected.has(id));
+        const confirmation = this.activationKnown ? `<p>World Info activation confirmed for ${b.accepted.filter(c => this.activatedIds.has(c.id)).length}/${b.accepted.length} selected memories.${extra.length ? ` ST also activated ${extra.length} other story entries outside this selection; check native World Info activation settings.` : ''}</p>` : '<p>These are selection decisions. World Info activation has not been confirmed yet.</p>';
+        el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens selected. All selection reasons are shown below.</p>` + confirmation + b.accepted.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Matched by: ${html(entryReasons(c))}` : ''}${textDetails(c)}</div>`).join('') + '</details>';
+    }
+
+    findRetrievedEntry(entry) {
+        const r = M.record(entry);
+        if (r) return r.storyId === this.state().storyId ? entry : null;
+        return this.entries.find(e => e.world === entry?.world && String(e.uid) === String(entry?.uid));
+    }
+
+    onWorldInfoActivated(entries) {
+        if (!this.lastBudget || this.vectorScan || !this.h.isActive()) return;
+        this.activatedIds = new Set();
+        for (const entry of entries || []) {
+            const source = this.findRetrievedEntry(entry);
+            if (source && M.record(source)?.storyId === this.state().storyId) this.activatedIds.add(M.record(source).id);
+        }
+        this.activationKnown = true;
+        this.renderBudget();
     }
 
     async inspect(id) {
@@ -1096,8 +1124,10 @@ export class Workbench {
     }
 
     async beforeGeneration(type, params, dryRun) {
-        this.installVectorBridge(); this.semanticHits.clear();
+        this.installVectorBridge();
         if (dryRun || this.h.isBusy() || type === 'quiet' || params?.quiet_prompt || !this.h.isActive()) return;
+        this.semanticHits.clear(); this.vectorRun = null; this.lastBudget = null;
+        this.activatedIds.clear(); this.activationKnown = false; this.renderBudget();
         this.held.clear();
         if (!this.h.settings().recall) return;
         await this.loadBooks();
@@ -1129,15 +1159,42 @@ export class Workbench {
         if (typeof original !== 'function' || original.sceneArchivistWrapped) return;
         const self = this;
         const wrapped = async function (...args) {
-            self.vectorScan = true;
-            try { return await original.apply(this, args); } finally { self.vectorScan = false; }
+            // Quiet helper requests must not overwrite the main reply's evidence.
+            const previousScan = self.vectorScan, previousQuiet = self.vectorQuiet;
+            self.vectorScan = true; self.vectorQuiet = args[3] === 'quiet';
+            try {
+                if (self.vectorQuiet || !self.options().semantic || !self.h.isActive() || self.h.isBusy()) return await original.apply(this, args);
+                const run = newVectorRun(self.h.vectorSettings?.() || {});
+                run.identity = self.identity(); run.storyId = self.state().storyId;
+                self.vectorRun = run;
+                const update = () => { if (self.vectorRun === run && run.identity === self.identity()) self.renderBudget(); };
+                update();
+                return await observeVectorRequests(globalThis, run, () => original.apply(this, args), update);
+            } finally { self.vectorScan = previousScan; self.vectorQuiet = previousQuiet; }
         };
         wrapped.sceneArchivistWrapped = true; wrapped.original = original;
         globalThis.vectors_rearrangeChat = wrapped;
     }
     onVectorActivated(entries) {
-        if (!this.vectorScan || !this.options().semantic) return;
-        for (const e of entries || []) if (M.record(e)?.storyId === this.state().storyId) this.semanticHits.add(M.record(e).id);
+        if (this.vectorQuiet || !this.options().semantic || !this.h.isActive()) return;
+        const run = this.vectorRun;
+        if (run && (run.identity !== this.identity() || run.storyId !== this.state().storyId)) return;
+        for (const entry of entries || []) {
+            // Outside the native call, only credit entries proved to have been
+            // returned by its observed query. Never credit unrelated Recall events.
+            const proved = run && this.h.vectorHash && run.hashes.has(this.h.vectorHash(String(entry.content || '')));
+            if (!this.vectorScan && !proved) continue;
+            run?.activated.add(`${entry.world}::${entry.uid}`);
+            const source = this.findRetrievedEntry(entry), r = M.record(source);
+            if (!r || r.storyId !== this.state().storyId) continue;
+            this.semanticHits.add(r.id); run?.storyMatches.add(r.id);
+        }
+        // Late activation events can supplement the explanation without pretending
+        // that a previously omitted record was selected within the budget.
+        for (const candidate of [...(this.lastBudget?.accepted || []), ...(this.lastBudget?.omitted || [])]) {
+            if (this.semanticHits.has(candidate.id) && candidate.reasons && !candidate.reasons.includes('native vector')) candidate.reasons.push('native vector');
+        }
+        this.renderBudget();
     }
 
     async filterEntries(groups) {
@@ -1279,6 +1336,7 @@ export class Workbench {
     }
     async onChatOpened() {
         this.selected.clear(); this.held.clear(); this.details.clear(); this.lastBudget = null;
+        this.semanticHits.clear(); this.vectorRun = null; this.activatedIds.clear(); this.activationKnown = false;
         await this.refresh();
         const state = this.state(), last = state.lastOpened ? Date.parse(state.lastOpened) : null;
         state.lastOpened = M.now(); await this.persist();

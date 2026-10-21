@@ -15,10 +15,11 @@ import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import * as Core from './core.js';
 import * as Memory from './memory-engine.js';
 import { Workbench } from './workbench.js';
+import { entryReasons } from './vector-diagnostics.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -651,13 +652,25 @@ const fmtTok = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
 async function onWorldInfoActivated(entries) {
     try {
         if (busy) return;
+        workbench?.onWorldInfoActivated(entries);
         const items = [];
+        const decision = workbench?.lastBudget;
+        const selected = new Set((decision?.accepted || []).map(c => c.id));
+        const candidates = new Map([...(decision?.accepted || []), ...(decision?.omitted || [])].map(c => [c.id, c]));
         for (const e of entries ?? []) {
             const cl = Core.classifyEntry(e);
             if (!cl) continue;
             const tokens = await getTokenCountAsync(String(e.content ?? ''));
-            const reason = e.constant ? 'always on' : (held.has(e.uid) && e.world === settings().lorebook ? 'recall' : 'keyword');
-            items.push({ title: e.comment || cl.heading || cl.type, tokens, reason, type: cl.type });
+            const id = Memory.record(workbench?.findRetrievedEntry(e) || e)?.id;
+            const candidate = candidates.get(id), triggers = [...(candidate?.reasons || [])];
+            if (workbench?.semanticHits.has(id) && !triggers.includes('native vector')) triggers.push('native vector');
+            if (!candidate) {
+                if (e.constant) triggers.push('always on');
+                if (held.has(e.uid) && e.world === settings().lorebook) triggers.push('recall');
+            }
+            const evidence = triggers.length ? entryReasons({ ...candidate, reasons: triggers }) : 'World Info activation';
+            const reason = candidate && !selected.has(id) ? 'Outside managed selection: ' + evidence : evidence;
+            items.push({ title: e.comment || cl.heading || cl.type, tokens, reason, triggers, type: cl.type });
         }
         lastView = { at: Date.now(), items };
         await renderView();
@@ -667,13 +680,11 @@ async function onWorldInfoActivated(entries) {
 async function renderView() {
     const sum = $('#sa_view_sum'); const list = $('#sa_view_list');
     if (!sum.length) return;
-    if (!lastView) { sum.text('Nothing yet. Send a message and this shows which log entries reached the model.'); list.empty(); return; }
-    const by = (r) => lastView.items.filter(i => i.reason === r).reduce((n, i) => n + i.tokens, 0);
+    if (!lastView) { sum.text('Send a normal chat reply to see World Info activations and their recorded selection reasons.'); list.empty(); return; }
+    const by = (r) => lastView.items.filter(i => i.triggers.includes(r)).reduce((n, i) => n + i.tokens, 0);
     const total = lastView.items.reduce((n, i) => n + i.tokens, 0);
     const ctx = Number(getContext().maxContext) || 0;
-    let keyedTotal = '';
-    try { const d = await loadWorldInfo(settings().lorebook); if (d) { const k = Core.managedSummary(d).keyed; keyedTotal = ` ${lastView.items.filter(i => i.reason !== 'always on').length} of ${k} keyed entries loaded.`; } } catch { /* ignore */ }
-    sum.text(`Last reply: ${lastView.items.length} log entries, about ${fmtTok(total)} tokens${ctx ? ` (${Math.round(total / ctx * 100)}% of the ${fmtTok(ctx)} context)` : ''}. Always on ${fmtTok(by('always on'))}, keywords ${fmtTok(by('keyword'))}, recall ${fmtTok(by('recall'))}.${keyedTotal}`);
+    sum.text(`Last World Info scan: ${lastView.items.length} archive entries, about ${fmtTok(total)} tokens${ctx ? ` (${Math.round(total / ctx * 100)}% of the ${fmtTok(ctx)} context)` : ''}. Text matches ${fmtTok(by('query match'))}, vector matches ${fmtTok(by('native vector'))}, always on ${fmtTok(by('always on'))}, AI Recall ${fmtTok(by('recall'))}. Reasons can overlap.`);
     list.html(lastView.items.map(i => `<div class="sa-viewrow"><span class="sa-badge">${esc(i.reason)}</span> ${esc(i.title)} <span class="sa-hint">${fmtTok(i.tokens)}</span></div>`).join(''));
 }
 

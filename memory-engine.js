@@ -171,9 +171,21 @@ export function condensationResult(raw, entries, mode, label) {
     return [{ content }];
 }
 
-const words = text => unique(String(text).toLocaleLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'_-]*/gu) ?? []);
+// Whole words, including names and non-Latin scripts. A query for "he" must
+// not activate "the", and the letter "a" must not activate every dated Day.
+const wordSegmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'word' }) : null;
+const wordList = text => (String(text ?? '').normalize('NFKC').toLocaleLowerCase().replace(/[’‘]/g, "'")
+    .match(/[\p{L}\p{N}][\p{L}\p{N}'_-]*/gu) ?? []).flatMap(word => {
+        const whole = word.replace(/'s$/, ''), parts = whole.split(/[-_]/).filter(Boolean);
+        return (parts.length > 1 ? [whole, ...parts] : [whole]).flatMap(part =>
+            wordSegmenter && /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u.test(part)
+                ? [...wordSegmenter.segment(part)].filter(s => s.isWordLike).map(s => s.segment) : [part]);
+    });
+const QUERY_STOP_WORDS = new Set(("a an and are as at be been being but by can could did do does doing for from had has have he her hers herself him himself his how i if in into is it its itself me my myself no nor not of on or our ours ourselves out over own same she should so some such than that the their theirs them themselves then there these they this those through to too under until up us very was we were what when where which while who whom why will with would you your yours yourself yourselves i'm i've i'll i'd you're you've you'll you'd he's she's it's we're we've we'll they're they've they'll isn't aren't wasn't weren't don't doesn't didn't can't couldn't won't wouldn't shouldn't hadn't hasn't haven't let's").split(/\s+/));
+export const queryTerms = text => unique(wordList(text)).filter(w => !QUERY_STOP_WORDS.has(w));
 export function search(entries, query = '', filters = {}) {
-    const needles = words(query);
+    const needles = queryTerms(query);
+    if (String(query).trim() && !needles.length) return [];
     const rows = [];
     for (const e of entries) {
         const r = record(e);
@@ -182,18 +194,21 @@ export function search(entries, query = '', filters = {}) {
         const n = r.unit?.number;
         if (filters.from != null && (n == null || n < filters.from)) continue;
         if (filters.to != null && (n == null || n > filters.to)) continue;
-        const fields = `${title(e)} ${(e.key ?? []).join(' ')} ${(r.dates ?? []).join(' ')} ${(r.people ?? []).join(' ')} ${(r.locations ?? []).join(' ')} ${r.subject} ${(r.aliases ?? []).join(' ')}`.toLocaleLowerCase();
-        const body = String(e.content).toLocaleLowerCase();
-        let score = 0, matches = 0;
+        const fields = new Set(wordList(`${title(e)} ${(e.key ?? []).join(' ')} ${(r.dates ?? []).join(' ')} ${(r.people ?? []).join(' ')} ${(r.locations ?? []).join(' ')} ${r.subject ?? ''} ${(r.aliases ?? []).join(' ')}`));
+        const frequencies = new Map();
+        for (const word of wordList(e.content)) frequencies.set(word, (frequencies.get(word) || 0) + 1);
+        let score = 0;
+        const matchedTerms = [], fieldMatches = [], bodyMatches = [];
         for (const w of needles) {
-            if (fields.includes(w) || body.includes(w)) matches++;
-            if (fields.includes(w)) score += 5;
-            if (body.includes(w)) score += 1 + Math.log1p(body.split(w).length - 1);
+            if (fields.has(w) || frequencies.has(w)) matchedTerms.push(w);
+            if (fields.has(w)) { score += 5; fieldMatches.push(w); }
+            if (frequencies.has(w)) { score += 1 + Math.log1p(frequencies.get(w)); bodyMatches.push(w); }
         }
+        const matches = matchedTerms.length;
         if (needles.length && !matches) continue;
         // Prefer results covering the complete query. Dates, names and locations are searchable in full.
         score += needles.length && matches === needles.length ? 12 : 0;
-        rows.push({ entry: e, score, matches, reason: needles.length ? `${matches}/${needles.length} query terms` : 'archive order' });
+        rows.push({ entry: e, score, matches, matchedTerms, fieldMatches, bodyMatches, reason: needles.length ? `${matches}/${needles.length} query terms` : 'archive order' });
     }
     return rows.sort((a, b) => b.score - a.score || (record(b.entry).unit?.number ?? 0) - (record(a.entry).unit?.number ?? 0));
 }
@@ -217,7 +232,8 @@ export function allocate(entries, { budget = 6000, query = '', selected = [], de
         const cost = Number(counts[r.id] ?? tokens(e.content));
         const reason = r.status !== 'current' ? r.status : e.disable ? 'disabled' : '';
         if (reason) { omitted.push({ id: r.id, title: title(e), tokens: cost, reason }); continue; }
-        const hit = scored.get(r.id)?.score ?? 0;
+        const textMatch = scored.get(r.id);
+        const hit = textMatch?.score ?? 0;
         const selectedHere = picked.has(r.id) || detail.has(r.id);
         const active = selectedHere || sem.has(r.id) || e.constant || r.protection?.pinned || hit > 0 || ['fact', 'thread'].includes(r.type);
         if (!active) { omitted.push({ id: r.id, title: title(e), tokens: cost, reason: 'not relevant' }); continue; }
@@ -225,7 +241,16 @@ export function allocate(entries, { budget = 6000, query = '', selected = [], de
             r.protection?.pinned ? 12000 : ['opening', 'closing', 'epoch', 'legend'].includes(r.type) ? 10000 :
             r.type === 'thread' ? 8500 : r.type === 'fact' ? 8000 : r.type === 'knowledge' ? 7500 :
             r.type === 'state' || r.type === 'tracker' ? 7000 : r.type === 'recap' ? 6500 + (r.level || 1) : e.constant ? 6000 : 1000;
+        const reasons = [];
+        if (detail.has(r.id)) reasons.push('detail requested');
+        if (picked.has(r.id)) reasons.push('recall');
+        if (r.protection?.pinned) reasons.push('pinned');
+        if (sem.has(r.id)) reasons.push('native vector');
+        if (e.constant) reasons.push('always on');
+        if (hit > 0) reasons.push('query match');
+        if (['fact', 'thread'].includes(r.type)) reasons.push('current ' + r.type);
         candidates.push({ entry: e, id: r.id, cost, score: priority + hit * 5 + (sem.has(r.id) ? 100 : 0),
+            reasons, matchedTerms: textMatch?.matchedTerms ?? [], textScore: hit,
             reason: detail.has(r.id) ? 'detail requested' : selectedHere ? 'recall' : r.protection?.pinned ? 'pinned' : sem.has(r.id) ? 'native vector' : hit > 0 ? 'query match' : 'current context' });
     }
     candidates.sort((a, b) => b.score - a.score || (record(b.entry).unit?.number ?? 0) - (record(a.entry).unit?.number ?? 0));
@@ -238,7 +263,7 @@ export function allocate(entries, { budget = 6000, query = '', selected = [], de
         if (r.type === 'recap' && covered.some(id => requestedLeaves.has(id))) reason = 'details requested instead';
         else if (covered.some(id => coverage.has(id))) reason = 'already covered by loaded memory';
         else if (used + c.cost > cap) reason = 'total memory budget';
-        if (reason) { omitted.push({ id: c.id, title: title(c.entry), tokens: c.cost, reason }); continue; }
+        if (reason) { omitted.push({ id: c.id, title: title(c.entry), tokens: c.cost, reason, reasons: c.reasons, matchedTerms: c.matchedTerms }); continue; }
         accepted.push(c); used += c.cost; covered.forEach(id => coverage.add(id));
     }
     return { used, budget: cap, accepted, omitted };

@@ -406,9 +406,15 @@ Enable **Let the model pick keyed entries before each reply** to make an additio
 
 **Memory budget and loading reasons** shows selected records and why other records were omitted. Managed story books share one total content-token cap. Current facts, open threads, pins, and requested details receive priority. A covering recap and its original sources are not loaded together.
 
+The panel also reports native **Vector search** status: off, waiting, searching, completed with matches, completed with no matches, failed, or not observed. It identifies the configured provider and, for Google AI Studio, its embedding model. Send a normal chat reply after changing settings to obtain a fresh report.
+
+Each record shows **all** selection reasons. For example, **Vector match + Text match: bucky, harbor** means both methods found it. Expand **Matched text words** to see every matched term. Text matching searches titles, configured keys, metadata, and entry content using whole words, ignoring common English function words. A shared character name can still match many records; this is separate from native lorebook keyword activation.
+
+The report observes existing native World Info vector requests and activation events. It does not make additional embedding requests or store query text, API keys, or provider response bodies in the report. A successful search with zero results is different from an unobserved or failed search. Selection and World Info activation are shown separately; an entry omitted by the shared budget is not relabeled as selected if ST activates it independently. Any such extra activations are counted explicitly. World Info activation confirms that stage of processing, not the exact final prompt text.
+
 ![What the model saw showing activated records, token counts, and activation reasons](docs/media/23-model-context.png)
 
-**What the model saw** shows records activated for the last observed reply, their token counts, and activation reasons. Check it alongside the budget view when a memory seems to be missing. A pin increases priority; it does not override the cap.
+**What the model saw** shows records activated in the last observed World Info scan, their token counts, and recorded selection reasons. Reasons can overlap. Check it alongside the budget view when a memory seems to be missing. A pin increases priority; it does not override the cap. Use SillyTavern's prompt inspection to verify the exact final prompt.
 
 </details>
 

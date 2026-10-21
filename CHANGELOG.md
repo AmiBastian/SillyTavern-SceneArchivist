@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.2 · October 21, 2026
+
+- Added native vector search status to **Memory budget and loading reasons**, including Google AI Studio/model identification, successful searches, zero matches, disabled settings, unobserved searches, and request errors.
+- Records now show all selection reasons together, including simultaneous vector and text matches. Expandable evidence lists the actual matched text words.
+- **What the model saw** reuses the recorded reasons instead of labeling temporarily constant, budget-selected records as always on.
+- Text retrieval now matches whole words and ignores common English function words. Short fragments such as `a` or `he` no longer match across nearly every archived entry. Names, dates, accents, and supported non-Latin word segmentation remain searchable.
+- Background and quiet helper generations preserve the normal reply's vector evidence. Unrelated force-activation events are not treated as vector matches.
+- Added separate World Info activation confirmation and a count of story entries that ST activated outside the managed selection.
+
+### Updating
+
+Replace the files in the existing Scene Archivist installation and reload SillyTavern. Include the new **`vector-diagnostics.js`** file. Send a normal chat reply, then open **Search → Memory budget and loading reasons**. Existing archive content and memories are not rewritten by these changes.
+
+### Validation
+
+Run `npm test` with Node.js. Regression checks cover whole-word retrieval, combined reasons, memory limits, recap coverage, simulated native vector requests and activation events, quiet generations, chat isolation, response preservation, errors, and interoperability with another fetch hook. These checks simulate the SillyTavern host; they do not verify a live Google API key or a laptop installation.
+
 ## 1.0.1 · October 20, 2026
 
 Bulk jobs now process the full selection before showing one combined review. No more approving every character individually.
