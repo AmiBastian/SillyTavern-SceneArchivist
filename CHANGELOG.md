@@ -13,10 +13,6 @@
 
 Replace the contents of the existing extension folder with this release and reload SillyTavern. Keep the existing installation's `.git` directory if it was installed through ST. No archive or keyword rewrites are required. Configure World Info vectors in native Vector Storage and the entries' own vector settings, then send a normal reply and open **Search → Memory budget and loading reasons**.
 
-### Validation
-
-Run `npm test`. Offline tests execute unmodified excerpts of SillyTavern's native World Info scanner, matching buffer, sorting, inclusion groups, and vector activation code, with browser persistence and provider I/O stubbed. They cover keyword-only activation, body-overlap exclusions, native eligibility, filters, recursion, budget trimming, explicit Recall/details, report isolation, and vector request errors. These checks do not use a live embedding provider or Mira's laptop installation.
-
 ## 1.0.2 · October 21, 2026
 
 - Added native vector search status to **Memory budget and loading reasons**, including Google AI Studio/model identification, successful searches, zero matches, disabled settings, unobserved searches, and request errors.
