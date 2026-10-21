@@ -1,4 +1,4 @@
-# Scene Archivist
+# Scene Archivist 1.0.2
 
 **Your story has consequences. Your characters should remember them.**
 
