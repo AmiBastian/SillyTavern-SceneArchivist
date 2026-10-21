@@ -13,10 +13,6 @@
 
 Replace the files in the existing Scene Archivist installation and reload SillyTavern. Include the new **`vector-diagnostics.js`** file. Send a normal chat reply, then open **Search → Memory budget and loading reasons**. Existing archive content and memories are not rewritten by these changes.
 
-### Validation
-
-Run `npm test` with Node.js. Regression checks cover whole-word retrieval, combined reasons, memory limits, recap coverage, simulated native vector requests and activation events, quiet generations, chat isolation, response preservation, errors, and interoperability with another fetch hook. These checks simulate the SillyTavern host; they do not verify a live Google API key or a laptop installation.
-
 ## 1.0.1 · October 20, 2026
 
 Bulk jobs now process the full selection before showing one combined review. No more approving every character individually.
