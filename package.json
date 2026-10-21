@@ -1,8 +1,7 @@
 {
   "name": "scene-archivist",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test tests/*.test.mjs" },
-  "description": "Local regression tests. Installation in SillyTavern does not require npm install."
+  "description": "SillyTavern extension for scene archives, character memories, recaps and continuity. No npm install needed."
 }
