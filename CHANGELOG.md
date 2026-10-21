@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.3 · October 21, 2026
+
+- Removed automatic full-text archive retrieval from chat injection. Shared names, dates, ordinary words, titles, metadata, and body text no longer qualify entries outside native World Info rules.
+- Removed the override that stripped entry keys, made selected records constant, reset probability and sticky settings, and bypassed native activation checks.
+- Native World Info now completes its own keyword, vector, secondary-key, depth, recursion, probability, group, cooldown, and delay checks before the archive budget trims the activated story entries. Pins affect priority only.
+- Removed automatic vectorization of all story entries. Native Vector Storage and each entry's vector flag control eligibility, including native Enabled for all when explicitly configured there.
+- Replaced body-word evidence with observed native activation sources: keywords, vectors, Always On, Sticky, explicit Recall/details, decorators, or unidentified external activations. Native vector activation does not prove a simultaneous keyword match.
+- Vector diagnostics run independently of the retired Scene Archivist semantic switch and preserve the native requests and responses. Quiet helpers, previews, chat changes, and recursion-step limits are covered by regression tests.
+
+### Updating
+
+Replace the contents of the existing extension folder with this release and reload SillyTavern. Keep the existing installation's `.git` directory if it was installed through ST. No archive or keyword rewrites are required. Configure World Info vectors in native Vector Storage and the entries' own vector settings, then send a normal reply and open **Search → Memory budget and loading reasons**.
+
+### Validation
+
+Run `npm test`. Offline tests execute unmodified excerpts of SillyTavern's native World Info scanner, matching buffer, sorting, inclusion groups, and vector activation code, with browser persistence and provider I/O stubbed. They cover keyword-only activation, body-overlap exclusions, native eligibility, filters, recursion, budget trimming, explicit Recall/details, report isolation, and vector request errors. These checks do not use a live embedding provider or Mira's laptop installation.
+
 ## 1.0.2 · October 21, 2026
 
 - Added native vector search status to **Memory budget and loading reasons**, including Google AI Studio/model identification, successful searches, zero matches, disabled settings, unobserved searches, and request errors.

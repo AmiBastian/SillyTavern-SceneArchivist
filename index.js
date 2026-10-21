@@ -6,7 +6,7 @@ import { saveSettingsDebounced, generateQuietPrompt, generateRaw, chat_metadata,
 import { callGenericPopup, Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getCharaFilename, getStringHash } from '../../../utils.js';
 import { hideChatMessageRange } from '../../../chats.js';
-import { selected_world_info, METADATA_KEY, createNewWorldInfo, createWorldInfoEntry, loadWorldInfo, saveWorldInfo, updateWorldInfoList, reloadEditor, world_info } from '../../../world-info.js';
+import { selected_world_info, METADATA_KEY, createNewWorldInfo, createWorldInfoEntry, loadWorldInfo, saveWorldInfo, updateWorldInfoList, reloadEditor, world_info, world_info_max_recursion_steps } from '../../../world-info.js';
 import { oai_settings } from '../../../openai.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { power_user } from '../../../power-user.js';
@@ -19,7 +19,7 @@ import { entryReasons } from './vector-diagnostics.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -651,8 +651,8 @@ const fmtTok = (n) => n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
 
 async function onWorldInfoActivated(entries) {
     try {
-        if (busy) return;
-        workbench?.onWorldInfoActivated(entries);
+        if (busy || workbench?.scanSuppressed || workbench?.vectorScan) return;
+        await workbench?.onWorldInfoActivated(entries);
         const items = [];
         const decision = workbench?.lastBudget;
         const selected = new Set((decision?.accepted || []).map(c => c.id));
@@ -663,7 +663,6 @@ async function onWorldInfoActivated(entries) {
             const tokens = await getTokenCountAsync(String(e.content ?? ''));
             const id = Memory.record(workbench?.findRetrievedEntry(e) || e)?.id;
             const candidate = candidates.get(id), triggers = [...(candidate?.reasons || [])];
-            if (workbench?.semanticHits.has(id) && !triggers.includes('native vector')) triggers.push('native vector');
             if (!candidate) {
                 if (e.constant) triggers.push('always on');
                 if (held.has(e.uid) && e.world === settings().lorebook) triggers.push('recall');
@@ -684,7 +683,7 @@ async function renderView() {
     const by = (r) => lastView.items.filter(i => i.triggers.includes(r)).reduce((n, i) => n + i.tokens, 0);
     const total = lastView.items.reduce((n, i) => n + i.tokens, 0);
     const ctx = Number(getContext().maxContext) || 0;
-    sum.text(`Last World Info scan: ${lastView.items.length} archive entries, about ${fmtTok(total)} tokens${ctx ? ` (${Math.round(total / ctx * 100)}% of the ${fmtTok(ctx)} context)` : ''}. Text matches ${fmtTok(by('query match'))}, vector matches ${fmtTok(by('native vector'))}, always on ${fmtTok(by('always on'))}, AI Recall ${fmtTok(by('recall'))}. Reasons can overlap.`);
+    sum.text(`Last World Info scan: ${lastView.items.length} archive entries, about ${fmtTok(total)} tokens${ctx ? ` (${Math.round(total / ctx * 100)}% of the ${fmtTok(ctx)} context)` : ''}. Keyword activations ${fmtTok(by('keyword'))}, vector matches ${fmtTok(by('native vector'))}, always on ${fmtTok(by('always on'))}, AI Recall ${fmtTok(by('recall'))}. Reasons can overlap.`);
     list.html(lastView.items.map(i => `<div class="sa-viewrow"><span class="sa-badge">${esc(i.reason)}</span> ${esc(i.title)} <span class="sa-hint">${fmtTok(i.tokens)}</span></div>`).join(''));
 }
 
@@ -1708,6 +1707,9 @@ jQuery(async () => {
             offerRecap: callback => toastr.info('Welcome back. Click for a dated recap of this story.', 'Scene Archivist', { timeOut: 20000, onclick: callback }),
             download: downloadFile, rebindSettings: () => { renderPromptLib(); renderTrackers(); void refreshLorebookList(); },
             vectorSettings: () => extension_settings.vectors, vectorHash: getStringHash, requestHeaders: getRequestHeaders,
+            scanSupported: !!event_types.WORLDINFO_SCAN_DONE,
+            scanLimit: () => world_info_max_recursion_steps,
+            forceEntries: entries => eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, entries),
         });
         workbench.mount(document.querySelector('.sa-panel'));
         migrateStoryBooks();
@@ -1737,6 +1739,7 @@ jQuery(async () => {
         eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
         eventSource.on(event_types.WORLD_INFO_ACTIVATED, onWorldInfoActivated);
         eventSource.on(event_types.WORLDINFO_FORCE_ACTIVATE, entries => workbench.onVectorActivated(entries));
+        if (event_types.WORLDINFO_SCAN_DONE) eventSource.on(event_types.WORLDINFO_SCAN_DONE, scan => workbench.onWorldInfoScan(scan));
         $('#extensionsMenu').append(`<div id="sa_wand" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-book-journal-whills extensionsMenuExtensionButton"></div><span>Archive scene</span></div>`);
         $('#sa_wand').on('click', () => runSummarize());
         $('#extensionsMenu').append(`<div id="sa_wand_panel" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-folder-tree extensionsMenuExtensionButton"></div><span>Scene Archivist</span></div>`);

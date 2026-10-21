@@ -269,6 +269,41 @@ export function allocate(entries, { budget = 6000, query = '', selected = [], de
     return { used, budget: cap, accepted, omitted };
 }
 
+/** Trim native WI activations. This path never searches or activates records. */
+export function allocateActivated(activated, { budget = 6000, entries = activated, details = [], counts = {}, reasons = new Map() } = {}) {
+    const cap = Math.max(0, Number(budget) || 0), detail = new Set(details);
+    const candidates = [], omitted = [];
+    for (const entry of activated) {
+        const r = record(entry); if (!r) continue;
+        const cost = Number(counts[r.id] ?? tokens(entry.content));
+        if (entry.disable || r.status !== 'current') {
+            omitted.push({ id: r.id, title: title(entry), tokens: cost, reason: entry.disable ? 'disabled' : r.status });
+            continue;
+        }
+        const triggers = [...(reasons.get(r.id) || ['world info'])];
+        const priority = triggers.includes('detail requested') ? 20000 : triggers.includes('recall') ? 15000 :
+            r.protection?.pinned ? 12000 : ['opening', 'closing', 'epoch', 'legend'].includes(r.type) ? 10000 :
+            r.type === 'thread' ? 8500 : r.type === 'fact' ? 8000 : r.type === 'knowledge' ? 7500 :
+            r.type === 'state' || r.type === 'tracker' ? 7000 : r.type === 'recap' ? 6500 + (r.level || 1) : entry.constant ? 6000 : 1000;
+        if (r.protection?.pinned) triggers.push('pinned priority');
+        candidates.push({ entry, id: r.id, cost, score: priority, reasons: unique(triggers), reason: triggers[0] });
+    }
+    // Stable sorting retains native order for records with equal priority.
+    candidates.sort((a, b) => b.score - a.score);
+    const requestedLeaves = new Set([...detail].flatMap(id => leaves(id, entries)));
+    const accepted = [], coverage = new Set(); let used = 0;
+    for (const c of candidates) {
+        const r = record(c.entry), covered = leaves(c.id, entries);
+        let reason = '';
+        if (r.type === 'recap' && covered.some(id => requestedLeaves.has(id))) reason = 'details requested instead';
+        else if (covered.some(id => coverage.has(id))) reason = 'already covered by loaded memory';
+        else if (used + c.cost > cap) reason = 'total memory budget';
+        if (reason) omitted.push({ id: c.id, title: title(c.entry), tokens: c.cost, reason, reasons: c.reasons });
+        else { accepted.push(c); used += c.cost; covered.forEach(id => coverage.add(id)); }
+    }
+    return { used, budget: cap, accepted, omitted, native: true, enforced: true };
+}
+
 /** Auto condensation uses story dates only when an unambiguous full date is present. */
 export function fullDate(value) {
     const s = String(value || '');

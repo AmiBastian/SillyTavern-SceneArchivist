@@ -1,4 +1,4 @@
-# Scene Archivist 1.0.2
+# Scene Archivist 1.0.3
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -404,15 +404,13 @@ Enable **Let the model pick keyed entries before each reply** to make an additio
 
 ![Memory budget view listing selected records, costs, reasons, and omitted records](docs/media/22-loading-budget.png)
 
-**Memory budget and loading reasons** shows selected records and why other records were omitted. Managed story books share one total content-token cap. Current facts, open threads, pins, and requested details receive priority. A covering recap and its original sources are not loaded together.
+**Memory budget and loading reasons** shows the entries selected by SillyTavern and why others were omitted. Native World Info finishes its scan first, including keyword rules, vector activations, recursion, probability, inclusion groups, cooldowns and delays. Scene Archivist then trims the activated story entries to one total content-token cap. A covering recap and its sources do not spend that cap twice. Pins change priority among activated entries; they do not activate unmatched records.
 
-The panel also reports native **Vector search** status: off, waiting, searching, completed with matches, completed with no matches, failed, or not observed. It identifies the configured provider and, for Google AI Studio, its embedding model. Send a normal chat reply after changing settings to obtain a fresh report.
+The report labels **Keyword activation (native ST)**, **Vector match (native ST)**, **Always on**, **Sticky**, **AI Recall**, explicitly requested details, activation decorators, and unidentified external activations separately. Vector hits enter native World Info through its external activation path, before keyword checks. The panel reports that observed source instead of inventing a simultaneous keyword match. It does not search entry bodies to decide what loads. Full-text search remains available for deliberate archive searches, recap preparation, and the optional AI Recall index.
 
-Each record shows **all** selection reasons. For example, **Vector match + Text match: bucky, harbor** means both methods found it. Expand **Matched text words** to see every matched term. Text matching searches titles, configured keys, metadata, and entry content using whole words, ignoring common English function words. A shared character name can still match many records; this is separate from native lorebook keyword activation.
+The panel also reports native **Vector search** status, including the provider, Google embedding model, disabled World Info vectors, matches, no matches, errors, and searches that could not be observed. These diagnostics observe existing native requests and activation events without adding embedding calls or changing request bodies, result limits, similarity thresholds, or entry vector flags. The old Scene Archivist **Include this story** switch no longer changes eligibility; use native Vector Storage and the lorebook entries' own vector settings.
 
-The report observes existing native World Info vector requests and activation events. It does not make additional embedding requests or store query text, API keys, or provider response bodies in the report. A successful search with zero results is different from an unobserved or failed search. Selection and World Info activation are shown separately; an entry omitted by the shared budget is not relabeled as selected if ST activates it independently. Any such extra activations are counted explicitly. World Info activation confirms that stage of processing, not the exact final prompt text.
-
-![What the model saw showing activated records, token counts, and activation reasons](docs/media/23-model-context.png)
+Normal-reply evidence survives quiet helpers and previews. An observed vector result is distinct from a memory actually retained after native World Info filters and the archive cap. World Info activation confirms that processing stage; use SillyTavern prompt inspection for the exact final prompt. On older hosts without `WORLDINFO_SCAN_DONE`, the report explicitly states that the archive cap is unavailable and native World Info limits apply.
 
 **What the model saw** shows records activated in the last observed World Info scan, their token counts, and recorded selection reasons. Reasons can overlap. Check it alongside the budget view when a memory seems to be missing. A pin increases priority; it does not override the cap. Use SillyTavern's prompt inspection to verify the exact final prompt.
 
@@ -497,7 +495,7 @@ AI summaries, memory generation, condensation, diaries, continuity checks, and e
 
 ![Optional native World Info vector-matching setting](docs/media/29-native-vectors.png)
 
-Enable World Info in SillyTavern's **Vector Storage** first, then enable **Include this story in existing World Info vector matching**. This optional bridge reuses your existing embedding configuration; it does not add another embedding connection. Current matching records still pass through the shared memory budget. Availability depends on the native vector integration exposed by your SillyTavern version.
+Enable World Info in SillyTavern's **Vector Storage**, then use each lorebook entry's vector setting, or native **Enabled for all** if you deliberately want that behavior. Scene Archivist observes the native integration and never marks every story entry as vector eligible. Native keyword activation continues to follow the entry's primary and secondary keywords and other World Info rules. Activated story entries share the archive memory budget. The existing screenshot shows the retired 1.0.2 switch; in 1.0.3 that area explains the native settings instead.
 
 </details>
 

@@ -12,7 +12,7 @@ export function newVectorRun(settings = {}) {
 function requestInfo(input, init) {
     const raw = typeof input === 'string' ? input : input?.url || String(input);
     const url = new URL(raw, 'http://sillytavern.local');
-    if (!/^\/api\/vector\/(list|insert|query-multi|query)$/.test(url.pathname)) return null;
+    if (!/^\/api\/vector\/(list|insert|delete|query-multi|query)$/.test(url.pathname)) return null;
     if (typeof init?.body !== 'string') return null;
     let body;
     try { body = JSON.parse(init.body); } catch { return null; }
@@ -77,26 +77,24 @@ export async function observeVectorRequests(target, run, perform, notify = () =>
     }
 }
 
-export function vectorStatus(run, { enabled = false, available = false, selected = 0 } = {}) {
-    if (!enabled) return 'Scene Archivist vector matching is off. Native ST vectors may still run independently.';
+export function vectorStatus(run, { enabled = false, available = false, selected = null } = {}) {
     if (!available) return 'Native Vector Storage is not available. Enable its extension and reload SillyTavern.';
+    if (!enabled) return 'World Info vectors are off in SillyTavern’s native Vector Storage.';
     if (!run) return 'Waiting for a normal chat reply. No vector search has been observed yet.';
     const source = run.provider + (run.model ? ` (${run.model})` : '');
     if (run.status === 'disabled') return 'Enable for World Info is off in native Vector Storage.';
     if (run.status === 'error') return `${source}: ${run.error}`;
     if (run.status === 'running') return `${source}: indexing or searching archive entries…`;
     if (run.status === 'no_matches') return `${source}: search completed with no matches above the configured threshold.`;
-    if (run.status === 'matches') return `${source}: search completed; ${run.returned} result(s), ${run.storyMatches.size} from this story, ${selected} selected within the archive budget.`;
+    if (run.status === 'matches') return `${source}: search completed; ${run.returned} result(s), ${run.storyMatches.size} story entry activation(s) requested by native vectors; ${selected == null ? 'World Info and archive budget decisions pending' : `${selected} retained after World Info and the archive budget`}.`;
     if (run.status === 'not_searched') return `${source}: no search request was made. Check that this story's lorebooks are attached and have eligible entries.`;
     if (run.status === 'unobserved') return `${source}: vector request results could not be observed; retrieval is not confirmed by this report.`;
     return `${source}: waiting for the native vector search.`;
 }
 
 export function entryReasons(item) {
-    const labels = { 'native vector': 'Vector match', 'query match': 'Text match', 'recall': 'AI Recall', 'always on': 'Always on', 'pinned': 'Pinned', 'detail requested': 'Detail requested', 'current fact': 'Current fact', 'current thread': 'Open thread', 'current context': 'Current context' };
-    return (item.reasons?.length ? item.reasons : [item.reason]).map(reason => {
-        const label = labels[reason] || reason;
-        const terms = item.matchedTerms || [];
-        return reason === 'query match' && terms.length ? `${label}: ${terms.slice(0, 8).join(', ')}${terms.length > 8 ? ` (+${terms.length - 8} more)` : ''}` : label;
-    }).join(' + ');
+    const labels = { 'native vector': 'Vector match (native ST)', 'keyword': 'Keyword activation (native ST)', 'world info': 'World Info activation',
+        'recall': 'AI Recall', 'always on': 'Always on', 'sticky': 'Sticky (native ST)', 'activation decorator': '@@activate decorator',
+        'external activation': 'External activation (source not identified)', 'pinned priority': 'Pinned priority', 'detail requested': 'Detail requested' };
+    return (item.reasons?.length ? item.reasons : [item.reason]).map(reason => labels[reason] || reason || 'World Info activation').join(' + ');
 }

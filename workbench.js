@@ -21,6 +21,8 @@ export class Workbench {
         this.h = host; this.baseHost = host; this.books = {}; this.entries = []; this.selected = new Set();
         this.held = new Set(); this.details = new Set(); this.semanticHits = new Set(); this.vectorScan = false; this.lastBudget = null; this.tokenCache = new Map();
         this.vectorRun = null; this.vectorQuiet = false; this.activatedIds = new Set(); this.activationKnown = false;
+        this.scanSuppressed = true; this.generationEpoch = 0; this.scanEntries = []; this.scanReasons = new Map();
+        this.externalActivations = new Map(); this.explicitReasons = new Map(); this.forcedEntries = new Set(); this.activeVectorRun = null;
         this.currentTab = 'archive'; this.loading = false; this.activeIdentity = ''; this.sourceContext = null;
         this.queue = new M.JobQueue({ state: () => this.liveState(), persist: () => this.persist(),
             perform: (j, s) => this.inBulk(j, () => this.perform(j, s)),
@@ -263,7 +265,7 @@ export class Workbench {
         this.panes.search.insertAdjacentHTML('beforeend', card('💰 Memory budget and loading reasons', `<div id="sa-budget-view"></div>`, false));
         this.panes.settings.insertAdjacentHTML('afterbegin', card('🛠️ Story memory settings', `<div class="sa-grid">${this.optionField('budget', 'Total injected memory tokens', 'number')}${this.optionField('requestBudget', 'Maximum input tokens per side request', 'number')}${this.optionField('batchSize', 'Units per archive condensation or extraction batch', 'number')}${this.optionField('charactersPerBatch', 'Characters per memory audit request, up to 8', 'number')}<label class="sa-field"><span>Review bulk results</span><select class="text_pole" data-sa-option="reviewMode"><option value="end">Together at the end</option><option value="step">After each step</option></select></label></div><p class="sa-hint">Together at the end runs the whole job before one combined review. Requests stay within your input limit. Canceling keeps prepared results for Resume / review.</p><label class="checkbox_label"><input type="checkbox" data-sa-option="continuityAuto"><span>Check continuity after new replies, findings only</span></label><label class="checkbox_label"><input type="checkbox" data-sa-option="recapOnReturn"><span>Offer a dated recap when returning to this story</span></label>${this.optionField('recapAfterHours', 'Hours before offering a return recap', 'number')}<div id="sa-telemetry" class="sa-hint"></div>`));
         this.panes.settings.insertAdjacentHTML('beforeend', card('💾 Backups and workflow presets', `<p class="sa-hint">A story backup includes its archive, character memories, recaps, dependencies, revisions, jobs and workflow settings. Imports show a preview and create separate books. Connection profiles stay on your device.</p><div class="sa-row">${button('exportStory', 'Export complete story')}${button('importStory', 'Import or restore story')}${button('exportWorkflow', 'Export workflow preset')}${button('importWorkflow', 'Import workflow preset')}${button('importLog', 'Import a plain Scene Log')}</div><input data-sa-field="file" type="file" accept=".json,.md,.txt" hidden>`, false));
-        this.panes.settings.insertAdjacentHTML('beforeend', card('🧭 Existing SillyTavern vectors', `<label class="checkbox_label"><input type="checkbox" data-sa-option="semantic"><span>Include this story in existing World Info vector matching</span></label><p class="sa-hint">Optional. Enable World Info in SillyTavern’s Vector Storage first. It uses your existing embedding settings. Matching memories still share the same total memory budget.</p>`, false));
+        this.panes.settings.insertAdjacentHTML('beforeend', card('🧭 Existing SillyTavern vectors', `<p class="sa-hint">Configure World Info vectors in SillyTavern’s native Vector Storage and each lorebook entry’s vector setting. Scene Archivist observes those searches without changing entry eligibility, query text, result limits, or similarity thresholds. The memory budget only trims the entries selected by World Info.</p>`, false));
         root.addEventListener('click', event => {
             const tab = event.target.closest('[data-sa-tab]'); if (tab) { this.showTab(tab.dataset.saTab); return; }
             const b = event.target.closest('[data-sa-action]');
@@ -387,27 +389,36 @@ export class Workbench {
     renderBudget() {
         const el = this.root?.querySelector('#sa-budget-view'); if (!el) return;
         const b = this.lastBudget;
-        const selectedVectors = b?.accepted.filter(c => this.semanticHits.has(c.id)).length || 0;
-        const status = vectorStatus(this.vectorRun, { enabled: this.options().semantic,
+        const selectedVectors = b ? b.accepted.filter(c => this.semanticHits.has(c.id)).length : null;
+        const status = vectorStatus(this.vectorRun, { enabled: !!this.h.vectorSettings?.()?.enabled_world_info,
             available: typeof globalThis.vectors_rearrangeChat === 'function', selected: selectedVectors });
         const heading = `<p class="sa-vector-status" role="status"><b>Vector search:</b> ${html(status)}</p>`;
         if (!b) { el.innerHTML = heading + '<p>Send a normal chat reply to see which memories were selected.</p>'; return; }
-        const textDetails = c => c.matchedTerms?.length ? `<details class="sa-match-details"><summary>Matched text words (${c.matchedTerms.length})</summary><p>${html(c.matchedTerms.join(', '))}</p></details>` : '';
-        const row = c => `<div class="sa-retrieval-entry"><div class="sa-viewrow"><b>${html(M.title(c.entry))}</b> · ${c.cost} tokens<br>${html(entryReasons(c))}${this.activationKnown ? `<br><span>${this.activatedIds.has(c.id) ? 'World Info activation confirmed' : 'Not activated by World Info'}</span>` : ''}</div>${textDetails(c)}</div>`;
+        const row = c => `<div class="sa-retrieval-entry"><div class="sa-viewrow"><b>${html(M.title(c.entry))}</b> · ${c.cost} tokens<br>${html(entryReasons(c))}${this.activationKnown ? `<br><span>${this.activatedIds.has(c.id) ? 'World Info activation confirmed' : 'Not activated by World Info'}</span>` : ''}</div></div>`;
         const selected = new Set(b.accepted.map(c => c.id));
         const extra = [...this.activatedIds].filter(id => !selected.has(id));
         const confirmation = this.activationKnown ? `<p>World Info activation confirmed for ${b.accepted.filter(c => this.activatedIds.has(c.id)).length}/${b.accepted.length} selected memories.${extra.length ? ` ST also activated ${extra.length} other story entries outside this selection; check native World Info activation settings.` : ''}</p>` : '<p>These are selection decisions. World Info activation has not been confirmed yet.</p>';
-        el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens selected. All selection reasons are shown below.</p>` + confirmation + b.accepted.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Matched by: ${html(entryReasons(c))}` : ''}${textDetails(c)}</div>`).join('') + '</details>';
+        const mode = b.enforced === false ? '<p class="sa-warnline">This SillyTavern version does not expose the scan hook needed for the archive cap. Native World Info limits apply; this report observes activations only.</p>' : '<p>SillyTavern selected these entries using its own activation rules. The archive budget only trims that selection.</p>';
+        el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens retained.</p>` + mode + confirmation + b.accepted.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Activation source: ${html(entryReasons(c))}` : ''}</div>`).join('') + '</details>';
     }
 
     findRetrievedEntry(entry) {
         const r = M.record(entry);
-        if (r) return r.storyId === this.state().storyId ? entry : null;
-        return this.entries.find(e => e.world === entry?.world && String(e.uid) === String(entry?.uid));
+        if (r) return this.isManagedEntry(entry) ? entry : null;
+        return this.entries.find(e => e.world === entry?.world && String(e.uid) === String(entry?.uid) && this.isManagedEntry(e));
     }
 
-    onWorldInfoActivated(entries) {
-        if (!this.lastBudget || this.vectorScan || !this.h.isActive()) return;
+    async onWorldInfoActivated(entries) {
+        if (this.scanSuppressed || this.vectorScan || this.h.isBusy() || !this.h.isActive()) return;
+        if (!this.lastBudget && this.h.scanSupported === false) {
+            const origin = this.identity(), epoch = this.generationEpoch;
+            const managed = [...entries || []].filter(e => this.isManagedEntry(e));
+            const counts = await this.countEntries(managed);
+            if (origin !== this.identity() || epoch !== this.generationEpoch || this.scanSuppressed) return;
+            const accepted = managed.map(entry => ({ entry, id: M.record(entry).id, cost: counts[M.record(entry).id], reasons: this.activationReasons(entry) }));
+            this.lastBudget = { used: accepted.reduce((n, c) => n + c.cost, 0), budget: this.options().budget, accepted, omitted: [], enforced: false };
+        }
+        if (!this.lastBudget) return;
         this.activatedIds = new Set();
         for (const entry of entries || []) {
             const source = this.findRetrievedEntry(entry);
@@ -1125,7 +1136,10 @@ export class Workbench {
 
     async beforeGeneration(type, params, dryRun) {
         this.installVectorBridge();
-        if (dryRun || this.h.isBusy() || type === 'quiet' || params?.quiet_prompt || !this.h.isActive()) return;
+        if (dryRun || this.h.isBusy() || type === 'quiet' || params?.quiet_prompt || !this.h.isActive()) { this.scanSuppressed = true; return; }
+        this.scanSuppressed = false;
+        const epoch = ++this.generationEpoch;
+        this.scanEntries = []; this.scanReasons.clear(); this.externalActivations.clear(); this.explicitReasons.clear(); this.forcedEntries.clear();
         this.semanticHits.clear(); this.vectorRun = null; this.lastBudget = null;
         this.activatedIds.clear(); this.activationKnown = false; this.renderBudget();
         this.held.clear();
@@ -1140,14 +1154,16 @@ export class Workbench {
             prompt: `RECENT CHAT\n${query}\n\nINDEX\n${ranked.map(x => {
                 const r = M.record(x.entry); return `${r.id} | ${M.title(x.entry)} | ${(r.dates || []).join('; ')} | ${(x.entry.key || []).join(', ')} | ${String(x.entry.content).replace(/\s+/g, ' ').slice(0, 360)}`;
             }).join('\n')}\n\nChoose up to ${max} relevant records.`, maxTokens: 600 };
-        // Recall never force-activates outside the central budget. Failure leaves lexical retrieval available.
+        // Recall is an explicit opt-in source. Native WI still applies its filters;
+        // the archive cap trims the resulting activations after the native scan.
         try {
             const raw = await this.h.model(req), result = M.parseJSON(raw), valid = new Set(ranked.map(x => M.record(x.entry).id));
             if (origin !== this.identity() || archive !== this.h.settings().lorebook) return;
             if (!Array.isArray(result?.load)) throw new Error('Invalid recall JSON');
             result.load.filter(id => valid.has(id)).slice(0, max).forEach(id => this.held.add(id));
             const info = document.querySelector('#sa_recall_last'); if (info) info.textContent = `Recall selected ${this.held.size} records, subject to the shared memory budget.`;
-        } catch (e) { console.warn('[Scene Archivist] Recall used local retrieval:', e); }
+        } catch (e) { console.warn('[Scene Archivist] Recall failed; native World Info rules remain in use:', e); }
+        finally { if (epoch === this.generationEpoch && origin === this.identity()) this.scanSuppressed = false; }
     }
     recentText() {
         const chat = this.h.context().chat || [], n = Math.max(1, Number(this.h.settings().recallMessages) || 4);
@@ -1160,57 +1176,103 @@ export class Workbench {
         const self = this;
         const wrapped = async function (...args) {
             // Quiet helper requests must not overwrite the main reply's evidence.
-            const previousScan = self.vectorScan, previousQuiet = self.vectorQuiet;
-            self.vectorScan = true; self.vectorQuiet = args[3] === 'quiet';
+            const previousScan = self.vectorScan, previousQuiet = self.vectorQuiet, previousRun = self.activeVectorRun;
+            self.vectorQuiet = args[3] === 'quiet';
             try {
-                if (self.vectorQuiet || !self.options().semantic || !self.h.isActive() || self.h.isBusy()) return await original.apply(this, args);
+                if (self.vectorQuiet || self.scanSuppressed || !self.h.isActive() || self.h.isBusy()) return await original.apply(this, args);
+                self.vectorScan = true;
                 const run = newVectorRun(self.h.vectorSettings?.() || {});
-                run.identity = self.identity(); run.storyId = self.state().storyId;
+                run.identity = self.identity(); run.storyId = self.state().storyId; run.epoch = self.generationEpoch;
+                self.activeVectorRun = run;
                 self.vectorRun = run;
                 const update = () => { if (self.vectorRun === run && run.identity === self.identity()) self.renderBudget(); };
                 update();
                 return await observeVectorRequests(globalThis, run, () => original.apply(this, args), update);
-            } finally { self.vectorScan = previousScan; self.vectorQuiet = previousQuiet; }
+            } finally { self.vectorScan = previousScan; self.vectorQuiet = previousQuiet; self.activeVectorRun = previousRun; }
         };
         wrapped.sceneArchivistWrapped = true; wrapped.original = original;
         globalThis.vectors_rearrangeChat = wrapped;
     }
     onVectorActivated(entries) {
-        if (this.vectorQuiet || !this.options().semantic || !this.h.isActive()) return;
-        const run = this.vectorRun;
-        if (run && (run.identity !== this.identity() || run.storyId !== this.state().storyId)) return;
+        if (this.vectorQuiet || this.scanSuppressed || this.h.isBusy() || !this.h.isActive()) return;
+        const run = this.activeVectorRun;
+        if (run && (run.identity !== this.identity() || run.storyId !== this.state().storyId || run.epoch !== this.generationEpoch)) return;
         for (const entry of entries || []) {
-            // Outside the native call, only credit entries proved to have been
-            // returned by its observed query. Never credit unrelated Recall events.
-            const proved = run && this.h.vectorHash && run.hashes.has(this.h.vectorHash(String(entry.content || '')));
-            if (!this.vectorScan && !proved) continue;
-            run?.activated.add(`${entry.world}::${entry.uid}`);
             const source = this.findRetrievedEntry(entry), r = M.record(source);
-            if (!r || r.storyId !== this.state().storyId) continue;
-            this.semanticHits.add(r.id); run?.storyMatches.add(r.id);
-        }
-        // Late activation events can supplement the explanation without pretending
-        // that a previously omitted record was selected within the budget.
-        for (const candidate of [...(this.lastBudget?.accepted || []), ...(this.lastBudget?.omitted || [])]) {
-            if (this.semanticHits.has(candidate.id) && candidate.reasons && !candidate.reasons.includes('native vector')) candidate.reasons.push('native vector');
+            if (!r || !this.isManagedEntry(source)) continue;
+            const proved = this.vectorScan && run && this.h.vectorHash && run.hashes.has(this.h.vectorHash(String(entry.content || '')));
+            const reasons = proved ? ['native vector'] : this.explicitReasons.get(r.id) || ['external activation'];
+            const ref = this.entryRef(entry);
+            this.externalActivations.set(ref, M.unique([...(this.externalActivations.get(ref) || []), ...reasons]));
+            if (proved) {
+                run.activated.add(ref); this.semanticHits.add(r.id); run.storyMatches.add(r.id);
+            }
         }
         this.renderBudget();
     }
 
+    entryRef(entry) { return `${entry.world}.${entry.uid}`; }
+    isManagedEntry(entry) {
+        return M.record(entry)?.storyId === this.state().storyId && entry.sceneArchivistArchive === this.h.settings().lorebook;
+    }
+    activationReasons(entry, timedEffects) {
+        if (entry.decorators?.includes('@@activate')) return ['activation decorator'];
+        const external = this.externalActivations.get(this.entryRef(entry));
+        if (external?.length) return [...external];
+        if (entry.constant) return ['always on'];
+        if (timedEffects?.isEffectActive('sticky', entry)) return ['sticky'];
+        // Only call this for actual native activations. Native WI has already
+        // checked depth, primary/secondary keys, recursion, probability and groups.
+        return timedEffects ? ['keyword'] : ['world info'];
+    }
+    async countEntries(entries) {
+        const counts = {};
+        await Promise.all(entries.map(async e => {
+            const r = M.record(e), key = M.hash(e.content);
+            if (!this.tokenCache.has(key)) this.tokenCache.set(key, (await this.h.tokenCount(String(e.content) + '\n')) + 4);
+            counts[r.id] = this.tokenCache.get(key);
+        }));
+        return counts;
+    }
+
+    async onWorldInfoScan(scan) {
+        if (this.h.scanSupported === false || this.scanSuppressed || this.vectorScan || this.h.isBusy() || !this.h.isActive() || !(scan?.activated?.entries instanceof Map)) return;
+        const origin = this.identity(), epoch = this.generationEpoch;
+        const all = [...new Map((scan.sortedEntries || []).filter(e => this.isManagedEntry(e)).map(e => [M.record(e).id, e])).values()];
+        for (const e of scan.activated.entries.values()) {
+            if (this.isManagedEntry(e) && !this.scanReasons.has(M.record(e).id)) this.scanReasons.set(M.record(e).id, this.activationReasons(e, scan.timedEffects));
+        }
+        // The hook fires after every recursion loop. Wait until native WI has
+        // completed its own work before applying one archive-wide cap.
+        const limit = Number(this.h.scanLimit?.()) || 0;
+        if (scan.state.next !== 0 && !(limit > 0 && scan.state.loopCount >= limit)) return;
+        const native = [...scan.activated.entries.values()].filter(e => this.isManagedEntry(e));
+        const counts = await this.countEntries(native);
+        if (origin !== this.identity() || epoch !== this.generationEpoch || this.scanSuppressed) return;
+        const decision = M.allocateActivated(native, { budget: this.options().budget, entries: all,
+            counts, details: [...this.details], reasons: this.scanReasons });
+        const kept = new Set(decision.accepted.map(c => c.id)), nativeIds = new Set(native.map(e => M.record(e).id));
+        for (const e of all) if (!nativeIds.has(M.record(e).id)) {
+            const r = M.record(e);
+            decision.omitted.push({ id: r.id, title: M.title(e), tokens: M.tokens(e.content),
+                reason: r.status !== 'current' ? r.status : e.disable ? 'disabled' : 'not activated by SillyTavern',
+                reasons: this.externalActivations.get(this.entryRef(e)) || [] });
+        }
+        const retain = e => !this.isManagedEntry(e) || kept.has(M.record(e).id);
+        for (const [key, e] of scan.activated.entries) if (!retain(e)) scan.activated.entries.delete(key);
+        for (const key of ['all', 'successful']) if (Array.isArray(scan.new?.[key])) {
+            const list = scan.new[key]; list.splice(0, list.length, ...list.filter(retain));
+        }
+        scan.activated.text = [...scan.activated.entries.values()].map(e => e.content).join('\n');
+        this.lastBudget = decision; this.details.clear(); this.renderBudget();
+    }
+
     async filterEntries(groups) {
-        if (!this.h.isActive() || this.h.isBusy()) return;
-        const keys = ['globalLore', 'characterLore', 'chatLore', 'personaLore'], storyId = this.state().storyId, origin = this.identity(), archive = this.h.settings().lorebook;
-        const all = keys.flatMap(k => groups[k] || []), managed = all.filter(e => M.record(e)?.storyId === storyId && e.sceneArchivistArchive === this.h.settings().lorebook);
+        if (this.scanSuppressed || !this.h.isActive() || this.h.isBusy()) return;
+        const keys = ['globalLore', 'characterLore', 'chatLore', 'personaLore'], storyId = this.state().storyId;
+        const all = keys.flatMap(k => groups[k] || []), managed = all.filter(e => this.isManagedEntry(e));
         if (!managed.length) return;
         const unique = [...new Map(managed.map(e => [M.record(e).id, e])).values()];
-        if (this.vectorScan) {
-            for (const e of unique) {
-                const r = M.record(e);
-                if (r.status !== 'current' || e.disable || ['diary', 'opening', 'closing', 'legend', 'epoch'].includes(r.type)) { e.disable = true; continue; }
-                if (this.options().semantic) e.vectorized = true;
-            }
-            return;
-        }
         // A source edit can happen before the panel is reopened. Check again at injection time.
         const bad = [];
         for (const e of unique) {
@@ -1223,26 +1285,22 @@ export class Workbench {
         const invalid = [];
         for (const e of unique) if (Object.entries(M.record(e).derivedHashes || {}).some(([id, version]) => byId.has(id) && M.hash(byId.get(id).content) !== version)) { M.record(e).status = 'stale'; invalid.push(M.record(e).id); }
         M.invalidate(unique, invalid, 'A source record changed');
-        const counts = {};
-        await Promise.all(unique.map(async e => {
-            const r = M.record(e), key = M.hash(e.content);
-            if (!this.tokenCache.has(key)) this.tokenCache.set(key, (await this.h.tokenCount(String(e.content) + '\n')) + 4);
-            counts[r.id] = this.tokenCache.get(key);
-        }));
-        if (origin !== this.identity() || archive !== this.h.settings().lorebook) throw new Error('The chat changed during memory selection.');
-        const decision = M.allocate(unique, { budget: this.options().budget, query: this.recentText(), selected: [...this.held], details: [...this.details], counts, semantic: [...this.semanticHits] });
-        const ids = new Set(decision.accepted.map(c => c.id));
-        for (const key of keys) if (Array.isArray(groups[key])) {
-            const array = groups[key], keep = array.filter(e => !M.record(e) || M.record(e).storyId !== storyId || !e.sceneArchivistArchive || e.sceneArchivistArchive !== this.h.settings().lorebook);
-            array.splice(0, array.length, ...keep);
+        // Preserve native activation flags, keys and vector eligibility. Only
+        // invalid evidence is excluded; pinning changes budget priority alone.
+        for (const e of managed) if (M.record(e).status !== 'current') e.disable = true;
+        if (this.vectorScan) return;
+        this.scanEntries = unique;
+        const requested = unique.filter(e => !e.disable && !this.forcedEntries.has(M.record(e).id) &&
+            (this.held.has(M.record(e).id) || this.details.has(M.record(e).id)));
+        if (requested.length && this.h.forceEntries) {
+            for (const e of requested) {
+                const id = M.record(e).id, reasons = [];
+                if (this.details.has(id)) reasons.push('detail requested');
+                if (this.held.has(id)) reasons.push('recall');
+                this.explicitReasons.set(id, reasons); this.forcedEntries.add(id);
+            }
+            await this.h.forceEntries(requested.map(e => ({ ...e, decorators: e.decorators ?? [] })));
         }
-        // A chosen managed record is made constant only in this scan's copy, after its full cost was counted.
-        groups.chatLore ??= [];
-        const seen = new Set();
-        for (const e of unique) if (ids.has(M.record(e).id) && !seen.has(M.record(e).id)) {
-            seen.add(M.record(e).id); groups.chatLore.push({ ...e, constant: true, ignoreBudget: true, disable: false, sticky: 0, probability: 100, useProbability: true, vectorized: false, key: [], keysecondary: [], selective: false, decorators: e.decorators ?? [] });
-        }
-        this.lastBudget = decision; this.details.clear(); this.renderBudget();
     }
 
     async exportStory() {
@@ -1337,6 +1395,8 @@ export class Workbench {
     async onChatOpened() {
         this.selected.clear(); this.held.clear(); this.details.clear(); this.lastBudget = null;
         this.semanticHits.clear(); this.vectorRun = null; this.activatedIds.clear(); this.activationKnown = false;
+        this.scanSuppressed = true; this.generationEpoch++; this.scanEntries = []; this.scanReasons.clear();
+        this.externalActivations.clear(); this.explicitReasons.clear(); this.forcedEntries.clear();
         await this.refresh();
         const state = this.state(), last = state.lastOpened ? Date.parse(state.lastOpened) : null;
         state.lastOpened = M.now(); await this.persist();
