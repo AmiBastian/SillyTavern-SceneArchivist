@@ -7,7 +7,7 @@
 - Native World Info now completes its own keyword, vector, secondary-key, depth, recursion, probability, group, cooldown, and delay checks before the archive budget trims the activated story entries. Pins affect priority only.
 - Removed automatic vectorization of all story entries. Native Vector Storage and each entry's vector flag control eligibility, including native Enabled for all when explicitly configured there.
 - Replaced body-word evidence with observed native activation sources: keywords, vectors, Always On, Sticky, explicit Recall/details, decorators, or unidentified external activations. Native vector activation does not prove a simultaneous keyword match.
-- Vector diagnostics run independently of the retired Scene Archivist semantic switch and preserve the native requests and responses. Quiet helpers, previews, chat changes, and recursion-step limits are covered by regression tests.
+- Vector diagnostics run independently of the retired Scene Archivist semantic switch and preserve the native requests and responses.
 
 ### Updating
 
@@ -37,7 +37,7 @@ Bulk jobs now process the full selection before showing one combined review. No 
 - Restored **Lists longer than** and made character-memory condensation honor the threshold. Full memory organization still includes shorter eligible lists.
 - Prepared results survive pause, canceled review, and reload. Reopening a completed proposal does not repeat its model requests.
 - Story books remain unchanged until approval. Partial-write retries retain receipts, memory coverage is saved after the character books, and Undo restores the whole bulk write.
-- Updated progress messages, Undo availability, documentation, and workflow preset handling. Added regression tests and two screenshots of the new controls.
+- Updated progress messages, Undo availability, documentation, and workflow preset handling. Added two screenshots of the new controls.
 
 ### Updating
 
