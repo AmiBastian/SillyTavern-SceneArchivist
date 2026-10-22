@@ -17,10 +17,12 @@ import * as Memory from './memory-engine.js';
 import { Workbench } from './workbench.js';
 import { entryReasons } from './vector-diagnostics.js';
 import { createWorldInfoIO } from './world-info-io.js';
+import * as Journal from './entry-journal.js';
+import { validateSharedUnits } from './workflow-tools.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.4';
+const VERSION = '1.0.5';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -44,7 +46,25 @@ const worldInfoIO = createWorldInfoIO({ requestHeaders: getRequestHeaders, cache
     onSaved: (name, data) => eventSource.emit(event_types.WORLDINFO_UPDATED, name, data) });
 const readFresh = worldInfoIO.readFresh;
 async function saveConfirmed(name, data) {
-    try { return await worldInfoIO.saveConfirmed(name, data); }
+    try {
+        if (!pendingUndo) return await worldInfoIO.saveConfirmed(name, data);
+        const existing = getContext().getWorldInfoNames().includes(name);
+        const current = existing ? await readFresh(name) : { entries: {} };
+        for (const c of Journal.entryChanges(current, data)) {
+            const entry = data.entries[c.key], r = Memory.record(entry); if (!r) continue;
+            if (!c.before) r.originChat ||= String(getCurrentChatId() || '');
+            r.updatedIn = String(getCurrentChatId() || ''); r.lastJobId = pendingUndo.journal.id;
+        }
+        if (name === settings().lorebook && data.sceneArchivistStory?.shared) data.sceneArchivistStory.books = { ...(data.sceneArchivistStory.books || {}), ...(settings().storyBooks?.[name] || {}), [name]: 'archive' };
+        if (pendingUndo.bases[name] && Memory.bookHash(current) !== pendingUndo.bases[name]) throw new Error(`"${name}" changed immediately before saving. Reopen the review.`);
+        Journal.stageWrite(pendingUndo.journal, name, current, data);
+        await saveMetadata();
+        const actual = await worldInfoIO.saveConfirmed(name, data);
+        Journal.confirmWrite(pendingUndo.journal, name, actual);
+        pendingUndo.bases[name] = Memory.bookHash(actual);
+        await persistMeta();
+        return actual;
+    }
     catch (error) { toastr.error(error.message, 'Scene Archivist'); throw error; }
 }
 async function createBookConfirmed(name) {
@@ -303,6 +323,7 @@ async function fillKeys(plan, data) {
             ai = (await sideJson({ prompt: kp.prompt, system: kp.system, maxTokens: 1200 }, t => Core.parseKeywordResponse(t, items.length), 'keywords')).value;
             if (!ai) plan.warnings.push('The keyword request did not return usable JSON, so automatic keywords were used.');
         } catch (e) {
+            if (workbench?.queue.running && workbench.liveState().job?.status !== 'running') throw e;
             console.warn(LOG, 'keyword generation failed', e);
             plan.warnings.push('The keyword request failed (' + (e?.message ?? e) + '), so automatic keywords were used.');
         }
@@ -367,83 +388,102 @@ async function showReview(plan, parsed, lorebookName) {
 
 // ---------------------------------------------------------------- main flow
 
+function progressSnapshot() {
+    const m = meta(), w = m.workbench || {}, s = settings();
+    return clone({ ranges: m.ranges || [], archivedThrough: m.archivedThrough ?? -1, lastDay: m.lastDay ?? null,
+        at: m.at ?? null, messages: m.messages ?? null, memoryProgress: s.memoryProgress?.[s.lorebook] ?? null,
+        coverage: w.coverage || {}, applied: w.applied || [] });
+}
+function visibilitySnapshot() { return (getContext().chat || []).map(m => ({ signature: messageSignature(m), hidden: !!m.is_system })); }
+async function persistMeta() {
+    if (pendingUndo && pendingUndo.journal.status !== 'undone') {
+        pendingUndo.journal.progress.after = progressSnapshot(); pendingUndo.journal.visibilityAfter = visibilitySnapshot();
+    }
+    await saveMetadata();
+}
 function beginUndoWrite() {
     assertCurrentChat();
-    const s = settings();
-    const current = chat_metadata[KEY] ?? {};
-    // Undo cancels the restored job, so its potentially large private draft is
-    // not part of the undo snapshot. The live job keeps it for crash recovery.
-    const wb = current.workbench;
-    const job = wb?.job?.options?.bulk ? { ...wb.job, draft: undefined, steps: wb.job.steps.map(({ output, ...step }) => step) } : wb?.job;
-    const before = clone({ ...current, ...(wb ? { workbench: { ...wb, job } } : {}) });
-    delete before.undo;
-    const progress = s.memoryProgress?.[s.lorebook];
-    pendingUndo = { archive: s.lorebook, before, books: {},
-        memoryProgress: progress ?? null,
-        visibility: (getContext().chat ?? []).map(m => ({ signature: messageSignature(m), hidden: !!m.is_system })) };
+    const m = meta(), job = m.workbench?.job, active = job?.status === 'running';
+    const journals = (m.journals ??= []), id = active ? job.id : Memory.uid();
+    let journal = journals.find(j => j.id === id && j.status !== 'undone');
+    if (!journal) {
+        journal = Journal.makeJournal({ id, archive: settings().lorebook, chatId: String(getCurrentChatId() || ''), label: active ? job.kind : 'Memory update', progress: progressSnapshot(), visibility: visibilitySnapshot() });
+        journals.push(journal);
+    }
+    pendingUndo = { journal, bases: {} };
 }
-
-function messageSignature(m) {
-    // Includes message contents so shifted/deleted/edited messages are never hidden by mistake.
-    const text = JSON.stringify([m.name, m.is_user, m.mes]);
-    let h = 2166136261;
-    for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
-    return `${text.length}:${h >>> 0}`;
-}
-
+function messageSignature(m) { return Memory.messageHash(m); }
 async function saveUndoSnapshot(name, data) {
     assertCurrentChat();
-    if (!pendingUndo) throw new Error('No restore point was started.');
-    if (!(name in pendingUndo.books)) pendingUndo.books[name] = clone(data);
-    chat_metadata[KEY].undo = clone(pendingUndo);
-    // Save the restore point before changing any lorebook. Failure aborts the write.
+    if (!pendingUndo) throw new Error('No journal was started.');
+    pendingUndo.bases[name] = Memory.bookHash(data);
     await saveMetadata();
-    assertCurrentChat();
     $('#sa_undo').prop('disabled', !undoBooks().length);
 }
-
-const undoBooks = () => Object.keys(chat_metadata?.[KEY]?.undo?.books ?? {});
-
+const latestJournal = () => [...(chat_metadata?.[KEY]?.journals || [])].reverse().find(j => j.archive === settings().lorebook && j.status !== 'undone' && (j.changes.some(c => c.status !== 'undone') || ['entries undone', 'restoring progress', 'undoing'].includes(j.status)));
+const undoBooks = () => Memory.unique((latestJournal()?.changes || []).map(c => c.book));
 async function undoLast() {
     if (busy) { toastr.info('Wait for the current operation to finish before using Undo.'); return; }
-    const undo = chat_metadata?.[KEY]?.undo;
-    if (!undo || !Object.keys(undo.books).length) { toastr.info('There is no complete restore point for this chat yet. New writes create one.'); return; }
-    const ok = await callGenericPopup('Restore the last write, including its lorebooks, archive ledger, memory progress and message visibility? Later manual edits to these lorebooks will be replaced.', POPUP_TYPE.CONFIRM);
-    if (ok !== POPUP_RESULT.AFFIRMATIVE && ok !== true) return;
-    busy = true; operationChat = getContext().chat; operationRevision = chatRevision;
+    const journal = latestJournal();
+    if (!journal) { toastr.info('There is no entry restore point yet. New writes create one. Older full-book restore points are kept in chat data but are not applied over later edits.'); return; }
+    busy = true; operationChat = getContext().chat; operationRevision = chatRevision; pendingUndo = null;
     try {
-        for (const [book, data] of Object.entries(undo.books)) {
-            assertCurrentChat();
-            await saveConfirmed(book, clone(data));
-            try { reloadEditor(book); } catch { /* editor closed */ }
+        const load = async () => {
+            await updateWorldInfoList();
+            const archive = settings().lorebook, data = await readFresh(archive);
+            if (!data) throw new Error('Select the original archive before opening Undo.');
+            const names = Memory.unique([...Object.keys(journal.receipts), ...Object.keys(settings().storyBooks?.[archive] || {}), ...Object.keys(data.sceneArchivistStory?.books || {}), archive, memoryBookName()]);
+            const available = getContext().getWorldInfoNames();
+            // A missing managed book could contain a dependent. Do not guess that it is empty.
+            const managed = names.filter(n => n !== memoryBookName() || available.includes(n) || Object.hasOwn(journal.receipts, n) || Object.hasOwn(data.sceneArchivistStory?.books || {}, n));
+            return Object.fromEntries(await Promise.all(managed.map(async n => [n, n === archive ? data : await readFresh(n)])));
+        };
+        const books = await load(), plan = Journal.planUndo(journal, books);
+        const root = document.createElement('div'); root.className = 'sa-review';
+        root.innerHTML = `<h3>Undo ${esc(journal.label)}</h3><p>${plan.safe.length} ${plan.safe.length === 1 ? 'change can' : 'changes can'} be undone; ${plan.conflicts.length} must be kept.</p>`;
+        if (journal.changes.every(c => c.status === 'undone')) root.insertAdjacentHTML('beforeend', '<p>Entry changes are already undone. Continue to finish restoring matching progress and visibility.</p>');
+        for (const c of plan.conflicts) { const p = document.createElement('p'); p.className = 'sa-warnline'; p.textContent = `${c.title}: ${c.reason}`; root.append(p); }
+        for (const c of plan.safe) { const p = document.createElement('p'); p.textContent = `${c.before ? 'Restore' : 'Remove'}: ${c.title} (${c.book})`; root.append(p); }
+        if (!plan.safe.length && !plan.already.length && !journal.changes.every(c => c.status === 'undone')) { await new Popup(root, POPUP_TYPE.TEXT, '', { wide: true, okButton: 'Close' }).show(); return; }
+        if ((await new Popup(root, POPUP_TYPE.CONFIRM, '', { wide: true, large: true, allowVerticalScrolling: true, okButton: 'Undo safe changes', cancelButton: 'Keep everything' }).show()) !== POPUP_RESULT.AFFIRMATIVE) return;
+        const fresh = await load(), final = Journal.planUndo(journal, fresh);
+        if (!Journal.same(final.safe.map(c => [c.book, c.key]).sort(), plan.safe.map(c => [c.book, c.key]).sort())) throw new Error('The Undo plan changed while you reviewed it. Reopen Undo.');
+        const desired = Journal.applyUndo(fresh, final);
+        journal.status = 'undoing'; await saveMetadata();
+        // Removing derived books first leaves source entries available after an interrupted Undo.
+        const touched = Memory.unique([...final.safe.map(c => c.book), ...final.already.map(c => c.book), ...(final.complete ? Object.keys(journal.receipts) : [])]).sort((a, b) => (a === settings().lorebook ? 1 : 0) - (b === settings().lorebook ? 1 : 0));
+        for (const name of touched) {
+            const latest = await readFresh(name);
+            if (!Journal.same(latest, fresh[name])) throw new Error(`"${name}" changed immediately before Undo. Reopen Undo to continue safely.`);
+            if (!Journal.same(latest, desired[name])) await worldInfoIO.saveConfirmed(name, desired[name]);
+            Journal.confirmUndo(journal, name, await readFresh(name), final); await saveMetadata();
+            try { reloadEditor(name); } catch { /* editor closed */ }
         }
-        assertCurrentChat();
-        const chat = getContext().chat ?? [];
-        let skipped = 0;
-        for (let i = 0; i < undo.visibility.length; i++) {
-            const saved = undo.visibility[i];
-            if (!chat[i] || messageSignature(chat[i]) !== saved.signature) { skipped++; continue; }
-            if (!!chat[i].is_system !== saved.hidden) {
-                await hideChatMessageRange(i, i, !saved.hidden);
-                assertCurrentChat();
+        if (journal.changes.every(c => c.status === 'undone')) {
+            journal.status = 'restoring progress'; await saveMetadata();
+            const current = progressSnapshot(), before = journal.progress.before, after = journal.progress.after;
+            // Restore only fields that still equal this job's recorded after-state.
+            for (const key of ['ranges', 'archivedThrough', 'lastDay', 'at', 'messages']) if (Journal.same(current[key], after[key])) meta()[key] = clone(before[key]);
+            for (const key of ['coverage', 'applied']) if (Journal.same(current[key], after[key])) (meta().workbench ??= {})[key] = clone(before[key]);
+            if (Journal.same(current.memoryProgress, after.memoryProgress)) {
+                settings().memoryProgress ??= {};
+                if (before.memoryProgress == null) delete settings().memoryProgress[journal.archive]; else settings().memoryProgress[journal.archive] = before.memoryProgress;
             }
+            const chat = getContext().chat || [];
+            for (let i = 0; i < journal.visibility.length; i++) {
+                const saved = journal.visibility[i], expected = journal.visibilityAfter?.[i];
+                if (!chat[i] || !expected || messageSignature(chat[i]) !== saved.signature || !!chat[i].is_system !== expected.hidden) continue;
+                if (!!chat[i].is_system !== saved.hidden) await hideChatMessageRange(i, i, !saved.hidden);
+            }
+            const job = meta().workbench?.job;
+            if (job?.id === journal.id) { job.status = 'canceled'; job.error = 'This job was undone.'; }
         }
-        const s = settings();
-        if (undo.memoryProgress == null) delete s.memoryProgress[undo.archive];
-        else s.memoryProgress[undo.archive] = undo.memoryProgress;
-        chat_metadata[KEY] = clone(undo.before);
-        // The snapshot was taken while the undone job was still open. Left alone it would block every later run.
-        const wbState = chat_metadata[KEY].workbench;
-        if (wbState?.job && !['done', 'canceled'].includes(wbState.job.status)) { wbState.job.status = 'canceled'; wbState.job.error = 'Canceled by Undo.'; }
-        pendingUndo = null;
-        saveSettingsDebounced();
-        await saveMetadata();
-        await refreshChatUi();
-        toastr.success('Restored the last write, its progress and message visibility.');
-        if (skipped) toastr.warning(`${skipped} edited or removed messages were left unchanged.`);
-    } catch (e) { console.error(LOG, e); toastr.error('Undo was not completed: ' + (e?.message ?? e)); }
+        if (journal.changes.every(c => c.status === 'undone')) journal.status = 'undone';
+        saveSettingsDebounced(); await saveMetadata();
+        toastr.success(journal.status === 'undone' ? 'The job was undone. Later unrelated records were kept.' : 'Safe changes were undone. Conflicting work and its progress were kept.');
+    } catch (e) { if (journal.changes.every(c => c.status === 'undone')) journal.status = 'restoring progress'; toastr.error('Undo is incomplete: ' + e.message); }
     finally { busy = false; operationChat = null; }
-    if (workbench) await workbench.refresh().catch(e => console.warn(LOG, e));
+    await refreshChatUi();
 }
 
 async function commit(plan, parsed, name, expectedHash = '') {
@@ -454,7 +494,7 @@ async function commit(plan, parsed, name, expectedHash = '') {
     const data = (await readFresh(name)) ?? { entries: {} };
     if (expectedHash && Memory.bookHash(data) !== expectedHash) throw new Error('The archive changed while you were reviewing. The response is saved; review it against the new version before writing.');
     const before = clone(data);
-    if (archiveSource && !Memory.checkSource(archiveSource, workbench?.state().storyId || archiveSource.chatId, getContext().chat || []).valid) throw new Error('The transcript changed while the output was being reviewed. No archive write was made.');
+    if (archiveSource && !Memory.checkSource(archiveSource, workbench?.sourceId() || archiveSource.chatId, getContext().chat || []).valid) throw new Error('The transcript changed while the output was being reviewed. No archive write was made.');
     await saveUndoSnapshot(name, data);
     const makeEntry = (d) => createWorldInfoEntry(name, d);
     const rep = Core.applyPlan(data, plan, parsed, o, makeEntry);
@@ -481,6 +521,7 @@ async function commit(plan, parsed, name, expectedHash = '') {
 async function prepareArchive(text, data) {
     const s = settings();
     const parsed = Core.parseArchivistOutput(text);
+    validateSharedUnits(data, parsed.entries);
     if (!parsed.entries.length && !Object.keys(parsed.states).length) {
         throw new Error(`I could not find any ${s.unit || 'story unit'} entries or states in that output. Nothing was marked complete.`);
     }
@@ -595,11 +636,12 @@ const noteIssue = (msg) => { issues.push(`${new Date().toISOString().slice(11, 1
 
 /** Ask for JSON; if the reply cannot be parsed, ask once more, firmly. Returns {value, text}. */
 async function sideJson(req, parse, label) {
-    let text = await sideCall(req);
+    const request = value => workbench?.queue.running ? workbench.call(value, label) : sideCall(value);
+    let text = await request(req);
     let value = parse(text);
     if (value == null) {
         noteIssue(`${label}: first reply was not usable JSON, retrying`);
-        text = await sideCall({ ...req, prompt: req.prompt + '\n\nYour previous reply could not be read. Reply again with ONLY the JSON object, no commentary and no code fences.' });
+        text = await request({ ...req, prompt: req.prompt + '\n\nYour previous reply could not be read. Reply again with ONLY the JSON object, no commentary and no code fences.' });
         value = parse(text);
         if (value == null) noteIssue(`${label}: retry also failed`);
     }
@@ -816,9 +858,9 @@ async function afterArchive(range, days, hideOverride = null) {
         assertCurrentChat();
         chat_metadata[KEY] = Core.ledgerAdd(chat_metadata[KEY] ?? {}, { from: r.from, to: r.to, days, hidden, hiddenTo });
         if (range.stepId) chat_metadata[KEY].ranges.at(-1).stepId = range.stepId;
-        chat_metadata[KEY].ranges.at(-1).source = Memory.sourceSnapshot(workbench?.state().storyId || '', chat, [r]);
+        chat_metadata[KEY].ranges.at(-1).source = workbench ? workbench.source([r]) : Memory.sourceSnapshot('', chat, [r]);
     }
-    await saveMetadata();
+    await persistMeta();
     await renderLedger();
 }
 
@@ -1678,14 +1720,15 @@ jQuery(async () => {
         bindUi();
         workbench = new Workbench({
             settings, meta, context: () => ({ ...getContext(), chatId: getCurrentChatId(), characterId: this_chid }),
-            saveMeta: saveMetadata, saveSettings: saveSettingsDebounced,
+            saveMeta: persistMeta, saveSettings: saveSettingsDebounced,
             worldNames: lorebookNames, load: readFresh, save: saveConfirmed,
             createBook: async name => { if (!getContext().getWorldInfoNames().includes(name) && !(await createBookConfirmed(name))) throw new Error('Could not create ' + name); await updateWorldInfoList(); },
             makeEntry: (name, data) => createWorldInfoEntry(name, data), register: registerStoryBook,
             memoryBook: memoryBookName, memoryBookFor, own: storyMemoryData, options: coreOpts,
             assert: assertCurrentChat, isBusy: () => busy, isActive: () => !!settings().lorebook && !!isLorebookActive(settings().lorebook),
             begin: () => { if (busy) return false; busy = true; operationChat = getContext().chat; operationRevision = chatRevision; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', true); return true; },
-            end: () => { busy = false; operationChat = null; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', false); },
+            end: () => { pendingUndo = null; busy = false; operationChat = null; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', false); },
+            confirmRecovered: async (name, actual) => { if (pendingUndo) { Journal.confirmWrite(pendingUndo.journal, name, actual); await persistMeta(); } },
             undoStart: beginUndoWrite, snapshot: saveUndoSnapshot, reload: name => { try { reloadEditor(name); } catch { /* editor closed */ } },
             model: sideCall, tokenCount: getTokenCountAsync, hide: hideChatMessageRange, renderLedger, prepareArchive, refreshInfo: updateInfoLine,
             archiveModel: async (req, range) => settings().archiveMode === 'chat' && !range.explicit

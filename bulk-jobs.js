@@ -2,6 +2,8 @@
 // reaches the host. Drafts and completed steps live in the durable job itself.
 import * as M from './memory-engine.js';
 import * as Core from './core.js';
+import { approvedChanges, entrySettings } from './workflow-tools.js';
+import { same } from './entry-journal.js';
 
 export class BulkRun {
     constructor(workbench, job) {
@@ -14,7 +16,7 @@ export class BulkRun {
             const state = { ...this.w.liveState(), job: undefined };
             this.job.draft = {
                 books: M.copy(this.w.books), before: M.copy(this.w.books),
-                meta: M.copy({ ...meta, undo: undefined, workbench: state }),
+                meta: M.copy({ ...meta, undo: undefined, journals: undefined, workbench: state }),
                 settings: M.copy(this.real.settings()), notices: [], archiveRanges: [],
                 approved: false, undoStarted: false,
             };
@@ -82,8 +84,9 @@ export class BulkRun {
         for (const [book, data] of Object.entries(this.data.books)) {
             for (const e of Object.values(data.entries || {})) {
                 const before = this.data.before[book]?.entries?.[e.uid];
-                if (String(before?.content || '') === String(e.content || '')) continue;
-                result.push({ title: `${M.title(e)} · ${book}`, before: before?.content || '', content: e.content, book, uid: e.uid });
+                if (same(before, e)) continue;
+                result.push({ title: `${M.title(e)} · ${book}`, before: before?.content || '', content: e.content, book, uid: e.uid,
+                    settingsBefore: entrySettings(before), settingsAfter: entrySettings(e) });
             }
         }
         return result;
@@ -102,16 +105,57 @@ export class BulkRun {
         for (const data of Object.values(d.books)) for (const e of Object.values(data.entries || {})) {
             const r = M.record(e);
             if (r?.storyId !== state.storyId || r.status !== 'current') continue;
-            if (!M.checkSource(r.source, state.storyId, chat).valid) throw new Error('A source transcript changed during this bulk run. Cancel it and select the current messages.');
+            const check = M.checkSource(r.source, this.w.sourceId(), chat);
+            if (!check.valid && !check.foreign) throw new Error('A source transcript changed during this bulk run. Cancel it and select the current messages.');
         }
-        for (const step of this.job.steps) if (step.payload.source && !M.checkSource(step.payload.source, state.storyId, chat).valid) {
+        for (const step of this.job.steps) if (step.payload.source && !M.checkSource(step.payload.source, this.w.sourceId(), chat).valid) {
             throw new Error('An archive source range changed during this bulk run. Cancel it and select the current messages.');
         }
         this.real.assert();
     }
+    async saveApproval() {
+        const job = this.job, d = this.data, approval = job.approval;
+        this.real.undoStart();
+        const archive = this.real.settings().lorebook;
+        const ordered = [...Object.entries(approval.books).filter(([name]) => name !== archive), ...Object.entries(approval.books).filter(([name]) => name === archive)];
+        for (const [name, target] of ordered) {
+            if (!this.real.context().getWorldInfoNames().includes(name)) await this.real.createBook(name);
+            const current = await this.real.load(name);
+            const applied = current.sceneArchivistReceipts?.includes(approval.id);
+            if (applied) {
+                if (M.bookHash(current) !== M.bookHash(target)) throw new Error(`"${name}" changed after this partial approval. Its confirmed changes were kept; inspect the conflict before continuing.`);
+                await this.real.confirmRecovered?.(name, current); continue;
+            }
+            if (M.bookHash(current) !== approval.bases[name]) throw new Error(`"${name}" changed before this approval was saved. Refresh and review the conflict.`);
+            await this.real.snapshot(name, current);
+            target.sceneArchivistReceipts = M.unique([...(target.sceneArchivistReceipts || []), approval.id]);
+            await this.real.saveMeta(); // Persist the exact save intent before the request.
+            await this.real.save(name, target); this.real.reload(name); await this.real.saveMeta();
+        }
+        for (const [name] of Object.entries(approval.books)) {
+            const saved = await this.real.load(name); d.before[name] = M.copy(saved);
+            if (saved.sceneArchivistStory) d.books[name].sceneArchivistStory = M.copy(saved.sceneArchivistStory);
+            this.real.register(archive, name, d.settings.storyBooks?.[archive]?.[name] || (name === archive ? 'archive' : 'separate'));
+            d.books[name].sceneArchivistReceipts = M.unique([...(d.books[name].sceneArchivistReceipts || []), ...(saved.sceneArchivistReceipts || [])]);
+            for (const c of approval.accepted.filter(c => c.book === name)) {
+                d.books[name].entries[c.uid] = M.copy(saved.entries[c.uid]);
+                const id = M.record(saved.entries[c.uid])?.id;
+                job.approvedRecords = M.unique([...(job.approvedRecords || []), id || `${name}:${c.uid}`]);
+            }
+        }
+        this.real.saveSettings();
+        const count = approval.accepted.length, deferred = approval.deferred;
+        delete job.approval; job.phase = 'review'; await this.real.saveMeta();
+        await this.real.refreshInfo?.();
+        await this.w.loadBooks(); await this.w.render();
+        this.real.notify(`Saved ${count} approved changes. ${deferred} prepared results remain for Resume / review.`, 'success');
+        return false;
+    }
+
     async finish() {
         await this.initialize();
         const d = this.data, w = this.w, job = this.job;
+        if (job.approval) return this.saveApproval();
         await this.validate();
         if (job.status !== 'running') return false;
         if (!d.approved) {
@@ -119,8 +163,32 @@ export class BulkRun {
             const needsReview = job.kind !== 'archive' || this.real.settings().review || job.options.pipeline?.length || job.options.hasFollowups;
             if (needsReview && !job.options.automatic) {
                 job.phase = 'review'; await this.real.saveMeta(); w.renderJob();
-                const note = `All ${job.steps.length} processing steps are ready. Review ${changes.length} changed records together. Nothing has been written to your story books yet. Choose "Review later" to keep the prepared results for Resume / review. "Discard unfinished job" in the job panel abandons them.` + (d.notices.length ? '\n\n' + d.notices.join('\n') : '');
-                if (changes.length ? !(await w.review(changes, 'Review complete run', note)) : !(await this.real.confirmText(note, { cancelButton: 'Review later' }))) return false;
+                const note = `All ${job.steps.length} processing steps are ready. Review ${changes.length} changed records together. ${job.approvedRecords?.length ? `${job.approvedRecords.length} approved records have already been saved; the remaining proposals are kept here.` : 'Nothing has been written to your story books yet.'} Choose "Review later" to keep the prepared results for Resume / review. "Discard unfinished job" in the job panel abandons them.` + (d.notices.length ? '\n\n' + d.notices.join('\n') : '');
+                const accepted = changes.length ? await w.review(changes, 'Review complete run', note, { partial: true }) : await this.real.confirmText(note, { cancelButton: 'Review later' });
+                // Keep edits even when the author closes this review for later.
+                const reviewEdited = [];
+                for (const c of changes) {
+                    const e = d.books[c.book].entries[c.uid];
+                    if (e.content !== c.content) { if (M.record(e)) { M.revise(e, c.content, 'Combined review correction'); reviewEdited.push(M.record(e).id); } else e.content = c.content; }
+                }
+                M.invalidate(Object.values(d.books).flatMap(b => Object.values(b.entries || {})), reviewEdited, 'A proposed source was corrected during review');
+                if (!accepted) return false;
+                const selection = approvedChanges(changes, d.before, d.books);
+                if (selection.deferred.length) {
+                    if (!selection.accepted.length) throw new Error('The selected changes depend on deferred sources. Approve those sources first or keep the results for later.');
+                    const books = M.copy(d.before);
+                    for (const c of selection.accepted) books[c.book].entries[c.uid] = M.copy(d.books[c.book].entries[c.uid]);
+                    const approval = { id: `${job.id}:approval:${M.uid()}`, books: {}, bases: {}, accepted: selection.accepted.map(c => ({ book: c.book, uid: c.uid })), deferred: selection.deferred.length };
+                    const names = M.unique(selection.accepted.map(c => c.book)), archive = this.real.settings().lorebook;
+                    if (books[archive]?.sceneArchivistStory?.shared) {
+                        books[archive].sceneArchivistStory.books = { ...(books[archive].sceneArchivistStory.books || {}), [archive]: 'archive' };
+                        for (const name of names) books[archive].sceneArchivistStory.books[name] = d.settings.storyBooks?.[archive]?.[name] || 'separate';
+                        if (!names.includes(archive)) names.push(archive);
+                    }
+                    for (const name of names) { approval.books[name] = books[name]; approval.bases[name] = M.bookHash(d.before[name]); }
+                    job.approval = approval; await this.real.saveMeta();
+                    return this.saveApproval();
+                }
                 if (job.status !== 'running') return false;
                 const edited = [];
                 for (const c of changes) {
@@ -145,6 +213,7 @@ export class BulkRun {
             d.undoStarted = true; await this.real.saveMeta();
         }
         const archive = this.real.settings().lorebook;
+        if (d.books[archive]?.sceneArchivistStory?.shared) d.books[archive].sceneArchivistStory.books = { ...(d.settings.storyBooks?.[archive] || {}), [archive]: 'archive' };
         const ordered = [...Object.entries(d.books).filter(([name]) => name !== archive), ...Object.entries(d.books).filter(([name]) => name === archive)];
         for (const [name, data] of ordered) {
             this.real.assert(); if (job.status !== 'running') return false;
@@ -154,7 +223,7 @@ export class BulkRun {
             if (M.bookHash(current) !== M.bookHash(written ? data : d.before[name])) {
                 throw new Error(`"${name}" changed before saving this bulk run. No further books were written. Refresh and review before retrying.`);
             }
-            if (written) continue;
+            if (written) { await this.real.confirmRecovered?.(name, current); continue; }
             data.sceneArchivistReceipts = M.unique([...(data.sceneArchivistReceipts || []), job.id]);
             await this.real.save(name, data); this.real.reload(name);
         }

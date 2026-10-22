@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.5 · October 22, 2026
+
+- Added optional shared archives across chats, off by default. Participating chats continue unit numbering and share memory destinations while keeping their transcript evidence and progress separate.
+- Replaced new whole-book restore points with entry journals. Undo groups a whole job in either review mode, previews safe changes and conflicts, preserves later edits and retained dependencies across managed books, and supports partial Undo without resetting retained work's progress.
+- Added durable approved-write intents for step jobs and partial approvals. Recovery recognizes confirmed books, retries unfinished saves without repeating model requests, and confirms stored data before completing bookkeeping.
+- Combined reviews now support individual approvals, retained deferred proposals, preserved edits, and highlighted differences. Processing receipts wait for their related memories to be approved.
+- Added a reviewed repair queue in dependency order for corrections and retcons. Protected records and circular dependencies require attention before a repair starts.
+- Added knowledge as of a fictional learning date, explicit historical knowledge states, and a reviewed character roster with aliases, memory-list merging, and destination changes. Editing revisions do not become past canon automatically.
+- Added loading-report activation filters and Inspect, advanced Library filters, selected-record protections, Markdown and JSON selection exports with optional source closure, and recent activity.
+- Added manual job previews, per-Resume request allowances, and a first archive guide. Fictional dates no longer shift with the browser's time zone.
+- Refreshed all screenshots and animated walkthroughs for this release, with new examples for sharing, partial Undo, review, repairs, knowledge, roster, filters, activity, preview, and setup.
+
+### Updating
+
+Replace the existing extension files together and reload SillyTavern. Include the new `entry-journal.js`, `workflow-tools.js`, and `workbench-tools.js` modules. Export a complete story backup before a large change. Keep one writer active at a time for a shared archive; SillyTavern does not provide conditional whole-book saves.
+
 ## 1.0.4 · October 22, 2026
 
 - Reviews now offer **Review later** to keep prepared results for Resume. The job panel uses **Discard unfinished job**, explains that unapproved results become unavailable while written records stay, and keeps Retry beside it. Blocked-job messages use the same wording.

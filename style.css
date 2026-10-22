@@ -116,3 +116,11 @@
 .sa-retrieval-entry { padding: .5em 0; border-bottom: 1px solid var(--SmartThemeBorderColor, #555); }
 .sa-retrieval-entry .sa-viewrow { display: block; }
 .sa-match-details { margin: .3em 0; font-size: .9em; }
+.sa-diff { white-space: pre-wrap; overflow-wrap: anywhere; font: .85em/1.5 monospace; max-height: 480px; overflow-y: auto; }
+.sa-diff-add { background: rgba(60, 180, 100, .15); border-left: 3px solid #65b98a; padding: 1px 6px; }
+.sa-diff-remove { background: rgba(210, 90, 90, .15); border-left: 3px solid #d58c8c; padding: 1px 6px; }
+.sa-diff-same { opacity: .65; padding: 1px 9px; }
+.sa-library-filters { margin: 10px 0; }
+.sa-review [data-review-include] { flex: 0 0 auto; width: auto; }
+.sa-review .sa-diff span { user-select: none; }
+.sa-panel input[type=date] { min-width: 0; width: 100%; }

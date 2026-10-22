@@ -16,7 +16,7 @@ export function hash(value) {
     return `${s.length}:${(h >>> 0).toString(16)}`;
 }
 export const messageHash = m => hash([m?.name, !!m?.is_user, m?.mes ?? '']);
-export const bookHash = data => hash(data?.entries ?? {});
+export const bookHash = data => hash({ entries: data?.entries ?? {}, story: data?.sceneArchivistStory ?? null, receipts: data?.sceneArchivistReceipts ?? [] });
 export const record = entry => entry?.sceneArchivist ?? null;
 export const title = e => String(e.content ?? '').trim().split('\n')[0].replace(/^#+\s*►?\s*/, '') || e.comment || 'Untitled';
 export const cleanUnit = value => String(value || 'Day').trim().replace(/[^\p{L}\p{N} _-]/gu, '').slice(0, 32) || 'Day';
@@ -111,7 +111,8 @@ export function invalidate(entries, ids, reason = 'A source was corrected') {
             const r = record(e);
             if (!r || seen.has(r.id)) continue;
             if ([...(r.derivedFrom ?? []), ...(r.covers ?? [])].some(id => seen.has(id))) {
-                r.status = 'stale'; r.staleReason = reason; r.updated = now();
+                if (!['superseded', 'resolved'].includes(r.status)) r.status = 'stale';
+                r.staleReason = reason; r.updated = now();
                 seen.add(r.id); stale.push(r.id); more = true;
             }
         }
@@ -321,12 +322,25 @@ export function allocateActivated(activated, { budget = 6000, entries = activate
     return { used, budget: cap, accepted, omitted, native: true, enforced: true };
 }
 
+export function calendarDay(value) {
+    const s = String(value || '').trim(); if (/unknown/i.test(s)) return null;
+    const months = 'January February March April May June July August September October November December'.split(' ');
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+    const named = s.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:st|nd|rd|th)?[,]?\s+(\d{4})\b/i);
+    const dayFirst = s.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December)[,]?\s+(\d{4})\b/i);
+    const year = Number(iso?.[1] || named?.[3] || dayFirst?.[3]), month = iso ? Number(iso[2]) - 1 : months.findIndex(m => m.toLowerCase() === (named?.[1] || dayFirst?.[2])?.toLowerCase()), day = Number(iso?.[3] || named?.[2] || dayFirst?.[1]);
+    if (!year || month < 0 || month > 11 || !day) return null;
+    // Fictional calendar dates must not move a day when the browser's time zone changes.
+    const d = new Date(Date.UTC(year, month, day));
+    if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month || d.getUTCDate() !== day) return null;
+    return `${String(year).padStart(4, '0')}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
 /** Auto condensation uses story dates only when an unambiguous full date is present. */
 export function fullDate(value) {
     const s = String(value || '');
     if (!/\b\d{4}\b/.test(s) || /unknown|\?|before|after|circa|about| to |\d{4}-\d{2}-\d{2}\s*[—–]/i.test(s)) return null;
-    const t = Date.parse(s.replace(/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s*/gi, ''));
-    return Number.isFinite(t) ? t : null;
+    const day = calendarDay(s);
+    return day ? Date.parse(day + 'T00:00:00Z') : null;
 }
 
 export function condensationCandidates(entries, options = {}) {
@@ -438,7 +452,7 @@ export function validateWorkflow(input) {
     if ('trackers' in w && (!Array.isArray(w.trackers) || w.trackers.some(t => !t || typeof t.id !== 'string' || typeof t.name !== 'string' || typeof t.prompt !== 'string' || typeof t.enabled !== 'boolean'))) throw new Error('The workflow trackers are invalid.');
     if ('workbench' in w) {
         if (!w.workbench || Array.isArray(w.workbench) || typeof w.workbench !== 'object') throw new Error('Invalid memory workflow settings.');
-        const allowed = ['budget', 'requestBudget', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic'];
+        const allowed = ['budget', 'requestBudget', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview'];
         w.workbench = Object.fromEntries(Object.entries(w.workbench).filter(([k]) => allowed.includes(k)));
         for (const [k, v] of Object.entries(w.workbench)) if (!['number', 'string', 'boolean'].includes(typeof v) || (typeof v === 'number' && (!Number.isFinite(v) || v < 0 || v > 1000000))) throw new Error(`Invalid memory workflow value: ${k}.`);
         if ('reviewMode' in w.workbench && !['end', 'step'].includes(w.workbench.reviewMode)) throw new Error('Invalid bulk review mode.');
@@ -448,7 +462,7 @@ export function validateWorkflow(input) {
 }
 export function makeBundle(books, metadata, settings) {
     const meta = copy(metadata); delete meta.undo;
-    return { sceneArchivistStory: SCHEMA, version: '1.0.1', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
+    return { sceneArchivistStory: SCHEMA, version: '1.0.5', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
 }
 export function parseBundle(raw) {
     const obj = typeof raw === 'string' ? parseJSON(raw) : copy(raw);
@@ -485,6 +499,7 @@ export class JobQueue {
     async create(kind, steps, options = {}) {
         const s = this.state();
         if (s.job && !['done', 'canceled'].includes(s.job.status)) throw new Error(unfinishedJobMessage(s.job));
+        if (s.job) (s.history ??= []).push({ id: s.job.id, kind: s.job.kind, status: s.job.status, created: s.job.created, ended: now(), steps: s.job.steps.length, approved: s.job.approvedRecords?.length || 0, requests: s.job.requestsTotal || 0 });
         s.job = { id: uid(), kind, options: copy(options), steps: steps.map(payload => ({ id: uid(), payload: copy(payload), status: 'pending' })), cursor: 0, status: 'paused', created: now() };
         await this.persist(); this.notify(); return s.job;
     }
@@ -494,7 +509,7 @@ export class JobQueue {
         if (this.running) return;
         const state = this.state(), job = state.job;
         if (!job || ['done', 'canceled'].includes(job.status)) return;
-        this.running = true; job.status = 'running'; delete job.error;
+        this.running = true; job.status = 'running'; job.requestsThisResume = 0; delete job.error;
         try {
             await this.persist();
             while (job.status === 'running') {

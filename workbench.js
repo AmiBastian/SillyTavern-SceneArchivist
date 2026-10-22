@@ -2,6 +2,8 @@ import * as M from './memory-engine.js';
 import * as Core from './core.js';
 import { BulkRun } from './bulk-jobs.js';
 import { newVectorRun, observeVectorRequests, vectorStatus, entryReasons } from './vector-diagnostics.js';
+import * as Tools from './workflow-tools.js';
+import { mountTools, renderTools, previewJob, dispatchTool } from './workbench-tools.js';
 
 const html = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const button = (action, label, extra = '') => `<button type="button" class="menu_button" data-sa-action="${action}" ${extra}>${label}</button>`;
@@ -13,7 +15,7 @@ const flat = (it, unit) => it.a == null ? it.text : `[${it.b != null && it.b !==
 export const WORKBENCH_DEFAULTS = {
     budget: 6000, requestBudget: 18000, autoCondense: 'off', trigger: 'units', afterUnits: 10,
     afterDays: 30, pressureTokens: 16000, batchSize: 6, charactersPerBatch: 4, reviewMode: 'end', recapLabel: 'Arc', recapMode: 'recap',
-    continuityAuto: false, recapOnReturn: false, recapAfterHours: 24, semantic: false,
+    continuityAuto: false, recapOnReturn: false, recapAfterHours: 24, semantic: false, requestLimit: 0, jobPreview: true,
 };
 
 export class Workbench {
@@ -45,16 +47,21 @@ export class Workbench {
         if (!this.h.begin()) throw new Error('An operation is already running. Pause or finish it first.');
         try { await this.ensureBranch(); return await fn(); } finally { this.h.end(); }
     }
-    async call(req, label) {
+    async call(req, label, archiveRange = null) {
         this.h.assert();
+        const job = this.liveState().job;
+        if (job?.status === 'running' && job.options.requestLimit > 0 && (job.requestsThisResume || 0) >= job.options.requestLimit) {
+            job.status = 'paused'; job.error = `Paused at the ${job.options.requestLimit}-request limit. Resume allows another ${job.options.requestLimit} requests.`; await this.persist(); throw new Error(job.error);
+        }
         const cost = M.tokens(req.system || '') + M.tokens(req.prompt || '');
         const limit = Math.max(2000, Number(this.options().requestBudget) || 18000);
-        if (cost > limit) throw new Error(`${label} needs about ${cost} input tokens, above the ${limit} request limit. Use a smaller selection or increase the request limit in Settings.`);
+        if (!archiveRange && cost > limit) throw new Error(`${label} needs about ${cost} input tokens, above the ${limit} request limit. Use a smaller selection or increase the request limit in Settings.`);
         const st = this.liveState(), meter = (st.telemetry ??= { requests: 0, input: 0, output: 0 });
         meter.requests++; meter.input += cost; meter.last = { label, at: M.now(), input: cost, state: 'requesting' };
         await this.persist();
         try {
-            const raw = await this.h.model(req);
+            if (job?.status === 'running') { job.requestsThisResume = (job.requestsThisResume || 0) + 1; job.requestsTotal = (job.requestsTotal || 0) + 1; await this.persist(); }
+            const raw = archiveRange ? await this.h.archiveModel(req, archiveRange) : await this.h.model(req);
             this.h.assert();
             if (typeof raw !== 'string' || !raw.trim()) throw new Error('The model returned no text. A normal finish_reason of stop only means generation ended; empty or incomplete content is not accepted.');
             meter.output += M.tokens(raw); meter.last.state = 'received'; meter.last.output = M.tokens(raw);
@@ -74,8 +81,10 @@ export class Workbench {
         const s = this.h.settings(), archive = s.lorebook, origin = this.identity();
         if (!archive) { this.books = {}; this.entries = []; return {}; }
         const names = this.h.context().getWorldInfoNames();
+        const archiveData = await this.h.load(archive);
+        if (archiveData?.sceneArchivistStory?.shared) for (const [name, kind] of Object.entries(archiveData.sceneArchivistStory.books || {})) this.h.register(archive, name, kind);
         const books = M.unique([archive, this.h.memoryBook(), ...Object.keys(s.storyBooks?.[archive] ?? {})]).filter(n => names.includes(n));
-        const values = await Promise.all(books.map(n => this.h.load(n)));
+        const values = await Promise.all(books.map(n => n === archive ? archiveData : this.h.load(n)));
         this.h.assert();
         if (archive !== this.h.settings().lorebook || origin !== this.identity()) throw new Error('The chat or archive changed while books were loading.');
         const result = {};
@@ -118,13 +127,28 @@ export class Workbench {
     async ensureBranch() {
         const state = this.state(), identity = this.identity();
         if (!identity) return;
+        state.sourceId ||= state.storyId;
         const s = this.h.settings(), oldArchive = s.lorebook, oldMemory = this.h.memoryBook();
         if (!oldArchive) { state.originChat = identity; return; }
         await this.loadBooks();
-        const foreignRecords = this.entries.some(e => M.record(e)?.storyId && M.record(e).storyId !== state.storyId);
+        const shared = this.books[oldArchive]?.sceneArchivistStory;
+        if (shared?.shared) {
+            if (state.originChat && state.originChat !== identity) {
+                state.sourceId = M.uid();
+                for (const key of ['ranges', 'archivedThrough', 'lastDay', 'at', 'messages']) delete this.h.meta()[key];
+                state.coverage = {}; state.applied = []; delete state.job;
+            }
+            state.storyId = shared.id; state.sharedArchive = oldArchive; state.originChat = identity;
+            if (shared.memoryBook) s.memoryBook = shared.memoryBook;
+            if (shared.memoryTarget) s.memoryTarget = shared.memoryTarget;
+            for (const [name, kind] of Object.entries(shared.books || {})) this.h.register(oldArchive, name, kind);
+            await this.persist(); await this.loadBooks(); return;
+        }
+        const detachedShared = state.sharedArchive === oldArchive;
+        const foreignRecords = detachedShared || this.entries.some(e => M.record(e)?.storyId && M.record(e).storyId !== state.storyId);
         if (!state.originChat && !foreignRecords) { state.originChat = identity; await this.persist(); return; }
         if (state.originChat === identity && !foreignRecords) return;
-        const newId = M.uid(), mapping = {};
+        const oldSource = this.sourceId(), newId = M.uid(), newSource = M.uid(), mapping = {};
         const existing = this.h.context().getWorldInfoNames();
         for (const old of Object.keys(this.books)) {
             let name = `${old} [branch ${newId.slice(0, 8)}]`.slice(0, 100), suffix = 2;
@@ -138,27 +162,48 @@ export class Workbench {
                 e.sceneArchivistArchive = mapping[oldArchive];
                 if (M.record(e)) { M.record(e).storyId = newId; M.record(e).inheritedFrom = M.record(e).source?.chatId || state.storyId; }
             }
+            if (old === oldArchive) d.sceneArchivistStory = { schema: 1, id: newId, shared: false, books: Object.fromEntries(Object.values(mapping).map(n => [n, n === mapping[oldArchive] ? 'archive' : 'separate'])) };
             await this.h.createBook(mapping[old]); await this.h.save(mapping[old], d);
         }
         s.lorebook = mapping[oldArchive]; s.memoryBook = mapping[oldMemory] || '';
         for (const name of Object.values(mapping)) this.h.register(s.lorebook, name, name === s.lorebook ? 'archive' : 'separate');
-        const oldId = state.storyId; state.storyId = newId; state.parentStory = oldId; state.originChat = identity; state.branchBooks = mapping;
-        for (const [name, data] of Object.entries(this.books)) for (const e of Object.values(this.h.own(data, name).entries ?? {})) {
-            if (M.record(e)?.source?.chatId === oldId) M.record(e).source.chatId = newId;
-        }
-        // Verify inherited sources against the branch's actual message contents. Diverged sources stay stale.
+        const oldId = state.storyId; state.storyId = newId; state.sourceId = newSource; delete state.sharedArchive; state.parentStory = oldId; state.originChat = identity; state.branchBooks = mapping;
         for (const book of Object.values(mapping)) {
             const d = await this.h.load(book);
-            for (const e of Object.values(d.entries ?? {})) if (M.record(e)?.source?.chatId === oldId) {
-                M.record(e).source.chatId = newId;
-                const check = M.checkSource(M.record(e).source, newId, this.h.context().chat || []);
-                if (!check.valid) { M.record(e).status = 'stale'; M.record(e).staleReason = 'Source differs in this branch'; }
+            for (const e of Object.values(d.entries ?? {})) if (M.record(e)?.source?.chatId === oldSource) {
+                const source = M.record(e).source, check = M.checkSource(source, oldSource, this.h.context().chat || []);
+                if (check.valid) { source.inheritedFrom = source.actualChatId || oldSource; source.chatId = newSource; source.actualChatId = identity; }
+                else { M.record(e).status = 'stale'; M.record(e).staleReason = 'Source differs in this branch'; }
             }
             await this.h.save(book, d);
         }
         if (state.job && !['done', 'canceled'].includes(state.job.status)) { state.job.status = 'canceled'; state.job.error = 'Copied jobs do not resume in a different branch.'; }
         await this.h.attach(s.lorebook); await this.persist(); this.h.saveSettings();
         this.h.notify('This branch now has its own archive and memory books. The original story is separate.', 'success');
+    }
+
+    async setShared(enabled) {
+        return this.withLock(async () => {
+            await this.loadBooks();
+            const name = this.h.settings().lorebook, before = this.books[name];
+            if (!before) throw new Error('Select an archive first.');
+            const note = enabled ? 'Allow other chats that select this archive to update the same books and continue its day numbering? Each chat keeps its own transcript evidence and progress.' : 'Stop sharing this archive? Chats that used shared mode will get private branches before their next write.';
+            if (!(await this.h.confirmText(note))) return;
+            const data = M.copy(before);
+            data.sceneArchivistStory = { ...(data.sceneArchivistStory || {}), schema: 1, id: this.state().storyId, shared: !!enabled,
+                memoryBook: this.h.memoryBook(), memoryTarget: this.h.settings().memoryTarget,
+                books: { ...(this.h.settings().storyBooks?.[name] || {}), [name]: 'archive' } };
+            if (M.bookHash(await this.h.load(name)) !== M.bookHash(before)) throw new Error('The archive changed. Refresh before changing sharing.');
+            await this.h.save(name, data);
+            if (enabled) this.state().sharedArchive = name;
+            await this.persist(); await this.loadBooks(); this.renderSharing();
+        });
+    }
+    renderSharing() {
+        const el = this.root?.querySelector('#sa-sharing-state'); if (!el) return;
+        const shared = !!this.books[this.h.settings().lorebook]?.sceneArchivistStory?.shared;
+        el.textContent = shared ? 'Shared archive: this chat writes into the existing story. Keep one writer active at a time.' : 'Private archive: other chats get their own branches.';
+        const toggle = this.root.querySelector('[data-sa-action=sharing]'); if (toggle) toggle.textContent = shared ? 'Stop sharing this archive' : 'Share this archive across chats';
     }
 
     /** Guard editor saves against an intervening World Info or source edit. */
@@ -171,15 +216,17 @@ export class Workbench {
         }
         this.h.undoStart();
         for (const name of Object.keys(books)) await this.h.snapshot(name, (await this.h.load(name)) || { entries: {} });
-        // A receipt in each touched book makes a resumed commit idempotent after a refresh.
+        const job = this.liveState().job;
+        if (stepId && !this.bulkRun && job?.status === 'running') {
+            job.pendingWrite = { stepId, books: M.copy(books), bases: M.copy(bases), reason };
+            for (const data of Object.values(job.pendingWrite.books)) data.sceneArchivistReceipts = M.unique([...(data.sceneArchivistReceipts || []), stepId]);
+            await this.persist();
+            return this.finishStepWrite(job.pendingWrite);
+        }
         for (const [book, data] of Object.entries(books)) {
-            // Snapshot persistence may take time. Check the server again just before each write.
-            if (Object.hasOwn(bases, book) && M.bookHash(await this.h.load(book)) !== bases[book]) {
-                throw new Error(`"${book}" changed before saving. Refresh and review the new version before retrying.`);
-            }
+            if (Object.hasOwn(bases, book) && M.bookHash(await this.h.load(book)) !== bases[book]) throw new Error(`"${book}" changed before saving. Refresh and review before retrying.`);
             if (stepId) data.sceneArchivistReceipts = M.unique([...(data.sceneArchivistReceipts ?? []), stepId]);
-            await this.h.save(book, data); this.h.assert();
-            this.h.reload(book);
+            await this.h.save(book, data); this.h.assert(); this.h.reload(book);
         }
         if (stepId) this.state().applied = M.unique([...(this.state().applied ?? []), stepId]);
         this.state().lastWrite = { at: M.now(), reason, books: Object.keys(books) };
@@ -187,10 +234,31 @@ export class Workbench {
         await this.persist(); await this.loadBooks(); await this.render();
     }
 
+    async finishStepWrite(intent) {
+        this.h.undoStart();
+        for (const [name, target] of Object.entries(intent.books)) {
+            this.h.assert();
+            const current = await this.h.load(name), written = current?.sceneArchivistReceipts?.includes(intent.stepId);
+            if (written) {
+                if (M.bookHash(current) !== M.bookHash(target)) throw new Error(`"${name}" changed after this step was saved. Its confirmed records were kept; review the conflict before continuing.`);
+                await this.h.confirmRecovered?.(name, current); continue;
+            }
+            if (Object.hasOwn(intent.bases, name) && M.bookHash(current) !== intent.bases[name]) throw new Error(`"${name}" changed before this step could finish saving. Its other confirmed records were kept.`);
+            await this.h.snapshot(name, current || { entries: {} });
+            await this.h.save(name, target); this.h.reload(name); await this.persist();
+        }
+        this.state().applied = M.unique([...(this.state().applied || []), intent.stepId]);
+        this.state().lastWrite = { at: M.now(), reason: intent.reason, books: Object.keys(intent.books) };
+        delete this.liveState().job.pendingWrite;
+        await this.persist(); await this.h.refreshInfo?.(); await this.loadBooks(); await this.render();
+        return true;
+    }
+
     bases() { return Object.fromEntries(Object.entries(this.books).map(([n, d]) => [n, M.bookHash(d)])); }
     find(id) { return this.entries.find(e => M.record(e)?.id === id); }
     selectedEntries() { return this.entries.filter(e => this.selected.has(M.record(e)?.id)); }
-    source(entries) { return M.sourceSnapshot(this.state().storyId, this.h.context().chat || [], entries); }
+    sourceId() { return this.state().sourceId || this.state().storyId; }
+    source(entries) { return { ...M.sourceSnapshot(this.sourceId(), this.h.context().chat || [], entries), actualChatId: this.identity(), label: String(this.h.context().chatId || 'Current chat') }; }
     entryIn(books, id) {
         for (const [book, data] of Object.entries(books)) {
             const entry = Object.values(data.entries ?? {}).find(e => M.record(e)?.id === id);
@@ -209,22 +277,40 @@ export class Workbench {
             excludeRecursion: true, preventRecursion: true, sticky: 0, scanDepth: o.scanDepth,
             sceneArchivistArchive: book });
         const versions = Object.fromEntries([...(extra.derivedFrom || []), ...(extra.covers || [])].map(id => [id, M.hash(this.find(id)?.content || '')]));
-        e.sceneArchivist = M.makeRecord(e, { storyId: this.state().storyId, type }, { ...extra, derivedHashes: versions });
+        e.sceneArchivist = M.makeRecord(e, { storyId: this.state().storyId, type, source: this.source([]) }, { ...extra, originChat: this.identity(), derivedHashes: versions });
         return e;
     }
 
-    async review(changes, title = 'Review changes', note = '') {
+    async review(changes, title = 'Review changes', note = '', options = {}) {
         if (this.bulkRun) return true;
         const root = document.createElement('div'); root.className = 'sa-review';
         root.innerHTML = `<h3>${html(title)}</h3><p class="sa-note">${html(note || 'Review the result before it is saved. The old content remains in revision history.')}</p>`;
+        const job = this.state().job?.status === 'running' ? this.state().job : null, edits = job ? (job.reviewEdits ??= {}) : {};
         for (const c of changes) {
+            const key = Tools.proposalKey(c), saved = edits[key];
+            if (saved) { c.content = saved.content; c.include = saved.include; }
             const d = document.createElement('details'); d.open = changes.length <= 4;
-            d.innerHTML = `<summary><b>${html(c.title || 'Proposed result')}</b><span class="sa-badge">${M.tokens(c.before || '')} → ${M.tokens(c.content || '')} estimated tokens</span></summary><label>Proposed text<textarea class="text_pole" rows="9"></textarea></label><details><summary>Original text</summary><pre></pre></details>`;
+            d.innerHTML = `<summary>${options.partial ? '<input type="checkbox" data-review-include aria-label="Approve this result">' : ''}<b>${html(c.title || 'Proposed result')}</b><span class="sa-badge">${M.tokens(c.before || '')} → ${M.tokens(c.content || '')} estimated tokens</span></summary><label>Proposed text<textarea class="text_pole" rows="9"></textarea></label><details><summary>Highlighted changes</summary><div class="sa-diff" aria-label="Added and removed lines"></div></details><details><summary>Original text</summary><pre></pre></details>`;
             d.querySelector('textarea').value = c.content || ''; d.querySelector('pre').textContent = c.before || '(new record)';
+            const check = d.querySelector('[data-review-include]'); if (check) { check.checked = c.include !== false; check.addEventListener('click', e => e.stopPropagation()); }
+            const diff = d.querySelector('.sa-diff'); diff.innerHTML = Tools.diffHtml(c.before, c.content);
+            if (c.settingsAfter && JSON.stringify(c.settingsBefore) !== JSON.stringify(c.settingsAfter)) {
+                const settings = document.createElement('details'); settings.innerHTML = '<summary>Entry settings and processing receipts</summary><pre></pre>';
+                settings.querySelector('pre').textContent = JSON.stringify({ before: c.settingsBefore, after: c.settingsAfter }, null, 2); d.append(settings);
+            }
+            d.querySelector('textarea').addEventListener('input', e => { diff.innerHTML = Tools.diffHtml(c.before, e.target.value); });
             root.append(d); c.node = d;
         }
-        if (!(await this.h.confirm(root, { okButton: 'Save reviewed result', cancelButton: this.state().job?.status === 'running' ? 'Review later' : 'Cancel' }))) return false;
-        for (const c of changes) { c.content = c.node.querySelector('textarea').value.trim(); delete c.node; if (!c.content) throw new Error('A reviewed entry cannot be empty.'); }
+        const accepted = await this.h.confirm(root, { okButton: options.partial ? 'Save approved results' : 'Save reviewed result', cancelButton: job?.status === 'running' ? 'Review later' : 'Cancel' });
+        for (const c of changes) {
+            c.content = c.node.querySelector('textarea').value.trim(); c.include = c.node.querySelector('[data-review-include]')?.checked ?? true;
+            if (job) edits[Tools.proposalKey(c)] = { content: c.content, include: c.include };
+            delete c.node;
+        }
+        if (job) await this.persist();
+        if (!accepted) return false;
+        if (changes.some(c => c.include && !c.content)) throw new Error('An approved entry cannot be empty.');
+        if (options.partial && !changes.some(c => c.include)) throw new Error('Choose at least one result, or use Review later to retain all results.');
         return true;
     }
 
@@ -266,10 +352,12 @@ export class Workbench {
         this.panes.characters.insertAdjacentHTML('beforeend', card('🧩 Facts, knowledge and unfinished business', `<p class="sa-hint">Select source entries in Library. Extract who knows, suspects, believes incorrectly, is unaware, or is hiding something, plus living facts and open promises.</p><div class="sa-row">${button('extract', 'Extract from selected')}${button('newKnowledge', 'Add knowledge')}${button('newFact', 'Add fact')}${button('newThread', 'Add promise or thread')}</div><div id="sa-state-list"></div>`, false));
         this.panes.characters.insertAdjacentHTML('beforeend', card('📖 Dear diary, behave yourself', `<p class="sa-hint">Pick someone from your story and the day to write about. Optionally pick a lorebook that holds their personality. The diary uses only what that character knows by that day. Diaries are creative writing and stay out of memory injection by default.</p><label class="sa-field"><span>Character</span><select class="text_pole" data-sa-field="diaryCharacter"></select></label><label class="sa-field"><span>Day to write about</span><select class="text_pole" data-sa-field="diaryUnit"></select></label><label class="sa-field"><span>Personality lorebook, optional</span><select class="text_pole" data-sa-field="diaryBook"></select></label>${field('diaryName', 'Different name for their memories, only if needed')}${field('diaryDate', 'Diary date, only if the day has none')}<label class="sa-field"><span>Style note, optional</span><textarea class="text_pole" data-sa-field="diaryStyle" rows="3" placeholder="Private, candid, a little dramatic..."></textarea></label><div class="sa-row">${button('diary', '📖 Write their little secrets')}</div>`, false));
         this.panes.search.insertAdjacentHTML('afterbegin', card('🔎 Search, evidence and continuity', `<p class="sa-hint">Ask uses relevant records across this story’s books. Source buttons open the original details, even when a recap is loaded.</p><div class="sa-row"><input class="text_pole" data-sa-field="question" placeholder="Ask, or enter a claim to check" aria-label="Archive question or continuity claim">${button('ask', 'Ask the archive')}${button('continuity', 'Check this claim')}${button('continuityAll', 'Check recent continuity')}</div><div id="sa-evidence-results" aria-live="polite"></div>`));
-        this.panes.search.insertAdjacentHTML('beforeend', card('💰 Memory budget and loading reasons', `<div id="sa-budget-view"></div>`, false));
-        this.panes.settings.insertAdjacentHTML('afterbegin', card('🛠️ Story memory settings', `<div class="sa-grid">${this.optionField('budget', 'Total injected memory tokens', 'number')}${this.optionField('requestBudget', 'Maximum input tokens per side request', 'number')}${this.optionField('batchSize', 'Units per archive condensation or extraction batch', 'number')}${this.optionField('charactersPerBatch', 'Characters per memory audit request, up to 8', 'number')}<label class="sa-field"><span>Review bulk results</span><select class="text_pole" data-sa-option="reviewMode"><option value="end">Together at the end</option><option value="step">After each step</option></select></label></div><p class="sa-hint">Together at the end runs the whole job before one combined review. Requests stay within your input limit. Canceling keeps prepared results for Resume / review.</p><label class="checkbox_label"><input type="checkbox" data-sa-option="continuityAuto"><span>Check continuity after new replies, findings only</span></label><label class="checkbox_label"><input type="checkbox" data-sa-option="recapOnReturn"><span>Offer a dated recap when returning to this story</span></label>${this.optionField('recapAfterHours', 'Hours before offering a return recap', 'number')}<div id="sa-telemetry" class="sa-hint"></div>`));
+        this.panes.search.insertAdjacentHTML('beforeend', card('💰 Memory budget and loading reasons', `<div class="sa-row"><label>Show activation source<select class="text_pole" data-sa-field="activationFilter"><option value="">All sources</option><option value="keyword">Keyword</option><option value="native vector">Vector</option><option value="always on">Always On</option><option value="recall">AI Recall</option><option value="sticky">Sticky</option></select></label></div><div id="sa-budget-view"></div>`, false));
+        this.panes.settings.insertAdjacentHTML('afterbegin', card('🛠️ Story memory settings', `<div class="sa-grid">${this.optionField('budget', 'Total injected memory tokens', 'number')}${this.optionField('requestBudget', 'Maximum input tokens per side request', 'number')}${this.optionField('batchSize', 'Units per archive condensation or extraction batch', 'number')}${this.optionField('charactersPerBatch', 'Characters per memory audit request, up to 8', 'number')}<label class="sa-field"><span>Review bulk results</span><select class="text_pole" data-sa-option="reviewMode"><option value="end">Together at the end</option><option value="step">After each step</option></select></label></div><p class="sa-hint">Together at the end runs the whole job before one combined review. Requests stay within your input limit. Review later keeps prepared results for Resume / review.</p><label class="checkbox_label"><input type="checkbox" data-sa-option="continuityAuto"><span>Check continuity after new replies, findings only</span></label><label class="checkbox_label"><input type="checkbox" data-sa-option="recapOnReturn"><span>Offer a dated recap when returning to this story</span></label>${this.optionField('recapAfterHours', 'Hours before offering a return recap', 'number')}<div id="sa-telemetry" class="sa-hint"></div>`));
+        this.panes.settings.insertAdjacentHTML('beforeend', card('🔗 Archive sharing', `<p id="sa-sharing-state" class="sa-hint"></p><div class="sa-row">${button('sharing', 'Share this archive across chats')}</div>`, false));
         this.panes.settings.insertAdjacentHTML('beforeend', card('💾 Backups and workflow presets', `<p class="sa-hint">A story backup includes its archive, character memories, recaps, dependencies, revisions, jobs and workflow settings. Imports show a preview and create separate books. Connection profiles stay on your device.</p><div class="sa-row">${button('exportStory', 'Export complete story')}${button('importStory', 'Import or restore story')}${button('exportWorkflow', 'Export workflow preset')}${button('importWorkflow', 'Import workflow preset')}${button('importLog', 'Import a plain Scene Log')}</div><input data-sa-field="file" type="file" accept=".json,.md,.txt" hidden>`, false));
         this.panes.settings.insertAdjacentHTML('beforeend', card('🧭 Existing SillyTavern vectors', `<p class="sa-hint">Configure World Info vectors in SillyTavern’s native Vector Storage and each lorebook entry’s vector setting. Scene Archivist observes those searches without changing entry eligibility, query text, result limits, or similarity thresholds. The memory budget only trims the entries selected by World Info.</p>`, false));
+        mountTools(this);
         root.addEventListener('click', event => {
             const tab = event.target.closest('[data-sa-tab]'); if (tab) { this.showTab(tab.dataset.saTab); return; }
             const b = event.target.closest('[data-sa-action]');
@@ -291,8 +379,9 @@ export class Workbench {
                 this.options()[key] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
                 this.h.saveSettings();
             }
+            if (el.dataset.saField === 'activationFilter') this.renderBudget();
             if (el.dataset.saSelect) { el.checked ? this.selected.add(el.dataset.saSelect) : this.selected.delete(el.dataset.saSelect); this.renderDashboard(); }
-            if (el.matches('#sa-library-type, #sa-library-status')) this.renderLibrary();
+            if (el.matches('#sa-library-type, #sa-library-status, .sa-library-filter')) this.renderLibrary();
             if (el.dataset.saField === 'file' && el.files?.[0]) { this.readImport(el.files[0], this.importKind).catch(e => this.h.notify(e.message, 'error')); el.value = ''; }
         });
         root.querySelector('#sa-library-query').addEventListener('input', () => this.renderLibrary());
@@ -340,7 +429,7 @@ export class Workbench {
     async render() {
         if (this.bulkRun) return;
         if (!this.root) return;
-        this.renderDashboard(); this.renderLibrary(); this.renderJob(); this.renderBudget();
+        renderTools(this); this.renderDashboard(); this.renderLibrary(); this.renderJob(); this.renderBudget(); this.renderSharing();
         const pending = M.pendingMemoryUnits(this.entries), units = this.entries.filter(e => M.record(e)?.type === 'unit');
         this.root.querySelector('#sa-memory-coverage').textContent = `${pending.length} of ${units.length} source units need memory processing. Coverage is based on saved content receipts, not the old “through” counter.`;
         const candidates = M.condensationCandidates(this.entries, this.options());
@@ -373,15 +462,18 @@ export class Workbench {
         this.root.querySelector('#sa-dashboard').innerHTML = `<span><b>${count('unit')}</b> ${count('unit') === 1 ? 'unit' : 'units'}</span><span><b>${count('recap')}</b> ${count('recap') === 1 ? 'recap' : 'recaps'}</span><span><b>${n}</b> ${n === 1 ? 'memory' : 'memories'}</span><span><b>${this.entries.filter(e => M.record(e)?.status === 'stale').length}</b> need review</span><span><b>${this.selected.size}</b> selected</span>`;
     }
     filtered() {
-        const query = this.root?.querySelector('#sa-library-query')?.value || '';
-        return M.search(this.entries, query, { type: this.root?.querySelector('#sa-library-type')?.value, status: this.root?.querySelector('#sa-library-status')?.value });
+        const value = key => this.root?.querySelector('#sa-library-' + key)?.value || '';
+        const number = key => value(key) === '' ? null : Number(value(key));
+        const entries = Tools.filterEntries(this.entries, { chat: value('chat'), protection: value('protection'), dateFrom: value('dateFrom'), dateTo: value('dateTo') });
+        return M.search(entries, value('query'), { type: value('type'), status: value('status'), subject: value('subject'), from: number('from'), to: number('to') });
     }
+
     renderLibrary() {
         const container = this.root?.querySelector('#sa-library-results'); if (!container) return;
         const rows = this.filtered();
         container.innerHTML = `<p class="sa-hint">${rows.length} results. Dates, source messages, revisions and protection flags are inside Inspect.</p>` + rows.slice(0, 200).map(({ entry: e }) => {
             const r = M.record(e), protection = Object.entries(r.protection || {}).filter(([, v]) => v).map(([k]) => k).join(', ');
-            return `<article class="sa-result"><div class="sa-result-head"><label><input type="checkbox" data-sa-select="${html(r.id)}" ${this.selected.has(r.id) ? 'checked' : ''}> <b>${html(M.title(e))}</b></label><span class="sa-badge">${html(r.type)} · ${html(r.status)}</span></div><p class="sa-hint">${html(e.world)} · ~${M.tokens(e.content)} tokens${protection ? ' · ' + html(protection) : ''}</p><p>${html(String(e.content).trim().split('\n').filter(l => /^[-*] /.test(l)).slice(0, 2).join(' ').slice(0, 240))}</p><div class="sa-row">${button('inspect', 'Inspect / edit', `data-id="${r.id}"`)}${button('sources', 'Sources', `data-id="${r.id}"`)}${button('loadDetail', 'Load detail next reply', `data-id="${r.id}"`)}${r.status === 'stale' ? button('regenerate', 'Rebuild and review', `data-id="${r.id}"`) : ''}</div></article>`;
+            return `<article class="sa-result"><div class="sa-result-head"><label><input type="checkbox" data-sa-select="${html(r.id)}" ${this.selected.has(r.id) ? 'checked' : ''}> <b>${html(M.title(e))}</b></label><span class="sa-badge">${html(r.type)} · ${html(r.status)}</span></div><p class="sa-hint">${html(e.world)} · ${html(Tools.sourceLabel(e))} · ~${M.tokens(e.content)} tokens${protection ? ' · ' + html(protection) : ''}</p><p>${html(String(e.content).trim().split('\n').filter(l => /^[-*] /.test(l)).slice(0, 2).join(' ').slice(0, 240))}</p><div class="sa-row">${button('inspect', 'Inspect / edit', `data-id="${r.id}"`)}${button('sources', 'Sources', `data-id="${r.id}"`)}${button('loadDetail', 'Load detail next reply', `data-id="${r.id}"`)}${r.status === 'stale' ? button('regenerate', 'Rebuild and review', `data-id="${r.id}"`) : ''}</div></article>`;
         }).join('') + (rows.length > 200 ? '<p class="sa-hint">Showing 200 results. Narrow the search to find older records.</p>' : '');
     }
     renderJob() {
@@ -390,7 +482,7 @@ export class Workbench {
         if (!j) { el.innerHTML = ''; return; }
         const active = !['done', 'canceled'].includes(j.status);
         if (!active) { el.innerHTML = `<p class="sa-hint">Last job: ${html(j.kind)} · ${html(j.status)} · ${j.cursor}/${j.steps.length} steps saved.</p>`; return; }
-        const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared · ${j.phase === 'review' ? 'ready for one combined review' : j.phase === 'saving' ? 'saving approved changes' : 'story books unchanged until approval'}` : `${j.cursor}/${j.steps.length} steps saved`;
+        const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared${j.approvedRecords?.length ? ` · ${j.approvedRecords.length} approved records saved` : ''} · ${j.phase === 'review' ? 'ready for one combined review' : j.phase === 'saving' ? 'saving approved changes' : j.approvedRecords?.length ? 'remaining results await approval' : 'story books unchanged until approval'}` : `${j.cursor}/${j.steps.length} steps saved`;
         el.innerHTML = `<div class="sa-job"><b>${html(j.kind)}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}${active ? `<div class="sa-row">${button('jobResume', j.status === 'failed' ? 'Retry / review saved result' : 'Resume / review')}${button('jobPause', 'Pause after this request')}${button('jobCancel', 'Discard unfinished job')}</div><p class="sa-hint">Discarding ends this job and makes its unapproved results unavailable. Records already written to your lorebooks are kept. Use Resume / review to keep working with prepared results.</p>` : ''}</div>`;
     }
     renderBudget() {
@@ -401,12 +493,13 @@ export class Workbench {
             available: typeof globalThis.vectors_rearrangeChat === 'function', selected: selectedVectors });
         const heading = `<p class="sa-vector-status" role="status"><b>Vector search:</b> ${html(status)}</p>`;
         if (!b) { el.innerHTML = heading + '<p>Send a normal chat reply to see which memories were selected.</p>'; return; }
-        const row = c => `<div class="sa-retrieval-entry"><div class="sa-viewrow"><b>${html(M.title(c.entry))}</b> · ${c.cost} tokens<br>${html(entryReasons(c))}${this.activationKnown ? `<br><span>${this.activatedIds.has(c.id) ? 'World Info activation confirmed' : 'Not activated by World Info'}</span>` : ''}</div></div>`;
+        const filter = this.value('activationFilter'), visible = b.accepted.filter(c => !filter || (c.reasons || [c.reason]).includes(filter));
+        const row = c => `<div class="sa-retrieval-entry"><div class="sa-viewrow"><b>${html(M.title(c.entry))}</b> · ${c.cost} tokens<br>${html(entryReasons(c))}${this.activationKnown ? `<br><span>${this.activatedIds.has(c.id) ? 'World Info activation confirmed' : 'Not activated by World Info'}</span>` : ''}</div><div class="sa-row">${button('inspect', 'Inspect', `data-id="${html(c.id)}"`)}</div></div>`;
         const selected = new Set(b.accepted.map(c => c.id));
         const extra = [...this.activatedIds].filter(id => !selected.has(id));
         const confirmation = this.activationKnown ? `<p>World Info activation confirmed for ${b.accepted.filter(c => this.activatedIds.has(c.id)).length}/${b.accepted.length} selected memories.${extra.length ? ` ST also activated ${extra.length} other story entries outside this selection; check native World Info activation settings.` : ''}</p>` : '<p>These are selection decisions. World Info activation has not been confirmed yet.</p>';
         const mode = b.enforced === false ? '<p class="sa-warnline">This SillyTavern version does not expose the scan hook needed for the archive cap. Native World Info limits apply; this report observes activations only.</p>' : '<p>SillyTavern selected these entries using its own activation rules. The archive budget only trims that selection.</p>';
-        el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens retained.</p>` + mode + confirmation + b.accepted.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Activation source: ${html(entryReasons(c))}` : ''}</div>`).join('') + '</details>';
+        el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens retained.</p>` + mode + confirmation + `<p class="sa-hint">Showing ${visible.length} of ${b.accepted.length} retained entries.</p>` + visible.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Activation source: ${html(entryReasons(c))}` : ''}</div>`).join('') + '</details>';
     }
 
     findRetrievedEntry(entry) {
@@ -439,7 +532,7 @@ export class Workbench {
         const source = this.find(id); if (!source) throw new Error('That record is no longer available.');
         const r = M.copy(M.record(source)), base = M.bookHash(this.books[source.world]);
         const root = document.createElement('div'); root.className = 'sa-review';
-        root.innerHTML = `<h3>${html(M.title(source))}</h3><p class="sa-note">${html(r.id)} · ${html(source.world)}</p><label>Content<textarea class="text_pole" data-edit="content" rows="14"></textarea></label><div class="sa-grid"><label class="sa-field"><span>Status</span><select class="text_pole" data-edit="status">${M.STATUSES.map(s => `<option ${r.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>${field('editSubject', 'Person or entity', r.subject)}${field('editDates', 'Event dates, separated by semicolons', (r.dates || []).join('; '))}${field('editPeople', 'People, separated by semicolons', (r.people || []).join('; '))}${field('editLocations', 'Locations, separated by semicolons', (r.locations || []).join('; '))}${field('editAliases', 'Proven aliases, separated by semicolons', (r.aliases || []).join('; '))}${field('editLearned', 'Date learned, separate from event date', r.learnedAt)}${field('editHow', 'How learned', r.howLearned)}${field('editDue', 'Promise or deadline', r.due)}<label class="sa-field"><span>Knowledge status</span><select class="text_pole" data-edit="knowledge">${M.KNOWLEDGE.map(s => `<option ${r.knowledge === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div><div class="sa-protections">${[['detailed', 'Keep detailed'], ['exact', 'Preserve exact wording'], ['locked', 'Author locked'], ['pinned', 'Prioritize in memory budget']].map(([k, l]) => `<label class="checkbox_label"><input type="checkbox" data-protect="${k}" ${r.protection?.[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}<label class="checkbox_label"><input type="checkbox" data-edit="disabled" ${source.disable ? 'checked' : ''}><span>Exclude this record from injection</span></label></div><label>Correction note<input class="text_pole" data-edit="reason" placeholder="What changed and why"></label><details><summary>Sources and dependencies</summary><pre data-edit="provenance"></pre></details><details><summary>${r.revisions.length} saved revisions</summary><div data-edit="revisions"></div></details>`;
+        root.innerHTML = `<h3>${html(M.title(source))}</h3><p class="sa-note">${html(r.id)} · ${html(source.world)}</p><label>Content<textarea class="text_pole" data-edit="content" rows="14"></textarea></label><div class="sa-grid"><label class="sa-field"><span>Status</span><select class="text_pole" data-edit="status">${M.STATUSES.map(s => `<option ${r.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label>${field('editSubject', 'Person or entity', r.subject)}${field('editDates', 'Event dates, separated by semicolons', (r.dates || []).join('; '))}${field('editPeople', 'People, separated by semicolons', (r.people || []).join('; '))}${field('editLocations', 'Locations, separated by semicolons', (r.locations || []).join('; '))}${field('editAliases', 'Proven aliases, separated by semicolons', (r.aliases || []).join('; '))}${field('editLearned', 'Date learned, separate from event date', r.learnedAt)}${field('editHow', 'How learned', r.howLearned)}${field('editDue', 'Promise or deadline', r.due)}<label class="sa-field"><span>Knowledge status</span><select class="text_pole" data-edit="knowledge">${M.KNOWLEDGE.map(s => `<option ${r.knowledge === s ? 'selected' : ''}>${s}</option>`).join('')}</select></label></div><div class="sa-protections">${[['detailed', 'Keep detailed'], ['exact', 'Preserve exact wording'], ['locked', 'Author locked'], ['pinned', 'Prioritize in memory budget']].map(([k, l]) => `<label class="checkbox_label"><input type="checkbox" data-protect="${k}" ${r.protection?.[k] ? 'checked' : ''}><span>${l}</span></label>`).join('')}<label class="checkbox_label"><input type="checkbox" data-edit="disabled" ${source.disable ? 'checked' : ''}><span>Exclude this record from injection</span></label></div>${['memory', 'knowledge'].includes(r.type) ? '<label class="checkbox_label"><input type="checkbox" data-edit="preserveKnowledge"><span>Preserve previous dated knowledge as a historical state</span></label><p class="sa-hint">Use this only for an in-story change of knowledge, with a later new learning date. Leave it off when correcting a mistake or retcon; a text or learning-state correction clears the dated historical states, while editing revisions remain.</p>' : ''}<label>Correction note<input class="text_pole" data-edit="reason" placeholder="What changed and why"></label><details><summary>Sources and dependencies</summary><pre data-edit="provenance"></pre></details><details><summary>${r.revisions.length} saved revisions</summary><div data-edit="revisions"></div></details>`;
         root.querySelector('[data-edit=content]').value = source.content;
         root.querySelector('[data-edit=provenance]').textContent = JSON.stringify({ source: r.source, derivedFrom: r.derivedFrom, covers: r.covers, staleReason: r.staleReason, memoryReceipt: r.memoryReceipt }, null, 2);
         const revisions = root.querySelector('[data-edit=revisions]');
@@ -462,6 +555,8 @@ export class Workbench {
                 patch.body = first ? first.replace(/^[-*] /, '').replace(r.type === 'knowledge' ? /^.*?(?:knows and is hiding|knows|suspects, unconfirmed|believes incorrectly|is unaware of):\s*/ : /^(?!)$/, '') : content;
             }
             if (r.protection.locked && patch.protection.locked && (content !== source.content || M.hash({ ...r, revisions: [] }) !== M.hash({ ...r, ...patch, revisions: [] }))) throw new Error('Untick Author locked before changing this record.');
+            if (root.querySelector('[data-edit=preserveKnowledge]')?.checked) patch.knowledgeHistory = Tools.preserveKnowledge(source, patch);
+            else if (['memory', 'knowledge'].includes(r.type) && (content !== source.content || patch.learnedAt !== r.learnedAt || patch.knowledge !== r.knowledge)) patch.knowledgeHistory = [];
             M.revise(item.entry, content, root.querySelector('[data-edit=reason]').value || 'User correction', patch);
             item.entry.disable = root.querySelector('[data-edit=disabled]').checked;
             M.invalidate(all, [id], 'A source record was corrected');
@@ -477,11 +572,11 @@ export class Workbench {
         const sources = M.unique([id, ...(M.record(source).derivedFrom ?? []), ...M.leaves(id, this.entries)]).map(i => this.find(i)).filter(Boolean);
         for (const e of sources) {
             const r = M.record(e), d = document.createElement('details'); d.open = sources.length < 3;
-            d.innerHTML = `<summary>${html(M.title(e))} · ${html(r.id)}</summary><pre></pre>`;
+            d.innerHTML = `<summary>${html(M.title(e))} · ${html(r.source?.label || r.source?.actualChatId || r.source?.chatId || 'Unknown source chat')} · ${html(r.id)}</summary><pre></pre>`;
             d.querySelector('pre').textContent = e.content; root.append(d);
             for (const range of r.source?.ranges ?? []) {
                 const evidence = document.createElement('details'); evidence.innerHTML = `<summary>Original messages ${range.from} to ${range.to}</summary><pre></pre>`;
-                const valid = M.checkSource(r.source, this.state().storyId, this.h.context().chat || []);
+                const valid = M.checkSource(r.source, this.sourceId(), this.h.context().chat || []);
                 evidence.querySelector('pre').textContent = valid.foreign ? 'These messages belong to another source chat. Open that chat to inspect them.' :
                     (range.messages ?? []).map(m => {
                         const msg = this.h.context().chat?.[m.index];
@@ -498,15 +593,15 @@ export class Workbench {
         const st = this.state(), chat = this.h.context().chat || [], bases = this.bases(), changed = [];
         for (const e of this.entries) {
             const r = M.record(e); if (!r || !r.source?.ranges?.length) continue;
-            const result = M.checkSource(r.source, st.storyId, chat);
-            if (!result.valid && !result.foreign && r.status !== 'stale') {
+            const result = M.checkSource(r.source, this.sourceId(), chat);
+            if (!result.valid && !result.foreign && r.status === 'current') {
                 r.status = 'stale'; r.staleReason = `Original messages changed or disappeared: ${result.changes.join(', ')}. Rebuild that source range or accept a correction.`;
                 changed.push(r.id);
             }
         }
         for (const e of this.entries) {
             const r = M.record(e);
-            if (!r || r.status === 'stale') continue;
+            if (!r || r.status !== 'current') continue;
             if (Object.entries(r.derivedHashes || {}).some(([id, version]) => !this.find(id) || M.hash(this.find(id).content) !== version)) {
                 r.status = 'stale'; r.staleReason = 'A source record changed. Review and regenerate this derived record.'; changed.push(r.id);
             }
@@ -520,7 +615,7 @@ export class Workbench {
             await this.h.save(name, data);
         }
         // Drop only invalidated ledger ranges. Their messages become pending for a targeted rebuild.
-        const affected = this.entries.filter(e => changed.includes(M.record(e).id)).flatMap(e => M.record(e).source.ranges);
+        const affected = this.entries.filter(e => changed.includes(M.record(e).id) && M.record(e).source?.chatId === this.sourceId()).flatMap(e => M.record(e).source.ranges || []);
         const meta = this.h.meta();
         meta.ranges = (meta.ranges ?? []).filter(r => !affected.some(a => r.from <= a.to && r.to >= a.from));
         meta.archivedThrough = Core.coverageThrough(meta); await this.persist();
@@ -602,7 +697,10 @@ export class Workbench {
         const followups = kind === 'archive' ? [...(this.state().followups || [])] : [];
         const pipeline = options.auditAfter ? ['audit'] : followups.flatMap(s => s === 'memories' ? ['memories', 'audit'] : [s]);
         return this.withLock(async () => {
-            await this.queue.create(kind, steps, { ...options, bulk, pipeline, hasFollowups: pipeline.length > 0, archive: this.h.settings().lorebook, storyId: this.state().storyId });
+            for (const p of steps) if (p.source && M.checkSource(p.source, p.source.chatId, this.h.context().chat || []).valid) Object.assign(p.source, { chatId: this.sourceId(), actualChatId: this.identity(), label: String(this.h.context().chatId || '') });
+            const requestLimit = await previewJob(this, kind, steps, options);
+            if (requestLimit == null) return;
+            await this.queue.create(kind, steps, { ...options, requestLimit, bulk, pipeline, hasFollowups: pipeline.length > 0, archive: this.h.settings().lorebook, storyId: this.state().storyId });
             if (bulk && kind === 'archive') { this.state().followups = []; await this.persist(); }
             return this.queue.resume();
         });
@@ -717,6 +815,7 @@ export class Workbench {
         const sourceIds = M.unique([...(r.derivedFrom || []), ...(r.covers || [])]);
         const inputs = sourceIds.map(i => this.find(i)).filter(Boolean);
         if (r.type !== 'unit' && (!inputs.length || inputs.some(e => M.record(e).status === 'stale'))) throw new Error('Correct or rebuild the stale source entries first.');
+        if (r.type === 'unit' && r.source?.chatId !== this.sourceId()) throw new Error('Open the original source chat to rebuild this unit, or correct it manually in Inspect.');
         if (r.type === 'unit' && !r.source?.ranges?.length) throw new Error('This legacy entry has no source messages. Use Inspect to correct it, or summarize an exact transcript range.');
         return this.createJob('rebuild', [this.inputStep(inputs, { target: id, targetHash: M.hash(target.content), targetType: r.type })]);
     }
@@ -862,13 +961,21 @@ export class Workbench {
     async perform(job, step) {
         await this.loadBooks(); this.h.assert();
         if (job.options.archive && job.options.archive !== this.h.settings().lorebook) throw new Error('Select this job’s original archive before resuming it.');
+        if (step.payload.repair && step.output == null) {
+            const target = this.find(step.payload.target), r = M.record(target);
+            if (!r || r.protection?.locked || r.protection?.exact || r.protection?.detailed) throw new Error('A repair target is missing or protected. Review the repair plan again.');
+            const ids = M.unique([...(r.derivedFrom || []), ...(r.covers || [])]), inputs = ids.map(id => this.find(id));
+            if (inputs.some(e => !e || M.record(e).status === 'stale')) throw new Error('A source still needs correction before this record can be repaired.');
+            Object.assign(step.payload, { ids, hashes: Object.fromEntries(inputs.map(e => [M.record(e).id, M.hash(e.content)])), targetHash: M.hash(target.content) }); await this.persist();
+        }
         const kind = step.payload.kind || job.kind;
         if (kind === 'archive') {
-            if (!M.checkSource(step.payload.source, this.state().storyId, this.h.context().chat || []).valid) throw new Error('The selected transcript changed. Cancel this job and select the current range.');
+            if (!M.checkSource(step.payload.source, this.sourceId(), this.h.context().chat || []).valid) throw new Error('The selected transcript changed. Cancel this job and select the current range.');
             const s = this.h.settings(), data = this.books[s.lorebook] || { entries: {} };
             const req = Core.buildArchivistRequest(s.prompt, Core.currentLogText(data), Core.buildTranscript(step.payload.messages), step.payload, s.unit);
+            if (data.sceneArchivistStory?.shared) req.system += `\nThis is one shared archive across chats. Its highest existing unit is ${Core.managedSummary(data).lastDay}; continue new units from ${Core.managedSummary(data).lastDay + 1}. Do not restart numbering for this chat. Preserve real story dates; use retrospective entries for earlier events.`;
             // The existing chat/transcript transport is supplied by index.js unchanged.
-            return { raw: await this.h.archiveModel(req, step.payload), at: M.now() };
+            return { raw: await this.call(req, 'Archive summary', step.payload), at: M.now() };
         }
         const inputs = this.inputs(step);
         if (kind === 'trackers') {
@@ -883,10 +990,11 @@ export class Workbench {
             const target = this.find(step.payload.target), r = M.record(target);
             if (!target || M.hash(target.content) !== step.payload.targetHash) throw new Error('The record to rebuild changed. Choose it again.');
             if (r.type === 'unit') {
+                if (r.source?.chatId !== this.sourceId()) throw new Error('Open the original chat to rebuild this source unit.');
                 const ranges = r.source.ranges.map(range => M.messageRange(this.h.context().chat || [], range.from, range.to));
                 const request = Core.buildArchivistRequest(this.h.settings().prompt, '', ranges.map(range => Core.buildTranscript(range.messages)).join('\n\n'), { from: ranges[0].from, to: ranges.at(-1).to }, r.unit?.label || this.h.settings().unit);
                 request.system += `\nRebuild only the existing ${r.unit?.label || 'unit'} ${r.unit?.number ?? '?'}. Keep its unit number. Use corrected transcript evidence; do not repeat unrelated units.`;
-                const raw = await this.h.archiveModel(request, { explicit: true });
+                const raw = await this.call(request, 'Rebuild source unit', { explicit: true });
                 const parsed = Core.parseArchivistOutput(raw), match = parsed.entries.find(e => e.dayNum === r.unit?.number);
                 if (!match) throw new Error('The rebuilt result did not contain the requested unit.');
                 return { content: match.content, source: this.source(ranges) };
@@ -956,6 +1064,7 @@ export class Workbench {
         await this.loadBooks(); this.h.assert();
         if (job.options.archive && job.options.archive !== this.h.settings().lorebook) throw new Error('Select this job’s original archive before resuming it.');
         const kind = step.payload.kind || job.kind;
+        if (!this.bulkRun && job.pendingWrite?.stepId === step.id) return this.finishStepWrite(job.pendingWrite);
         if (this.state().applied?.includes(step.id)) return true;
         const archiveBook = this.h.settings().lorebook;
         if (kind === 'archive' && this.books[archiveBook]?.sceneArchivistReceipts?.includes(step.id)) {
@@ -966,7 +1075,7 @@ export class Workbench {
             this.state().applied = M.unique([...(this.state().applied ?? []), step.id]); return true;
         }
         if (kind === 'archive') {
-            if (!M.checkSource(step.payload.source, this.state().storyId, this.h.context().chat || []).valid) throw new Error('The selected transcript changed while the result was waiting for review.');
+            if (!M.checkSource(step.payload.source, this.sourceId(), this.h.context().chat || []).valid) throw new Error('The selected transcript changed while the result was waiting for review.');
             const res = this.bulkRun ? await this.bulkRun.acceptArchive(step.output.raw, step.payload.source, step.id) : await this.h.acceptArchive(step.output.raw, step.payload.source, step.id);
             if (!res) return false;
             await this.h.afterArchive({ from: step.payload.from, to: step.payload.to, stepId: step.id }, res.days, job.options.hide);
@@ -1008,7 +1117,7 @@ export class Workbench {
                 const levels = inputs.map(e => Number(M.record(e).level) || 0);
                 this.add(books, 'recap', changes[0].content, { covers: inputs.map(e => M.record(e).id), derivedFrom: inputs.map(e => M.record(e).id), level: Math.max(...levels) + 1,
                     dates: M.unique(inputs.flatMap(e => M.record(e).dates || [])), people: M.unique(inputs.flatMap(e => M.record(e).people || [])), locations: M.unique(inputs.flatMap(e => M.record(e).locations || [])),
-                    source: { chatId: this.state().storyId, ranges: [] } }, true);
+                    source: this.source([]) }, true);
             }
             await this.write(books, bases, 'Archive condensation', step.id); return true;
         }
@@ -1078,7 +1187,11 @@ export class Workbench {
                 const stale = Object.values(own.entries || {}).find(e => Core.classifyEntry(e)?.type === 'memory' && M.record(e)?.status === 'stale' && names.includes(String(M.record(e).subject || Core.classifyEntry(e).name).toLocaleLowerCase()));
                 if (stale) throw new Error(`${char.name}'s existing memory has stale evidence. Rebuild it in Library before accepting these new memories. This response is saved for retry.`);
             }
-            const items = Core.planMemories(own, list, { cap: s.memoryCap, unit: s.unit, dates: result.dateMap });
+            const freshChars = list.filter(char => !Object.values(own.entries || {}).some(e => {
+                const r = M.record(e), names = [char.name, ...(char.aliases || [])].map(n => n.toLocaleLowerCase());
+                return r?.type === 'memory' && r.status === 'current' && names.includes(String(r.subject || '').toLocaleLowerCase()) && inputs.length && inputs.every(input => r.derivedHashes?.[M.record(input).id] === M.hash(input.content));
+            }));
+            const items = Core.planMemories(own, freshChars, { cap: s.memoryCap, unit: s.unit, dates: result.dateMap });
             for (const p of items) {
                 const existing = p.uid != null ? data.entries[p.uid] : null;
                 const additions = Core.parseMemoryDoc('## ► Memories — X\n' + p.bullets.map(x => '- ' + x).join('\n'));
@@ -1094,8 +1207,8 @@ export class Workbench {
         for (const c of plans) {
             const data = books[c.book], p = c.p, existing = p.uid != null ? data.entries[p.uid] : null;
             if (existing) {
-                if (!M.record(existing)) existing.sceneArchivist = M.makeRecord(existing, { storyId: this.state().storyId, type: 'memory' }, { subject: p.name });
-                M.revise(existing, c.content, 'New character memories');
+                if (!M.record(existing)) existing.sceneArchivist = M.makeRecord(existing, { storyId: this.state().storyId, type: 'memory', source: this.source([]) }, { subject: p.name });
+                M.revise(existing, c.content, 'New character memories', { learnedAt: '', howLearned: '' });
                 existing.key = M.unique([...(existing.key || []), ...p.keys]);
                 M.record(existing).derivedFrom = M.unique([...(M.record(existing).derivedFrom || []), ...inputs.map(e => M.record(e).id)]);
                 M.record(existing).derivedHashes = { ...(M.record(existing).derivedHashes || {}), ...Object.fromEntries(inputs.map(e => [M.record(e).id, M.hash(e.content)])) };
@@ -1103,7 +1216,7 @@ export class Workbench {
                 const e = this.h.makeEntry(c.book, data);
                 const o = this.h.options();
                 Object.assign(e, { content: c.content, comment: `🧠| Memories · ${p.name}`, key: p.keys, keysecondary: [], constant: s.memoryTarget === 'character', position: ({ outlet: 7, before: 0, after: 1, depth: 4 })[o.delivery] ?? 4, outletName: o.delivery === 'outlet' ? o.outlet : '', depth: o.depth, role: o.role, ignoreBudget: true, disable: false, order: 5000, excludeRecursion: true, preventRecursion: true, selective: true, probability: 100 });
-                e.sceneArchivist = M.makeRecord(e, { storyId: this.state().storyId, type: 'memory' }, { subject: p.name, aliases: p.aliases, derivedFrom: inputs.map(e => M.record(e).id), derivedHashes: Object.fromEntries(inputs.map(e => [M.record(e).id, M.hash(e.content)])) });
+                e.sceneArchivist = M.makeRecord(e, { storyId: this.state().storyId, type: 'memory', source: this.source([]) }, { subject: p.name, aliases: p.aliases, derivedFrom: inputs.map(e => M.record(e).id), derivedHashes: Object.fromEntries(inputs.map(e => [M.record(e).id, M.hash(e.content)])) });
             }
             for (const e of Object.values(data.entries)) if (Core.classifyEntry(e)?.type === 'memory' && M.record(e)?.subject === p.name) e.sceneArchivistArchive = s.lorebook;
             this.h.register(s.lorebook, c.book, s.memoryTarget === 'character' ? 'character' : c.book === s.lorebook ? 'archive' : 'separate');
@@ -1353,48 +1466,55 @@ export class Workbench {
             if (!(await this.h.confirm(root))) return;
             Object.assign(this.h.settings(), next); Core.registerUnits([next.unit, ...(next.promptLibrary || []).map(p => p.unit)]); this.h.saveSettings(); this.syncOptions(); this.h.rebindSettings(); return;
         }
+        if (this.liveState().job && !['done', 'canceled'].includes(this.liveState().job.status)) throw new Error('Finish or discard the unfinished job before restoring a different story. Export a complete backup to keep its draft.');
         const bundle = M.parseBundle(text), s = this.h.settings(), mapping = {}, existing = this.h.context().getWorldInfoNames();
         const names = Object.keys(bundle.books), oldArchive = bundle.metadata?.config?.lorebook || names[0];
         for (const old of names) {
             let name = old, i = 2; while (existing.includes(name) || Object.values(mapping).includes(name)) name = `${old.slice(0, 85)} (restored ${i++})`; mapping[old] = name;
         }
         const root = document.createElement('div'); root.className = 'sa-review';
-        root.innerHTML = `<h3>Restore a complete story</h3><p>${names.length} books, ${Object.values(bundle.books).reduce((n, d) => n + Object.keys(d.entries).length, 0)} entries. Existing books remain available. The restored archive will be selected for this chat.</p><pre></pre><label class="checkbox_label"><input type="checkbox" data-import-settings><span>Also apply the saved workflow settings</span></label>`;
+        root.innerHTML = `<h3>Restore a complete story</h3><p>${names.length} books, ${Object.values(bundle.books).reduce((n, d) => n + Object.keys(d.entries).length, 0)} entries. Existing books remain available. The restored archive will be private and selected for this chat. Unfinished imported drafts are preserved in backup metadata; they are not replayed against renamed books.</p><pre></pre><label class="checkbox_label"><input type="checkbox" data-import-settings><span>Also apply the saved workflow settings</span></label>`;
         root.querySelector('pre').textContent = Object.entries(mapping).map(([a, b]) => `${a} → ${b}`).join('\n');
         if (!(await this.h.confirm(root, { okButton: 'Create restored books' }))) return;
         await this.withLock(async () => {
-            const newId = M.uid(), dataBooks = M.copy(bundle.books), importedIds = new Set();
+            const newId = M.uid(), newSource = M.uid(), dataBooks = M.copy(bundle.books);
+            const importedState = bundle.metadata?.workbench || {}, originalSource = importedState.sourceId || importedState.storyId;
+            const ownRanges = [];
             for (const [old, data] of Object.entries(dataBooks)) {
                 for (const e of Object.values(data.entries)) {
                     e.sceneArchivistArchive = mapping[oldArchive]; const r = M.record(e); if (!r) continue;
-                    importedIds.add(r.id); const oldStory = r.storyId; r.storyId = newId;
+                    r.storyId = newId;
                     const source = r.source || { ranges: [] };
                     const matches = (source.ranges || []).every(range => (range.messages || []).every(m => this.h.context().chat?.[m.index] && M.messageHash(this.h.context().chat[m.index]) === m.hash));
-                    if (matches && source.chatId === oldStory) source.chatId = newId;
+                    if (matches && source.chatId === originalSource) {
+                        ownRanges.push(...(source.ranges || []));
+                        Object.assign(source, { chatId: newSource, actualChatId: this.identity(), label: String(this.h.context().chatId || '') });
+                    }
                     r.source = source;
                 }
+                if (data.sceneArchivistStory) data.sceneArchivistStory = { schema: 1, id: newId, shared: false, books: Object.fromEntries(Object.entries(mapping).map(([a, b]) => [b, a === oldArchive ? 'archive' : 'separate'])) };
                 await this.h.createBook(mapping[old]); await this.h.save(mapping[old], data);
             }
             s.lorebook = mapping[oldArchive]; s.memoryBook = mapping[bundle.metadata?.config?.memoryBook || `${oldArchive} Memories`.slice(0, 80)] || '';
             if (['separate', 'archive', 'character'].includes(bundle.metadata?.config?.memoryTarget)) s.memoryTarget = bundle.metadata.config.memoryTarget;
             for (const name of Object.values(mapping)) this.h.register(s.lorebook, name, name === s.lorebook ? 'archive' : 'separate');
-            const state = this.state(); state.storyId = newId; state.originChat = this.identity(); state.restoredFrom = bundle.created;
+            const state = this.state(); state.storyId = newId; state.sourceId = newSource; delete state.sharedArchive; state.originChat = this.identity(); state.restoredFrom = bundle.created;
             state.findings = M.copy(bundle.metadata?.workbench?.findings || []); state.applied = [];
-            if (bundle.metadata?.workbench?.job && !['done', 'canceled'].includes(bundle.metadata.workbench.job.status)) {
-                state.job = M.copy(bundle.metadata.workbench.job); state.job.status = 'paused';
-                state.job.options.archive = s.lorebook; state.job.options.storyId = newId;
-                state.job.error = 'Restored job. Sources will be checked before it resumes.';
-                for (const step of state.job.steps) if (step.payload.source?.chatId) step.payload.source.chatId = newId;
-            } else delete state.job;
+            if (importedState.job && !['done', 'canceled'].includes(importedState.job.status)) {
+                // A recovered draft refers to original books and save receipts. Keep it for export,
+                // but never replay those writes against renamed books or a different transcript.
+                (state.restoredDrafts ||= []).push({ at: M.now(), books: mapping, job: M.copy(importedState.job) });
+            }
+            delete state.job;
             const ranges = bundle.metadata?.ranges || [];
-            const allSourceRanges = Object.values(dataBooks).flatMap(d => Object.values(d.entries).flatMap(e => M.record(e)?.source?.ranges || []));
+            const allSourceRanges = ownRanges;
             this.h.meta().ranges = ranges.filter(range => allSourceRanges.some(r => r.from <= range.from && r.to >= range.to && (r.messages || []).every(m => this.h.context().chat?.[m.index] && M.messageHash(this.h.context().chat[m.index]) === m.hash)));
             this.h.meta().archivedThrough = Core.coverageThrough(this.h.meta());
             delete this.h.meta().undo;
             if (root.querySelector('[data-import-settings]').checked) Object.assign(s, M.workflow(bundle.workflow));
             Core.registerUnits([s.unit, ...(s.promptLibrary || []).map(p => p.unit)]); this.h.saveSettings();
             await this.h.attach(s.lorebook); await this.persist(); await this.indexBooks(); await this.render(); this.syncOptions(); this.h.rebindSettings();
-            this.h.notify('Story restored into separate books.', 'success');
+            this.h.notify('Story restored into separate private books.' + (state.restoredDrafts?.length ? ' Unfinished imported drafts are retained in backup metadata for export; start a new job against these restored books.' : ''), 'success');
         });
     }
 
@@ -1426,7 +1546,9 @@ export class Workbench {
     }
 
     async dispatch(action, el) {
+        if (await dispatchTool(this, action, el)) return;
         const id = el?.dataset?.id;
+        if (action === 'sharing') return this.setShared(!this.books[this.h.settings().lorebook]?.sceneArchivistStory?.shared);
         if (action === 'refresh') return this.refresh();
         if (action === 'selectVisible') { this.filtered().forEach(x => this.selected.add(M.record(x.entry).id)); this.renderLibrary(); return this.renderDashboard(); }
         if (action === 'clearSelection') { this.selected.clear(); this.renderLibrary(); return this.renderDashboard(); }
