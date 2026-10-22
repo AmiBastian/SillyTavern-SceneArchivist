@@ -28,7 +28,7 @@ If your characters can hide a body but cannot remember where they had dinner, we
 
 ### About the screenshots and videos
 
-This guide includes **36 screenshots and three animated walkthroughs**, with MP4 versions linked beside each animation. The captures render the extension's actual interface in a demonstration host using an invented story and scripted model replies. They show how the controls work; they are not recordings of live API calls or Mira's private chats. The overview captures include version 1.0.0; the bulk review and settings captures show the 1.0.1 update. Your SillyTavern theme, fonts, and popup styling can look different.
+This guide includes **36 screenshots and three animated walkthroughs**, with MP4 versions linked beside each animation. The captures render the extension's actual interface in a demonstration host using an invented story and scripted model replies. They show how the controls work; they are not recordings of live API calls or Mira's private chats. The changed search, vector, settings, job, and review panels were recaptured from **1.0.4**. Some overview screenshots and the animated walkthroughs retain earlier versions and button labels. Your SillyTavern theme, fonts, and popup styling can look different.
 
 ## Install and make your first archive
 
@@ -57,7 +57,7 @@ Each record has its proposed text and original text. **Review later** keeps the 
 
 ### Control request size and review timing
 
-![Version 1.0.1 settings for character request size and combined or per-step review](docs/media/36-bulk-settings.png)
+![Version 1.0.4 settings for character request size and combined or per-step review](docs/media/36-bulk-settings.png)
 
 In **Settings → Story memory settings**:
 
@@ -382,7 +382,7 @@ Find saved diaries using the **diary** type filter. Their injection exclusion is
 <details>
 <summary>See the return-recap controls</summary>
 
-![Previously on recap control, pictured beside the older duplicate Ask box removed in 1.0.4](docs/media/20-return-recap.png)
+![Previously on return-recap control in the Search tab in version 1.0.4](docs/media/20-return-recap.png)
 
 Use **Previously on...** for a short, dated return recap from recent records. **Settings → Story memory settings** can offer one after you have been away for a configured number of hours. This helps you resume a story; it does not replace the archive with a condensed record.
 
@@ -404,7 +404,7 @@ Enable **Let the model pick keyed entries before each reply** to make an additio
 <details>
 <summary>See the budget decision and the model-context view</summary>
 
-![Memory budget view listing selected records, costs, reasons, and omitted records](docs/media/22-loading-budget.png)
+![Version 1.0.4 memory budget showing native keyword and vector activation separately, vector search status, and omitted records](docs/media/22-loading-budget.png)
 
 **Memory budget and loading reasons** shows the entries selected by SillyTavern and why others were omitted. Native World Info finishes its scan first, including keyword rules, vector activations, recursion, probability, inclusion groups, cooldowns and delays. Scene Archivist then trims the activated story entries to one total content-token cap. A covering recap and its sources do not spend that cap twice. Pins change priority among activated entries; they do not activate unmatched records.
 
@@ -415,6 +415,8 @@ The panel also reports native **Vector search** status, including the provider, 
 Normal-reply evidence survives quiet helpers and previews. An observed vector result is distinct from a memory actually retained after native World Info filters and the archive cap. World Info activation confirms that processing stage; use SillyTavern prompt inspection for the exact final prompt. On older hosts without `WORLDINFO_SCAN_DONE`, the report explicitly states that the archive cap is unavailable and native World Info limits apply.
 
 **What the model saw** shows records activated in the last observed World Info scan, their token counts, and recorded selection reasons. Reasons can overlap. Check it alongside the budget view when a memory seems to be missing. A pin increases priority; it does not override the cap. Use SillyTavern's prompt inspection to verify the exact final prompt.
+
+![Version 1.0.4 model-context view with recorded keyword, vector, and Always on activation reasons](docs/media/23-model-context.png)
 
 </details>
 
@@ -493,11 +495,11 @@ AI summaries, memory generation, condensation, diaries, continuity checks, and e
 ### Existing SillyTavern vectors
 
 <details>
-<summary>See optional semantic matching</summary>
+<summary>See native World Info vector guidance</summary>
 
-![Optional native World Info vector-matching setting](docs/media/29-native-vectors.png)
+![Version 1.0.4 guidance for configuring vectors in native Vector Storage and individual lorebook entries](docs/media/29-native-vectors.png)
 
-Enable World Info in SillyTavern's **Vector Storage**, then use each lorebook entry's vector setting, or native **Enabled for all** if you deliberately want that behavior. Scene Archivist observes the native integration and never marks every story entry as vector eligible. Native keyword activation continues to follow the entry's primary and secondary keywords and other World Info rules. Activated story entries share the archive memory budget. The existing screenshot shows the retired 1.0.2 switch; in 1.0.3 that area explains the native settings instead.
+Enable World Info in SillyTavern's **Vector Storage**, then use each lorebook entry's vector setting, or native **Enabled for all** if you deliberately want that behavior. Scene Archivist observes the native integration and never marks every story entry as vector eligible. Native keyword activation continues to follow the entry's primary and secondary keywords and other World Info rules. Activated story entries share the archive memory budget.
 
 </details>
 
@@ -520,7 +522,7 @@ Back up your skeletons. The closet is not version control.
 
 ### Paused jobs, saved results, and Undo
 
-![Paused archive job with Resume and Pause; the pictured Cancel button is labeled Discard unfinished job in 1.0.4](docs/media/30-job-recovery.png)
+![Version 1.0.4 paused archive job with Resume / review, Pause after this request, and Discard unfinished job](docs/media/30-job-recovery.png)
 
 Bulk jobs retain their generated results and proposed book changes before the combined review. The progress panel distinguishes prepared steps from approved changes being saved. **Review later** closes the review and keeps the prepared result for **Resume / review**. **Pause after this request** stops between requests. **Discard unfinished job** ends the job and makes its unapproved results unavailable; records already written to lorebooks are kept. A failed job also offers **Retry / review saved result**, so a usable prepared result can be reviewed again without another model call.
 
