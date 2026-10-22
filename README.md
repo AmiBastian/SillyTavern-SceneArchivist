@@ -1,4 +1,4 @@
-# Scene Archivist 1.0.3
+# Scene Archivist 1.0.4
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -51,7 +51,7 @@ This applies to scene-summary passes, new character memories and their follow-up
 
 ![One combined review containing all 33 character memory lists, with expandable records](docs/media/35-combined-review.png)
 
-Each record has its proposed text and original text. Canceling this review keeps the prepared results; **Resume / review** opens them again without repeating completed requests. **Undo** restores the complete accepted bulk write.
+Each record has its proposed text and original text. **Review later** keeps the prepared results; **Resume / review** opens them again without repeating completed requests. **Undo** restores the complete accepted bulk write.
 
 </details>
 
@@ -67,7 +67,7 @@ In **Settings → Story memory settings**:
 
 A whole run can still use several model requests. Grouping suitable character lists reduces repeated request overhead without forcing the entire cast into an oversized response. No need to click Apply 33 bloody times.
 
-**Updating from 1.0.0:** finish or cancel remaining steps in an old paused job before starting a new run. Old jobs retain their original review behavior; newly started jobs use the selected bulk mode. Existing books and saved memories remain in place. Keep all extension files together, including the new `bulk-jobs.js` file.
+**Updating:** finish or discard an old unfinished job before starting a new run. **Review later** keeps a prepared result for **Resume / review**; **Discard unfinished job** abandons its unapproved results while keeping records already written. Old jobs retain their original review behavior. Keep all extension files together, including `bulk-jobs.js` and the new `world-info-io.js` file.
 
 ## Find your way around
 
@@ -233,6 +233,8 @@ A new recap links to its originals, which remain in their books. Shortening save
 
 The preserved chronology keeps source dates, recognized times, locations, and named participants. Unknown dates stay unknown. The result must still be smaller after that chronology is included.
 
+Before requesting archive condensation, Scene Archivist checks whether the required heading and preserved chronology alone already use the available space. Impossible records or recap batches are skipped without a model call. A short record can still be included in a feasible combined recap. Other inputs still need a model result and the final size check.
+
 ![Animated guide to selecting source records, naming a recap, reviewing it, and finding it in Library](docs/media/recap-walkthrough.gif)
 
 [Watch or download the recap walkthrough as MP4](docs/media/recap-walkthrough.mp4).
@@ -380,7 +382,7 @@ Find saved diaries using the **diary** type filter. Their injection exclusion is
 <details>
 <summary>See the return-recap controls</summary>
 
-![Ask and recap section with the Previously on button](docs/media/20-return-recap.png)
+![Previously on recap control, pictured beside the older duplicate Ask box removed in 1.0.4](docs/media/20-return-recap.png)
 
 Use **Previously on...** for a short, dated return recap from recent records. **Settings → Story memory settings** can offer one after you have been away for a configured number of hours. This helps you resume a story; it does not replace the archive with a condensed record.
 
@@ -518,13 +520,21 @@ Back up your skeletons. The closet is not version control.
 
 ### Paused jobs, saved results, and Undo
 
-![Paused archive job offering Resume or review, Pause, and Cancel remaining steps](docs/media/30-job-recovery.png)
+![Paused archive job with Resume and Pause; the pictured Cancel button is labeled Discard unfinished job in 1.0.4](docs/media/30-job-recovery.png)
 
-Bulk jobs retain their generated results and proposed book changes before the combined review. The progress panel distinguishes prepared steps from approved changes being saved. If you cancel a review, use **Resume / review** to reopen the retained result. **Pause after this request** stops between requests, **Cancel remaining steps** ends the pending work, and a failed job offers **Retry / review saved result**. A saved usable result can be reviewed again without generating it again.
+Bulk jobs retain their generated results and proposed book changes before the combined review. The progress panel distinguishes prepared steps from approved changes being saved. **Review later** closes the review and keeps the prepared result for **Resume / review**. **Pause after this request** stops between requests. **Discard unfinished job** ends the job and makes its unapproved results unavailable; records already written to lorebooks are kept. A failed job also offers **Retry / review saved result**, so a usable prepared result can be reviewed again without another model call.
 
 Accepted stages have completion receipts to help prevent duplicate writes after a reload or partial failure. **Archive thoroughly** retains its remaining memory and tracker stages when paused. If a queued source changed, cancel that job and choose the corrected sources rather than applying old output blindly.
 
 **Undo** restores the last write's books, metadata, and matching message visibility. It restores the complete accepted bulk run, rather than only its final character; newly created empty books may remain. For earlier text, open a record's saved revisions. Reviews also check for intervening source/book edits before accepting a write.
+
+### Fresh reads and confirmed saves
+
+Scene Archivist reads lorebooks directly from SillyTavern's server instead of accepting an older browser cache for its operations. Extension writes, book creation, and Undo check the save response and then read the book back. A save is accepted only when the stored JSON matches the submitted data, including entry settings and receipts. ST's cache is refreshed from that read-back. A save error leaves the job unfinished and reports the error instead of claiming the write completed.
+
+If the save reached the server but the confirming read failed, refresh and retry the retained job. Its stored receipts help recovery recognize work already written. Back up first if you need to inspect or repair a partial write manually.
+
+SillyTavern saves entire lorebooks and does not offer a conditional revision check. Fresh checks narrow the overwrite window, but simultaneous writes to the same book from two tabs or devices are unsupported. Shared archives and whole-job Undo for step-by-step runs are planned for 1.1.0. Current Undo still restores whole books and can replace later manual edits, as its confirmation warns.
 
 ## Slash commands
 

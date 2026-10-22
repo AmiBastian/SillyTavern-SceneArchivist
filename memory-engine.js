@@ -142,6 +142,23 @@ ${short ? 'Shorten each record independently. Keep its first heading exactly. Re
         prompt: entries.map(e => `SOURCE ${record(e).id}\n${e.content}`).join('\n\n---\n\n') };
 }
 
+/** Reject only inputs whose mandatory output already cannot be smaller. */
+export function condensationPrecheck(entries, mode, label = 'Recap') {
+    const suffix = sources => `\n\n### Preserved chronology\n${sourceChronology(sources)}`;
+    const short = mode === 'shorten';
+    const blocked = short ? entries.filter(e => {
+        const heading = String(e.content || '').trim().split('\n')[0];
+        return tokens(heading + suffix([e])) >= tokens(e.content);
+    }).map(e => ({ id: record(e).id, title: title(e) })) : [];
+    if (!short) {
+        const minimum = `## ► Recap — ${String(label || 'Recap').slice(0, 80)}\n\n${suffix(entries)}`;
+        if (tokens(minimum) >= entries.reduce((n, e) => n + tokens(e.content), 0)) blocked.push(...entries.map(e => ({ id: record(e).id, title: title(e) })));
+    }
+    return { possible: blocked.length === 0, blocked };
+}
+
+export const unfinishedJobMessage = job => `The ${job.kind || 'unfinished'} job is ${job.status || 'unfinished'}. Resume it, or choose "Discard unfinished job" in the job panel at the top before starting another. Discarding ends the job and makes its unapproved results unavailable. Records already written to your lorebooks are kept.`;
+
 export function parseJSON(raw) {
     const s = String(raw ?? '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
     try { return JSON.parse(s); } catch { /* extract a single JSON object */ }
@@ -467,7 +484,7 @@ export class JobQueue {
     }
     async create(kind, steps, options = {}) {
         const s = this.state();
-        if (s.job && !['done', 'canceled'].includes(s.job.status)) throw new Error('Finish or cancel the current job before starting another.');
+        if (s.job && !['done', 'canceled'].includes(s.job.status)) throw new Error(unfinishedJobMessage(s.job));
         s.job = { id: uid(), kind, options: copy(options), steps: steps.map(payload => ({ id: uid(), payload: copy(payload), status: 'pending' })), cursor: 0, status: 'paused', created: now() };
         await this.persist(); this.notify(); return s.job;
     }

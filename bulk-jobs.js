@@ -119,8 +119,8 @@ export class BulkRun {
             const needsReview = job.kind !== 'archive' || this.real.settings().review || job.options.pipeline?.length || job.options.hasFollowups;
             if (needsReview && !job.options.automatic) {
                 job.phase = 'review'; await this.real.saveMeta(); w.renderJob();
-                const note = `All ${job.steps.length} processing steps are ready. Review ${changes.length} changed records together. Nothing has been written to your story books yet. Cancel keeps the results for Resume / review.` + (d.notices.length ? '\n\n' + d.notices.join('\n') : '');
-                if (changes.length ? !(await w.review(changes, 'Review complete run', note)) : !(await this.real.confirmText(note))) return false;
+                const note = `All ${job.steps.length} processing steps are ready. Review ${changes.length} changed records together. Nothing has been written to your story books yet. Choose "Review later" to keep the prepared results for Resume / review. "Discard unfinished job" in the job panel abandons them.` + (d.notices.length ? '\n\n' + d.notices.join('\n') : '');
+                if (changes.length ? !(await w.review(changes, 'Review complete run', note)) : !(await this.real.confirmText(note, { cancelButton: 'Review later' }))) return false;
                 if (job.status !== 'running') return false;
                 const edited = [];
                 for (const c of changes) {
@@ -148,9 +148,13 @@ export class BulkRun {
         const ordered = [...Object.entries(d.books).filter(([name]) => name !== archive), ...Object.entries(d.books).filter(([name]) => name === archive)];
         for (const [name, data] of ordered) {
             this.real.assert(); if (job.status !== 'running') return false;
-            const current = await this.real.load(name);
-            if (current?.sceneArchivistReceipts?.includes(job.id)) continue;
             if (!this.real.context().getWorldInfoNames().includes(name)) await this.real.createBook(name);
+            const current = await this.real.load(name);
+            const written = current?.sceneArchivistReceipts?.includes(job.id);
+            if (M.bookHash(current) !== M.bookHash(written ? data : d.before[name])) {
+                throw new Error(`"${name}" changed before saving this bulk run. No further books were written. Refresh and review before retrying.`);
+            }
+            if (written) continue;
             data.sceneArchivistReceipts = M.unique([...(data.sceneArchivistReceipts || []), job.id]);
             await this.real.save(name, data); this.real.reload(name);
         }

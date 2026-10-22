@@ -173,6 +173,10 @@ export class Workbench {
         for (const name of Object.keys(books)) await this.h.snapshot(name, (await this.h.load(name)) || { entries: {} });
         // A receipt in each touched book makes a resumed commit idempotent after a refresh.
         for (const [book, data] of Object.entries(books)) {
+            // Snapshot persistence may take time. Check the server again just before each write.
+            if (Object.hasOwn(bases, book) && M.bookHash(await this.h.load(book)) !== bases[book]) {
+                throw new Error(`"${book}" changed before saving. Refresh and review the new version before retrying.`);
+            }
             if (stepId) data.sceneArchivistReceipts = M.unique([...(data.sceneArchivistReceipts ?? []), stepId]);
             await this.h.save(book, data); this.h.assert();
             this.h.reload(book);
@@ -219,7 +223,7 @@ export class Workbench {
             d.querySelector('textarea').value = c.content || ''; d.querySelector('pre').textContent = c.before || '(new record)';
             root.append(d); c.node = d;
         }
-        if (!(await this.h.confirm(root, { okButton: 'Save reviewed result' }))) return false;
+        if (!(await this.h.confirm(root, { okButton: 'Save reviewed result', cancelButton: this.state().job?.status === 'running' ? 'Review later' : 'Cancel' }))) return false;
         for (const c of changes) { c.content = c.node.querySelector('textarea').value.trim(); delete c.node; if (!c.content) throw new Error('A reviewed entry cannot be empty.'); }
         return true;
     }
@@ -243,7 +247,7 @@ export class Workbench {
         const heroCard = document.createElement('details'); heroCard.className = 'sa-card'; heroCard.open = true; heroCard.innerHTML = '<summary>🗂️ Your archive</summary><div class="sa-body"></div>'; heroCard.querySelector('.sa-body').append(hero); this.panes.archive.append(heroCard);
         for (const c of oldCards) {
             const text = c.querySelector('summary').textContent;
-            const tab = /Ledger/.test(text) ? 'archive' : /Memory settings|Memories|Trackers/.test(text) ? 'characters' : /Condense/.test(text) ? 'condense' : /Ask|Recall|model saw/.test(text) ? 'search' : 'settings';
+            const tab = /Ledger/.test(text) ? 'archive' : /Memory settings|Memories|Trackers/.test(text) ? 'characters' : /Condense/.test(text) ? 'condense' : /Ask|Previously on|Recall|model saw/.test(text) ? 'search' : 'settings';
             c.open = false; this.panes[tab].append(c);
         }
         root.querySelector('#sa_range_from')?.closest('.sa-row')?.remove();
@@ -270,6 +274,9 @@ export class Workbench {
             const tab = event.target.closest('[data-sa-tab]'); if (tab) { this.showTab(tab.dataset.saTab); return; }
             const b = event.target.closest('[data-sa-action]');
             if (b) { event.preventDefault(); this.dispatch(b.dataset.saAction, b).catch(e => this.h.notify(String(e?.message ?? e), 'error')); }
+        });
+        root.querySelector('[data-sa-field="question"]').addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); this.dispatch('ask').catch(error => this.h.notify(error.message, 'error')); }
         });
         nav.addEventListener('keydown', e => {
             const buttons = [...nav.querySelectorAll('[role=tab]')], i = buttons.indexOf(document.activeElement);
@@ -384,7 +391,7 @@ export class Workbench {
         const active = !['done', 'canceled'].includes(j.status);
         if (!active) { el.innerHTML = `<p class="sa-hint">Last job: ${html(j.kind)} · ${html(j.status)} · ${j.cursor}/${j.steps.length} steps saved.</p>`; return; }
         const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared · ${j.phase === 'review' ? 'ready for one combined review' : j.phase === 'saving' ? 'saving approved changes' : 'story books unchanged until approval'}` : `${j.cursor}/${j.steps.length} steps saved`;
-        el.innerHTML = `<div class="sa-job"><b>${html(j.kind)}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}${active ? `<div class="sa-row">${button('jobResume', j.status === 'failed' ? 'Retry / review saved result' : 'Resume / review')}${button('jobPause', 'Pause after this request')}${button('jobCancel', 'Cancel remaining steps')}</div>` : ''}</div>`;
+        el.innerHTML = `<div class="sa-job"><b>${html(j.kind)}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}${active ? `<div class="sa-row">${button('jobResume', j.status === 'failed' ? 'Retry / review saved result' : 'Resume / review')}${button('jobPause', 'Pause after this request')}${button('jobCancel', 'Discard unfinished job')}</div><p class="sa-hint">Discarding ends this job and makes its unapproved results unavailable. Records already written to your lorebooks are kept. Use Resume / review to keep working with prepared results.</p>` : ''}</div>`;
     }
     renderBudget() {
         const el = this.root?.querySelector('#sa-budget-view'); if (!el) return;
@@ -657,7 +664,7 @@ export class Workbench {
     async archiveWorkflow(thorough = false) {
         if (this.h.isBusy()) throw new Error('The archivist is already running.');
         if (!this.h.context().chat?.length) throw new Error('Open a chat first.');
-        if (this.state().job && !['done', 'canceled'].includes(this.state().job.status)) throw new Error('Finish, resume or cancel the current job first.');
+        if (this.state().job && !['done', 'canceled'].includes(this.state().job.status)) throw new Error(M.unfinishedJobMessage(this.state().job));
         this.state().followups = [this.h.settings().memoryAuto || thorough ? 'memories' : '', this.h.settings().trackerAuto || thorough ? 'trackers' : ''].filter(Boolean);
         await this.persist();
         const result = await this.startArchiveNew();
@@ -677,12 +684,26 @@ export class Workbench {
         await this.refresh();
     }
     async startCondense(entries, automatic = false) {
-        const eligible = entries.filter(M.eligible);
+        let eligible = entries.filter(M.eligible);
         if (!eligible.length) throw new Error('Select unprotected, current units or recaps in Library first.');
         const mode = automatic ? 'recap' : this.options().recapMode;
         const label = this.value('recapLabel') || this.options().recapLabel || 'Arc';
-        const groups = this.chunks(eligible);
+        let skipped = 0;
+        if (mode === 'shorten') eligible = eligible.filter(e => {
+            const possible = M.condensationPrecheck([e], mode, label).possible;
+            if (!possible) skipped++;
+            return possible;
+        });
+        if (!eligible.length) throw new Error('These records cannot become smaller after keeping their headings and required chronology. No model request was made.');
+        let groups = this.chunks(eligible);
         if (mode === 'recap' && groups.some(g => g.length < 2)) throw new Error('A recap needs at least two records per batch. Select more records or use Shorten individual entries.');
+        if (mode === 'recap') groups = groups.filter(g => {
+            const possible = M.condensationPrecheck(g, mode, label).possible;
+            if (!possible) skipped += g.length;
+            return possible;
+        });
+        if (!groups.length) throw new Error('These records cannot become a smaller recap after keeping their required chronology. No model request was made.');
+        if (skipped) this.h.notify(`Skipped ${skipped} records whose required headings and chronology leave no room for a smaller result.`, 'info');
         return this.createJob('condense', groups.map(g => this.inputStep(g)), { mode, label, automatic });
     }
     async startExtract() {
@@ -875,6 +896,7 @@ export class Workbench {
             return this.json(req, raw => { const o = M.parseJSON(raw); if (typeof o?.content !== 'string' || o.content.trim().length < 15) throw new Error('The rebuilt record was empty.'); return o; }, 'rebuild stale memory');
         }
         if (kind === 'condense') {
+            if (!M.condensationPrecheck(inputs, job.options.mode, job.options.label).possible) throw new Error('These records cannot become smaller after preserving their headings and required chronology. No model request was made.');
             const req = M.condensationRequest(inputs, job.options.mode, job.options.label);
             return this.json({ ...req, maxTokens: 6000 }, raw => M.condensationResult(raw, inputs, job.options.mode, job.options.label), 'archive condensation');
         }

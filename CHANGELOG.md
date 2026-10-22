@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.4 · October 22, 2026
+
+- Reviews now offer **Review later** to keep prepared results for Resume. The job panel uses **Discard unfinished job**, explains that unapproved results become unavailable while written records stay, and keeps Retry beside it. Blocked-job messages use the same wording.
+- Archive condensation skips provably impossible inputs before a model request when the required heading and chronology already prevent a smaller result. Final size validation still applies; short sources can contribute to a feasible combined recap.
+- Removed the duplicate Ask box after checking both controls in a browser. Search keeps one **Ask the archive** control, Enter submission, answer text and original-source buttons. **Previously on...** remains in Search.
+- All extension World Info operations use fresh server reads. Writes, new books and Undo check HTTP status, verify saved JSON by direct read-back and refresh ST's cache without a second save. Failed or unverified writes do not mark the affected queued step completed. Workbench and bulk writes recheck for changes immediately before saving.
+- No record schema changes. Shared archives, entry-level rollback and whole-job Undo for step-by-step runs remain planned for 1.1.0. Simultaneous writers to the same lorebook remain unsupported because ST has no conditional save API.
+
 ## 1.0.3 · October 21, 2026
 
 - Removed automatic full-text archive retrieval from chat injection. Shared names, dates, ordinary words, titles, metadata, and body text no longer qualify entries outside native World Info rules.

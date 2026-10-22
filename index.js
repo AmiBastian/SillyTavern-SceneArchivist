@@ -4,9 +4,9 @@
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, generateQuietPrompt, generateRaw, chat_metadata, saveMetadata, main_api, characters, this_chid, eventSource, event_types, getCurrentChatId, getRequestHeaders } from '../../../../script.js';
 import { callGenericPopup, Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
-import { getCharaFilename, getStringHash } from '../../../utils.js';
+import { getCharaFilename, getStringHash, getSanitizedFilename } from '../../../utils.js';
 import { hideChatMessageRange } from '../../../chats.js';
-import { selected_world_info, METADATA_KEY, createNewWorldInfo, createWorldInfoEntry, loadWorldInfo, saveWorldInfo, updateWorldInfoList, reloadEditor, world_info, world_info_max_recursion_steps } from '../../../world-info.js';
+import { selected_world_info, METADATA_KEY, createWorldInfoEntry, worldInfoCache, updateWorldInfoList, reloadEditor, world_info, world_info_max_recursion_steps } from '../../../world-info.js';
 import { oai_settings } from '../../../openai.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { power_user } from '../../../power-user.js';
@@ -16,10 +16,11 @@ import * as Core from './core.js';
 import * as Memory from './memory-engine.js';
 import { Workbench } from './workbench.js';
 import { entryReasons } from './vector-diagnostics.js';
+import { createWorldInfoIO } from './world-info-io.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -38,6 +39,24 @@ const CHAT_SETTINGS = new Set(['lorebook', 'memoryBook', 'memoryTarget', 'memory
 function assertCurrentChat() {
     if (operationChat && (operationChat !== getContext().chat || operationRevision !== chatRevision)) throw new Error('The chat changed. Reopen the original chat and run the operation again.');
 }
+
+const worldInfoIO = createWorldInfoIO({ requestHeaders: getRequestHeaders, cache: worldInfoCache, assert: assertCurrentChat,
+    onSaved: (name, data) => eventSource.emit(event_types.WORLDINFO_UPDATED, name, data) });
+const readFresh = worldInfoIO.readFresh;
+async function saveConfirmed(name, data) {
+    try { return await worldInfoIO.saveConfirmed(name, data); }
+    catch (error) { toastr.error(error.message, 'Scene Archivist'); throw error; }
+}
+async function createBookConfirmed(name) {
+    if (!name) return false;
+    if (await getSanitizedFilename(name) !== name) throw new Error('Use a lorebook name without unsupported filename characters.');
+    await updateWorldInfoList();
+    if (getContext().getWorldInfoNames().includes(name)) return false;
+    await saveConfirmed(name, { entries: {} });
+    await updateWorldInfoList();
+    return true;
+}
+const reviewCancelLabel = () => workbench?.state().job?.status === 'running' ? 'Review later' : 'Cancel';
 
 function chatSettings(global) {
     const m = (chat_metadata[KEY] ??= {});
@@ -143,7 +162,7 @@ async function updateInfoLine() {
     const s = settings();
     $('#sa_undo').prop('disabled', !undoBooks().length);
     if (!s.lorebook) { $('#sa_info').text(names0() ? 'Pick a lorebook, or create one below.' : 'No lorebooks exist yet. Create one below.'); return; }
-    const data = await loadWorldInfo(s.lorebook);
+    const data = await readFresh(s.lorebook);
     if (!data) { $('#sa_info').text('Could not load this lorebook.'); return; }
     $('#sa_undo').prop('disabled', !undoBooks().length);
     const sum = Core.managedSummary(data);
@@ -158,7 +177,7 @@ async function createLorebook() {
     const name = String($('#sa_newname').val() ?? '').trim();
     if (!name) { toastr.warning('Type a name for the new lorebook first.'); return; }
     if (lorebookNames().includes(name)) { toastr.info('That lorebook already exists, so I selected it.'); await refreshLorebookList(name); saveSettingsDebounced(); return; }
-    const ok = await createNewWorldInfo(name);
+    const ok = await createBookConfirmed(name);
     if (!ok) { toastr.error('Could not create the lorebook.'); return; }
     await updateWorldInfoList();
     await refreshLorebookList(name);
@@ -207,7 +226,7 @@ async function checkSetup() {
     const o = coreOpts();
     const out = [];
     if (!s.lorebook) { out.push({ level: 'bad', text: 'No lorebook selected.' }); setStatus(out); return out; }
-    const data = await loadWorldInfo(s.lorebook);
+    const data = await readFresh(s.lorebook);
     if (!data) { out.push({ level: 'bad', text: `Lorebook "${s.lorebook}" could not be loaded.` }); setStatus(out); return out; }
     const sum = Core.managedSummary(data);
     out.push({ level: 'ok', text: `Lorebook "${s.lorebook}" loaded (${sum.total} log entries).` });
@@ -243,14 +262,14 @@ async function fixOutlet() {
     if (busy) return;
     const s = settings(); const o = coreOpts();
     if (!s.lorebook) return;
-    const data = await loadWorldInfo(s.lorebook);
+    const data = await readFresh(s.lorebook);
     let n = 0;
     for (const e of Object.values(data.entries ?? {})) {
         if (!Core.classifyEntry(e)) continue;
         if (e.constant && !e.ignoreBudget) { e.ignoreBudget = true; n++; }
     }
     n += Core.convertDelivery(data, o);
-    await saveWorldInfo(s.lorebook, data, true);
+    await saveConfirmed(s.lorebook, data);
     try { reloadEditor(s.lorebook); } catch { /* editor closed */ }
     toastr.success(n ? `Updated ${n} settings on log entries.` : 'Nothing to fix.');
     await checkSetup();
@@ -336,7 +355,7 @@ async function showReview(plan, parsed, lorebookName) {
         root.append(d);
         refs.demotions.push({ dm, d });
     }
-    const popup = new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Write to lorebook', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true });
+    const popup = new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Write to lorebook', cancelButton: reviewCancelLabel(), wide: true, large: true, allowVerticalScrolling: true });
     const result = await popup.show();
     if (result !== POPUP_RESULT.AFFIRMATIVE) return false;
     const parseKeys = (v) => Core.withVariants(String(v).split(',').map(x => x.trim()).filter(Boolean));
@@ -395,7 +414,7 @@ async function undoLast() {
     try {
         for (const [book, data] of Object.entries(undo.books)) {
             assertCurrentChat();
-            await saveWorldInfo(book, clone(data), true);
+            await saveConfirmed(book, clone(data));
             try { reloadEditor(book); } catch { /* editor closed */ }
         }
         assertCurrentChat();
@@ -432,7 +451,7 @@ async function commit(plan, parsed, name, expectedHash = '') {
     if (archiveStep && workbench?.state().job?.status !== 'running') throw new Error('The archive job was paused or canceled before the write. Its output is saved for review.');
     beginUndoWrite();
     const o = coreOpts();
-    const data = (await loadWorldInfo(name)) ?? { entries: {} };
+    const data = (await readFresh(name)) ?? { entries: {} };
     if (expectedHash && Memory.bookHash(data) !== expectedHash) throw new Error('The archive changed while you were reviewing. The response is saved; review it against the new version before writing.');
     const before = clone(data);
     if (archiveSource && !Memory.checkSource(archiveSource, workbench?.state().storyId || archiveSource.chatId, getContext().chat || []).valid) throw new Error('The transcript changed while the output was being reviewed. No archive write was made.');
@@ -443,7 +462,7 @@ async function commit(plan, parsed, name, expectedHash = '') {
     for (const e of Object.values(data.entries)) if (Memory.record(e)?.storyId === (workbench?.state().storyId || '')) e.sceneArchivistArchive = name;
     Memory.invalidate(Object.values(data.entries), changed.filter(id => Object.values(before.entries || {}).some(e => Memory.record(e)?.id === id)), 'An archive source was updated');
     if (archiveStep) data.sceneArchivistReceipts = Memory.unique([...(data.sceneArchivistReceipts || []), archiveStep]);
-    await saveWorldInfo(name, data, true);
+    await saveConfirmed(name, data);
     assertCurrentChat();
     try { reloadEditor(name); } catch { /* editor closed */ }
     const sum = Core.managedSummary(data);
@@ -476,11 +495,11 @@ async function handleOutput(text) {
     assertCurrentChat();
     const s = settings();
     if (!s.lorebook) { toastr.warning('Pick or create a lorebook first.'); return false; }
-    const data = (await loadWorldInfo(s.lorebook)) ?? { entries: {} };
+    const data = (await readFresh(s.lorebook)) ?? { entries: {} };
     const { parsed, plan } = await prepareArchive(text, data);
     if (s.review) {
         const ok = await showReview(plan, parsed, s.lorebook);
-        if (!ok) { toastr.info('Cancelled. Nothing was written.'); return false; }
+        if (!ok) { toastr.info(archiveStep ? 'Review postponed. Use Resume / review to reopen the prepared result.' : 'Cancelled. Nothing was written.'); return false; }
     }
     assertCurrentChat();
     if (!plan.adds.some(a => a.include && a.content.trim()) && !plan.states.some(a => a.include && a.content.trim())) { toastr.info('No changes were accepted. The source range stays pending.'); return false; }
@@ -495,7 +514,7 @@ async function ensureLorebook() {
     const base = `${getContext().name2 || 'Story'} Archive`;
     let name = base, i = 2;
     while (getContext().getWorldInfoNames().includes(name)) name = `${base} ${i++}`;
-    if (!(await createNewWorldInfo(name))) { toastr.error('Could not create a lorebook.'); return false; }
+    if (!(await createBookConfirmed(name))) { toastr.error('Could not create a lorebook.'); return false; }
     await updateWorldInfoList();
     await refreshLorebookList(name);
     if (!isLorebookActive(name)) { chat_metadata[METADATA_KEY] = name; try { await saveMetadata(); } catch { /* ignore */ } $('.chat_lorebook_button').addClass('world_set'); }
@@ -523,7 +542,7 @@ async function runSummarize(opts = {}) {
         if (s.archiveMode === 'chat') {
             let prompt = s.prompt;
             if (s.appendLog) {
-                const data = await loadWorldInfo(s.lorebook);
+                const data = await readFresh(s.lorebook);
                 const log = data ? Core.currentLogText(data) : '';
                 if (log) prompt += '\n\n---\n\nCURRENT SCENE LOG (always-on part):\n\n' + log;
             }
@@ -589,7 +608,7 @@ async function sideJson(req, parse, label) {
 
 async function copyDiagnostics() {
     const s = settings(); const ctx = getContext();
-    const data = s.lorebook ? await loadWorldInfo(s.lorebook).catch(() => null) : null;
+    const data = s.lorebook ? await readFresh(s.lorebook).catch(() => null) : null;
     const entries = data ? Object.values(data.entries ?? {}) : [];
     const m = chat_metadata?.[KEY] ?? {};
     const lines = [
@@ -723,11 +742,11 @@ async function runCondense(quiet = false) {
         if (names.includes(memoryBookName())) books.add(memoryBookName()); // the separate memories lorebook
         for (const book of Object.keys(s.storyBooks?.[s.lorebook] ?? {})) if (names.includes(book)) books.add(book);
         const above = Math.max(2, Number(s.condenseAbove) || 12);
-        const archiveData = await loadWorldInfo(s.lorebook);
+        const archiveData = await readFresh(s.lorebook);
         const dates = archiveData ? Core.selectMemorySource(archiveData, 0, 1).dates : {}; // models tend to drop the dates, so they are put back from the log
         const jobs = [];
         for (const book of books) {
-            const data = await loadWorldInfo(book); if (!data) continue;
+            const data = await readFresh(book); if (!data) continue;
             for (const m of Core.memoryEntries(storyMemoryData(data, book), s.unit || 'Day')) if (m.bullets.length > above) jobs.push({ book, data, ...m });
         }
         if (!jobs.length) { if (quiet === true) return; toastr.info(`No character has more than ${above} memories in ${[...books].map(b => '"' + b + '"').join(', ')}. Lower "Condense above" to try a shorter list.`); return; }
@@ -751,11 +770,11 @@ async function runCondense(quiet = false) {
         beginUndoWrite();
         for (const [book, list] of byBook) {
             assertCurrentChat();
-            const data = await loadWorldInfo(book);
+            const data = await readFresh(book);
             if (!data) throw new Error(`Could not reload ${book}.`);
             await saveUndoSnapshot(book, data);
             for (const r of list) if (Core.applyCondense(data, r.uid, r.bullets, { dates, unit: s.unit || 'Day' })) n++;
-            await saveWorldInfo(book, data, true);
+            await saveConfirmed(book, data);
             try { reloadEditor(book); } catch { /* editor closed */ }
             touched.push(book);
         }
@@ -880,7 +899,7 @@ async function runPasses() {
         const note = toastr.info(`Pass ${i + 1} of ${passes.length}: messages ${pass.from} to ${pass.to} (about ${fmtTok(pass.tokens)} tokens).`, 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
         let out = '';
         try {
-            const data = (await loadWorldInfo(s.lorebook)) ?? { entries: {} };
+            const data = (await readFresh(s.lorebook)) ?? { entries: {} };
             const req = Core.buildArchivistRequest(s.prompt, Core.currentLogText(data), Core.buildTranscript(pass.messages), { from: pass.from, to: pass.to }, s.unit || 'Day');
             out = await generateRaw({ prompt: req.prompt, systemPrompt: req.system, responseLength: Number(s.maxTokens) > 0 ? Number(s.maxTokens) : 6000 });
         } finally { try { toastr.clear(note); } catch { /* ignore */ } }
@@ -979,7 +998,7 @@ function promptImportFile(file) {
 
 async function exportLogMd() {
     const s = settings();
-    const data = s.lorebook ? await loadWorldInfo(s.lorebook) : null;
+    const data = s.lorebook ? await readFresh(s.lorebook) : null;
     if (!data) { toastr.warning('Pick a lorebook first.'); return; }
     const md = Core.exportLogMarkdown(data);
     if (!md.trim()) { toastr.info('The log is empty.'); return; }
@@ -1048,7 +1067,7 @@ async function onEntriesLoaded(groups) {
     const books = new Set([memoryBookName(), ...Object.keys(s.storyBooks[archive] ?? {})]);
     for (const book of books) {
         if (book === archive || !getContext().getWorldInfoNames().includes(book)) continue;
-        const data = await loadWorldInfo(book);
+        const data = await readFresh(book);
         if (settings().lorebook !== archive) return;
         for (const e of Object.values(storyMemoryData(data ?? {}, book).entries ?? {})) {
             if ((!Memory.record(e) && Core.classifyEntry(e)?.type !== 'memory') || e.disable || seen.has(`${book}::${e.uid}`)) continue;
@@ -1124,11 +1143,11 @@ async function commitMemories(plans, src) {
         assertCurrentChat();
         registerStoryBook(s.lorebook, p.book, p.own ? 'character' : (p.book === s.lorebook ? 'archive' : 'separate'));
         if (!getContext().getWorldInfoNames().includes(p.book)) {
-            if (!(await createNewWorldInfo(p.book))) throw new Error(`Could not create the lorebook "${p.book}".`);
+            if (!(await createBookConfirmed(p.book))) throw new Error(`Could not create the lorebook "${p.book}".`);
             await updateWorldInfoList();
         }
         assertCurrentChat();
-        p.data = (await loadWorldInfo(p.book)) ?? { entries: {} };
+        p.data = (await readFresh(p.book)) ?? { entries: {} };
         await saveUndoSnapshot(p.book, p.data);
         const untouched = clone(p.data.entries ?? {});
         const rep = Core.applyMemories(p.data, p.items.filter(i => i.bullets.length), o, (d) => createWorldInfoEntry(p.book, d), { constant: p.own, dates: src.dates, unit: s.unit || 'Day' });
@@ -1138,7 +1157,7 @@ async function commitMemories(plans, src) {
             if (cl?.type === 'memory' && accepted.some(i => i.uid === e.uid || (i.uid == null && !(e.uid in untouched) && i.name === cl.name))) e.sceneArchivistArchive = s.lorebook;
             else if (e.uid in untouched) p.data.entries[e.uid] = untouched[e.uid];
         }
-        await saveWorldInfo(p.book, p.data, true);
+        await saveConfirmed(p.book, p.data);
         try { reloadEditor(p.book); } catch { /* editor closed */ }
         touched.push(p.book); created += rep.created.length; updated += rep.updated.length;
     }
@@ -1155,7 +1174,7 @@ async function memoryStep(range, first) {
     const s = settings();
     let note = null;
     try {
-        const data = await loadWorldInfo(s.lorebook);
+        const data = await readFresh(s.lorebook);
         if (!data) { toastr.error('Could not load the lorebook.'); return { ok: false }; }
         const progress = Number(s.memoryProgress?.[s.lorebook] ?? 0);
         const src = Core.selectMemorySource(data, progress, s.memoryDays, { fromDay: range?.from ?? null, toDay: range?.to ?? null });
@@ -1172,7 +1191,7 @@ async function memoryStep(range, first) {
         for (const c of chars) { const b = memoryBookFor(c); if (!groups.has(b)) groups.set(b, []); groups.get(b).push(c); }
         const plans = [];
         for (const [book, list] of groups) {
-            const d = book === s.lorebook ? data : ((await loadWorldInfo(book)) ?? { entries: {} });
+            const d = book === s.lorebook ? data : ((await readFresh(book)) ?? { entries: {} });
             plans.push({ book, data: d, own: s.memoryTarget === 'character' && book !== s.lorebook && book !== memoryBookName(), items: Core.planMemories(storyMemoryData(d, book), list, { cap: Number(s.memoryCap) || 30, tag: `[${s.unit || 'Day'} ${src.lastDay}]`, unit: s.unit || 'Day' }) });
         }
         const done = { ok: true, remaining: src.remaining, lastDay: src.lastDay };
@@ -1264,7 +1283,7 @@ async function runTrackers(onlyId = null, quiet = false) {
     busy = true; operationChat = getContext().chat; operationRevision = chatRevision;
     let note = null;
     try {
-        const data = await loadWorldInfo(s.lorebook);
+        const data = await readFresh(s.lorebook);
         if (!data) { toastr.error('Could not load the lorebook.'); return false; }
         const trackerBase = Memory.bookHash(data), trackerBefore = clone(data);
         const src = Core.latestUnits(data, Number(s.trackerDays) || 3);
@@ -1284,7 +1303,7 @@ async function runTrackers(onlyId = null, quiet = false) {
         if (s.review && !(await showTrackerReview(results))) { toastr.info('Cancelled. Nothing was written.'); return false; }
         const picked = results.filter(r => r.include && r.text.trim());
         if (!picked.length) return false;
-        if (Memory.bookHash(await loadWorldInfo(s.lorebook)) !== trackerBase) throw new Error('The archive changed while the tracker update was being reviewed. Run the tracker again with the current sources.');
+        if (Memory.bookHash(await readFresh(s.lorebook)) !== trackerBase) throw new Error('The archive changed while the tracker update was being reviewed. Run the tracker again with the current sources.');
         beginUndoWrite();
         await saveUndoSnapshot(s.lorebook, data);
         for (const r of picked) Core.applyTracker(data, r.name, r.text, coreOpts(), (dd) => createWorldInfoEntry(s.lorebook, dd));
@@ -1294,7 +1313,7 @@ async function runTrackers(onlyId = null, quiet = false) {
             e.sceneArchivistArchive = s.lorebook;
             Memory.record(e).derivedHashes = Object.fromEntries(dependencies.map(id => [id, Memory.hash(workbench.find(id)?.content || '')]));
         }
-        await saveWorldInfo(s.lorebook, data, true);
+        await saveConfirmed(s.lorebook, data);
         try { reloadEditor(s.lorebook); } catch { /* editor closed */ }
         s.lastWriteBooks = [s.lorebook]; saveSettingsDebounced();
         await updateInfoLine();
@@ -1313,26 +1332,6 @@ async function runTrackers(onlyId = null, quiet = false) {
 let asking = false;
 const answerPopup = (title, text) => callGenericPopup(`<div style="text-align:left"><h3>${esc(title)}</h3><div style="white-space:pre-wrap">${esc(text)}</div></div>`, POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
 
-async function askArchive(question) {
-    if (workbench) { try { return await workbench.ask(question); } catch (e) { toastr.error(e?.message ?? e); return; } }
-    const s = settings();
-    const q = String(question ?? '').trim();
-    if (!q) { toastr.info('Type a question first.'); return; }
-    if (!s.lorebook) { toastr.warning('Pick or create a lorebook first.'); return; }
-    if (asking) return;
-    asking = true;
-    const note = toastr.info('Reading the archive.', 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
-    try {
-        const data = await loadWorldInfo(s.lorebook);
-        if (!data) { toastr.error('Could not load the lorebook.'); return; }
-        const req = Core.buildAskRequest(s.askPrompt, q, data, { maxChars: 60000 });
-        const text = await sideCall({ prompt: req.prompt, system: req.system, maxTokens: 700 });
-        toastr.clear(note);
-        await answerPopup(q, (text || '(no answer)').trim() + (req.omitted ? `\n\n(${req.omitted} older ${req.omitted === 1 ? 'entry was' : 'entries were'} left out to fit.)` : ''));
-    } catch (e) { console.error(LOG, e); toastr.error('Ask failed: ' + (e?.message ?? e)); }
-    finally { try { toastr.clear(note); } catch { /* ignore */ } asking = false; }
-}
-
 async function recap() {
     if (workbench) { try { return await workbench.recap(); } catch (e) { toastr.error(e?.message ?? e); return; } }
     const s = settings();
@@ -1341,7 +1340,7 @@ async function recap() {
     asking = true;
     const note = toastr.info('Writing the recap.', 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
     try {
-        const data = await loadWorldInfo(s.lorebook);
+        const data = await readFresh(s.lorebook);
         const req = data ? Core.buildRecapRequest(s.recapPrompt, data, 3) : null;
         if (!req || !req.days.length) { toastr.info('The log has no entries to recap yet.'); return; }
         const text = await sideCall({ prompt: req.prompt, system: req.system, maxTokens: 600 });
@@ -1364,7 +1363,7 @@ function recentMessages(n, dropTrailingAi, pending = '') {
 
 async function runRecall(type, pending = '') {
     const s = settings();
-    const data = await loadWorldInfo(s.lorebook);
+    const data = await readFresh(s.lorebook);
     if (!data) return null;
     const recent = recentMessages(Number(s.recallMessages) || 4, ['swipe', 'regenerate'].includes(type), pending);
     const index = Core.buildRecallIndex(data, { limit: 120, recentText: recent });
@@ -1386,7 +1385,7 @@ function showRecallResult(r, prefix) {
 
 async function forceActivate(name, uids) {
     if (!uids.length) return;
-    const data = await loadWorldInfo(name);
+    const data = await readFresh(name);
     // ST adds the object it is given straight into the prompt, so it must be a full entry, not just { world, uid }.
     const full = uids.map(u => data?.entries?.[u]).filter(Boolean).map(e => ({ ...e, world: name, decorators: e.decorators ?? [] }));
     if (full.length) await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, full);
@@ -1513,8 +1512,7 @@ function panelHtml() {
       <div class="sa-row"><label for="sa_tr_days">Entries to read</label><input id="sa_tr_days" class="text_pole" type="number" min="1" max="20" title="How many of the newest log entries each update reads"></div>
     </div></details>
 
-    <details class="sa-card"><summary>🔎 Ask and recap</summary><div class="sa-body">
-      <div class="sa-row"><input id="sa_ask_q" class="text_pole" type="text" placeholder="Ask the archive, e.g. who knows about the ring?"><input id="sa_ask_go" class="menu_button" type="button" value="Ask"></div>
+    <details class="sa-card"><summary>📺 Previously on...</summary><div class="sa-body">
       <div class="sa-row"><input id="sa_recap" class="menu_button" type="button" value="📺 Previously on..." title="A short recap of the newest entries, for when you come back to a story"></div>
     </div></details>
 
@@ -1650,8 +1648,6 @@ function bindUi() {
     $('#sa_tr_auto').prop('checked', s.trackerAuto).on('change', function () { s.trackerAuto = this.checked; saveSettingsDebounced(); });
     bindVal('#sa_tr_days', 'trackerDays', true);
     $('#sa_autoarch').prop('checked', s.autoArchive).on('change', function () { s.autoArchive = this.checked; saveSettingsDebounced(); });
-    $('#sa_ask_go').on('click', () => askArchive($('#sa_ask_q').val()));
-    $('#sa_ask_q').on('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); askArchive($('#sa_ask_q').val()); } });
     $('#sa_recap').on('click', recap);
     bindVal('#sa_archmode', 'archiveMode'); bindVal('#sa_chunk', 'chunkTokens', true); bindVal('#sa_keepvis', 'keepVisible', true);
     $('#sa_hide').prop('checked', s.hideArchived).on('change', function () { s.hideArchived = this.checked; saveSettingsDebounced(); });
@@ -1683,8 +1679,8 @@ jQuery(async () => {
         workbench = new Workbench({
             settings, meta, context: () => ({ ...getContext(), chatId: getCurrentChatId(), characterId: this_chid }),
             saveMeta: saveMetadata, saveSettings: saveSettingsDebounced,
-            worldNames: lorebookNames, load: loadWorldInfo, save: (name, data) => saveWorldInfo(name, data, true),
-            createBook: async name => { if (!getContext().getWorldInfoNames().includes(name) && !(await createNewWorldInfo(name))) throw new Error('Could not create ' + name); await updateWorldInfoList(); },
+            worldNames: lorebookNames, load: readFresh, save: saveConfirmed,
+            createBook: async name => { if (!getContext().getWorldInfoNames().includes(name) && !(await createBookConfirmed(name))) throw new Error('Could not create ' + name); await updateWorldInfoList(); },
             makeEntry: (name, data) => createWorldInfoEntry(name, data), register: registerStoryBook,
             memoryBook: memoryBookName, memoryBookFor, own: storyMemoryData, options: coreOpts,
             assert: assertCurrentChat, isBusy: () => busy, isActive: () => !!settings().lorebook && !!isLorebookActive(settings().lorebook),
@@ -1701,7 +1697,7 @@ jQuery(async () => {
             attach: async name => { chat_metadata[METADATA_KEY] = name; await saveMetadata(); $('.chat_lorebook_button').addClass('world_set'); },
             trackers: () => runTrackers(null, true),
             confirm: async (root, opts = {}) => (await new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true, ...opts }).show()) === POPUP_RESULT.AFFIRMATIVE,
-            confirmText: async text => { const result = await callGenericPopup(esc(text), POPUP_TYPE.CONFIRM); return result === true || result === POPUP_RESULT.AFFIRMATIVE; },
+            confirmText: async (text, opts = {}) => { const result = await callGenericPopup(esc(text), POPUP_TYPE.CONFIRM, '', opts); return result === true || result === POPUP_RESULT.AFFIRMATIVE; },
             show: root => new Popup(root, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true }).show(),
             notify: (message, kind = 'info') => toastr[kind](message, 'Scene Archivist'),
             offerRecap: callback => toastr.info('Welcome back. Click for a dated recap of this story.', 'Scene Archivist', { timeOut: 20000, onclick: callback }),
