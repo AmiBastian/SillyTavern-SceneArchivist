@@ -42,7 +42,6 @@ Keep the **`docs/` folder beside `README.md`** when uploading or sharing the pro
 6. In **Settings → Prompts**, choose a prompt and its story unit. Check your delivery settings and leave **Review before writing** enabled while setting up.
 7. Summarize a small range, review the result, then inspect it in **Library**. Export a complete story backup once you are happy with the setup.
 
-No npm installation is required to use the extension.
 
 ## Run the whole job, then review
 
@@ -551,10 +550,6 @@ Accepted stages have completion receipts to help prevent duplicate writes after 
 | You need to report a problem | Include extension and SillyTavern versions, steps to reproduce, the exact error, and relevant diagnostics. Remove private story text or credentials before sharing. |
 
 AI output still needs your judgment. Review the dates, who was present, who learned what, and whether the wording says more than the evidence supports. Scene Archivist keeps the paperwork organized; your questionable fictional life choices remain yours.
-
-## Development checks
-
-Run `npm test` in this folder. The included suites cover memory batching, the condensation threshold, dates and character identities, combined review, cancel/resume, serialized recovery, source edits, partial-write retries, and the existing archive and continuity behavior. Browser checks also exercise the actual interface with a simulated SillyTavern host, including a 33-character run and the full archive workflow. These checks use scripted replies, not live provider calls.
 
 ## License
 
