@@ -41,7 +41,6 @@ Keep the **`docs/` folder beside `README.md`** when uploading or sharing the pro
 6. In **Settings → Prompts**, choose a prompt and its story unit. Check your delivery settings and leave **Review before writing** enabled while setting up.
 7. Summarize a small range, review the result, then inspect it in **Library**. Export a complete story backup once you are happy with the setup.
 
-No npm installation is required to use the extension.
 
 ## Find your way around
 
