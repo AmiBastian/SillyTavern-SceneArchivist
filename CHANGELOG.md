@@ -24,7 +24,7 @@ Bulk jobs now process the full selection before showing one combined review. No 
 - Restored **Lists longer than** and made character-memory condensation honor the threshold. Full memory organization still includes shorter eligible lists.
 - Prepared results survive pause, canceled review, and reload. Reopening a completed proposal does not repeat its model requests.
 - Story books remain unchanged until approval. Partial-write retries retain receipts, memory coverage is saved after the character books, and Undo restores the whole bulk write.
-- Updated progress messages, Undo availability, documentation, and workflow preset handling. Added regression tests and two screenshots of the new controls.
+- Updated progress messages, Undo availability, documentation, and workflow preset handling. Added two screenshots of the new controls.
 
 ### Updating
 

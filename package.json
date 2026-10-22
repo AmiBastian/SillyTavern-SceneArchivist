@@ -1,7 +1,0 @@
-{
-  "name": "scene-archivist",
-  "version": "1.0.2",
-  "private": true,
-  "type": "module",
-  "description": "SillyTavern extension for scene archives, character memories, recaps and continuity. No npm install needed."
-}
