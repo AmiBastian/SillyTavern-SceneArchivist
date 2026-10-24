@@ -22,7 +22,7 @@ import { validateSharedUnits } from './workflow-tools.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.6';
+const VERSION = '1.0.7';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -891,6 +891,7 @@ async function renderLedger() {
     const rows = Core.ledgerRows(m);
     list.html(rows.map(r => { const row = m.ranges[r.i]; const visible = chat.slice(row.from, row.to + 1).filter(x => !x.is_system).length; return `<div class="sa-ledgerrow"><b>Messages ${esc(r.label)}</b> <span class="sa-badge">summarized</span> <span class="sa-hint">${visible} visible / ${row.to - row.from + 1} total · ${esc(r.note.replace(/Day/g, settings().unit))}</span> <a class="sa-ledgerlink" data-i="${r.i}">${visible ? 'hide exactly this range' : 'show exactly this range'}</a><button type="button" class="menu_button" data-sa-action="ledgerForget" data-row="${r.i}">🧽 Mark unprocessed</button><button type="button" class="menu_button" data-sa-action="ledgerRedo" data-row="${r.i}">🔄 Redo summaries</button></div>`; }).join('') || '<div class="sa-hint">No summarized ranges yet. Use Pick your messages for an exact interval.</div>');
     list.find('.sa-ledgerlink').on('click', async function () { await toggleLedgerRow(Number($(this).data('i'))); });
+    workbench?.layout?.help.refresh(list[0]);
 }
 
 async function setThrough() {
@@ -1633,7 +1634,10 @@ async function openPanelPopup() {
     wrap.append(panel);
     try {
         const popup = new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true });
-        await popup.show();
+        const shown = popup.show();
+        workbench?.renderLibrary();
+        workbench?.layout?.help.refresh(panel);
+        await shown;
     } finally { home.append(panel); delete panel.dataset.popped; }
 }
 
@@ -1708,7 +1712,7 @@ function bindUi() {
     refreshProfileList();
     $('#sa_side_profile').on('change', function () { s.sideProfile = $(this).val(); saveSettingsDebounced(); });
     $('#sa_side_test').on('click', testSide);
-    $('#sa_drawer .inline-drawer-toggle').on('click', refreshProfileList);
+    $('#sa_drawer .inline-drawer-toggle').on('click', () => { refreshProfileList(); requestAnimationFrame(() => { workbench?.renderLibrary(); workbench?.layout?.help.refresh(document.querySelector('.sa-panel')); }); });
     $('#sa_mem_auto').prop('checked', s.memoryAuto).on('change', function () { s.memoryAuto = this.checked; saveSettingsDebounced(); });
     bindVal('#sa_mem_target', 'memoryTarget'); bindVal('#sa_mem_book', 'memoryBook'); bindVal('#sa_mem_from', 'memoryFrom'); bindVal('#sa_mem_to', 'memoryTo'); bindVal('#sa_mem_days', 'memoryDays', true); bindVal('#sa_mem_cap', 'memoryCap', true); bindVal('#sa_mem_prompt', 'memoryPrompt');
     $('#sa_mem_prompt_reset').on('click', () => { s.memoryPrompt = DEFAULT_SETTINGS.memoryPrompt; $('#sa_mem_prompt').val(s.memoryPrompt); saveSettingsDebounced(); toastr.info('Memory prompt reset to the default.'); });

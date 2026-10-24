@@ -387,8 +387,8 @@ export class Workbench {
         });
         nav.addEventListener('keydown', e => {
             const buttons = [...nav.querySelectorAll('[role=tab]')], i = buttons.indexOf(document.activeElement);
-            if (i < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
-            e.preventDefault(); const n = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+            if (i < 0 || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
+            e.preventDefault(); const n = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + buttons.length) % buttons.length;
             this.showTab(buttons[n].dataset.saTab); buttons[n].focus();
         });
         root.addEventListener('change', event => {
@@ -404,7 +404,11 @@ export class Workbench {
             if (el.dataset.saField === 'file' && el.files?.[0]) { this.readImport(el.files[0], this.importKind).catch(e => this.h.notify(e.message, 'error')); el.value = ''; }
             this.layout?.refresh();
         });
-        root.querySelector('#sa-library-query').addEventListener('input', () => this.renderLibrary());
+        root.querySelector('#sa-library-query').addEventListener('input', () => this.scheduleLibraryRender());
+        for (const input of root.querySelectorAll('[data-sa-field="rangeFrom"],[data-sa-field="rangeTo"]')) input.addEventListener('input', () => {
+            root.querySelector('#sa-range-preview').textContent = '';
+            root.querySelector('#sa-range-message-preview')?.replaceChildren();
+        });
         this.syncOptions(); this.showTab('archive'); this.updateUnitLabels(); this.installVectorBridge();
     }
 
@@ -492,13 +496,23 @@ export class Workbench {
         return M.search(filterActiveCharacters(this, entries), value('query'), { type: value('type'), status: value('status'), subject: value('subject'), from: number('from'), to: number('to') });
     }
 
+    scheduleLibraryRender() {
+        clearTimeout(this.librarySearchTimer);
+        this.librarySearchTimer = setTimeout(() => { this.librarySearchTimer = null; this.renderLibrary(); }, 90);
+    }
     renderLibrary() {
+        clearTimeout(this.librarySearchTimer); this.librarySearchTimer = null;
+        if (this.currentTab !== 'library' || (this.root?.getClientRects && !this.root.getClientRects().length)) { this.libraryDirty = true; return; }
         const container = this.root?.querySelector('#sa-library-results'); if (!container) return;
+        this.libraryDirty = false;
         const rows = this.filtered();
-        container.innerHTML = `<p class="sa-hint">${rows.length} results. Dates, source messages, revisions and protection flags are inside Inspect.</p>` + rows.slice(0, 200).map(({ entry: e }) => {
+        const markup = `<p class="sa-hint">${rows.length} results. Dates, source messages, revisions and protection flags are inside Inspect.</p>` + rows.slice(0, 200).map(({ entry: e }) => {
             const r = M.record(e), protection = Object.entries(r.protection || {}).filter(([, v]) => v).map(([k]) => k).join(', ');
             return `<article class="sa-result"><div class="sa-result-head"><label><input type="checkbox" data-sa-select="${html(r.id)}" ${this.selected.has(r.id) ? 'checked' : ''}> <b>${html(M.title(e))}</b></label><span class="sa-badge">${html(r.type)} · ${html(r.status)}</span></div><p class="sa-hint">${html(e.world)} · ${html(Tools.sourceLabel(e))} · ~${M.tokens(e.content)} tokens${protection ? ' · ' + html(protection) : ''}</p><p>${html(String(e.content).trim().split('\n').filter(l => /^[-*] /.test(l)).slice(0, 2).join(' ').slice(0, 240))}</p><div class="sa-row">${button('inspect', 'Inspect / edit', `data-id="${r.id}"`)}${button('sources', 'Sources', `data-id="${r.id}"`)}${button('loadDetail', 'Load detail next reply', `data-id="${r.id}"`)}${r.status === 'stale' ? button('regenerate', 'Rebuild and review', `data-id="${r.id}"`) : ''}</div></article>`;
         }).join('') + (rows.length > 200 ? '<p class="sa-hint">Showing 200 results. Narrow the search to find older records.</p>' : '');
+        if (this.libraryRenderedIn === container && this.libraryResultMarkup === markup && container.firstChild) return;
+        container.innerHTML = markup; this.libraryRenderedIn = container; this.libraryResultMarkup = markup;
+        this.layout?.help.refresh(container);
     }
     renderJob() {
         const el = this.root?.querySelector('#sa-jobs'); if (!el) return;
@@ -508,6 +522,7 @@ export class Workbench {
         if (!active) { el.innerHTML = `<p class="sa-hint">Last job: ${html(j.kind)} · ${html(j.status)} · ${j.cursor}/${j.steps.length} steps saved.</p>`; return; }
         const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared${j.approvedRecords?.length ? ` · ${j.approvedRecords.length} approved records saved` : ''} · ${j.phase === 'review' ? 'ready for one combined review' : j.phase === 'saving' ? 'saving approved changes' : j.approvedRecords?.length ? 'remaining results await approval' : 'story books unchanged until approval'}` : `${j.cursor}/${j.steps.length} steps saved`;
         el.innerHTML = `<div class="sa-job"><b>${html(j.kind)}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}${active ? `<div class="sa-row">${button('jobResume', j.status === 'failed' ? 'Retry / review saved result' : 'Resume / review')}${button('jobPause', 'Pause after this request')}${button('jobCancel', 'Discard unfinished job')}</div><p class="sa-hint">Discarding ends this job and makes its unapproved results unavailable. Records already written to your lorebooks are kept. Use Resume / review to keep working with prepared results.</p>` : ''}</div>`;
+        this.layout?.help.refresh(el);
     }
     renderBudget() {
         const el = this.root?.querySelector('#sa-budget-view'); if (!el) return;
@@ -524,6 +539,7 @@ export class Workbench {
         const confirmation = this.activationKnown ? `<p>World Info activation confirmed for ${b.accepted.filter(c => this.activatedIds.has(c.id)).length}/${b.accepted.length} selected memories.${extra.length ? ` ST also activated ${extra.length} other story entries outside this selection; check native World Info activation settings.` : ''}</p>` : '<p>These are selection decisions. World Info activation has not been confirmed yet.</p>';
         const mode = b.enforced === false ? '<p class="sa-warnline">This SillyTavern version does not expose the scan hook needed for the archive cap. Native World Info limits apply; this report observes activations only.</p>' : '<p>SillyTavern selected these entries using its own activation rules. The archive budget only trims that selection.</p>';
         el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens retained.</p>` + mode + confirmation + `<p class="sa-hint">Showing ${visible.length} of ${b.accepted.length} retained entries.</p>` + visible.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Activation source: ${html(entryReasons(c))}` : ''}</div>`).join('') + '</details>';
+        this.layout?.help.refresh(el);
     }
 
     findRetrievedEntry(entry) {
@@ -651,6 +667,16 @@ export class Workbench {
         const range = M.messageRange(this.h.context().chat || [], this.value('rangeFrom'), this.value('rangeTo'));
         const hidden = (this.h.context().chat || []).slice(range.from, range.to + 1).filter(m => m.is_system).length;
         this.root.querySelector('#sa-range-preview').textContent = `Messages ${range.from} through ${range.to}, ${range.to - range.from + 1} selected; ${range.messages.length} with text; ${hidden} currently hidden/system. Messages outside this interval are untouched.`;
+        let preview = this.root.querySelector('#sa-range-message-preview');
+        if (!preview) { preview = document.createElement('div'); preview.id = 'sa-range-message-preview'; preview.className = 'sa-range-message-preview'; this.root.querySelector('#sa-range-preview').after(preview); }
+        preview.replaceChildren();
+        for (const message of range.messages.slice(0, 6)) {
+            const row = document.createElement('p'), label = document.createElement('b'), text = document.createElement('span');
+            label.textContent = `#${message.idx} · ${message.name}`;
+            text.textContent = message.text.slice(0, 320) + (message.text.length > 320 ? '…' : '');
+            row.append(label, text); preview.append(row);
+        }
+        if (range.messages.length > 6) { const note = document.createElement('small'); note.textContent = `Previewing the first 6 of ${range.messages.length} messages. Summarizing includes the entire selected range.`; preview.append(note); }
         return range;
     }
     async visibility(show) {
@@ -1269,6 +1295,7 @@ export class Workbench {
     renderFindings(findings) {
         const el = this.root?.querySelector('#sa-continuity-results'); if (!el) return;
         el.innerHTML = `<p class="sa-hint">${html(this.state().findingsScope || 'Continuity check')}. ${findings.length} findings retained in this run.</p>` + '<p class="sa-hint">Findings are suggestions. Apply a correction through Inspect; sources and dependent recaps then update their status.</p>' + findings.map(f => `<article class="sa-result"><b>${html(f.verdict)}: ${html(f.claim)}</b><p>${html(f.explanation)}</p><p>${html(f.suggestion)}</p><div class="sa-row">${M.unique([...f.support, ...f.conflicts]).map(id => button('evidence', html(M.title(this.find(id) || {})), `data-id="${id}"`)).join('')}</div></article>`).join('');
+        this.layout?.help.refresh(el);
     }
 
     async ask(question) {

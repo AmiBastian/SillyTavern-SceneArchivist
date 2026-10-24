@@ -212,6 +212,10 @@ export function search(entries, query = '', filters = {}) {
         const n = r.unit?.number;
         if (filters.from != null && (n == null || n < filters.from)) continue;
         if (filters.to != null && (n == null || n > filters.to)) continue;
+        if (!needles.length) {
+            rows.push({ entry: e, score: 0, matches: 0, matchedTerms: [], fieldMatches: [], bodyMatches: [], reason: 'archive order' });
+            continue;
+        }
         const fields = new Set(wordList(`${title(e)} ${(e.key ?? []).join(' ')} ${(r.dates ?? []).join(' ')} ${(r.people ?? []).join(' ')} ${(r.locations ?? []).join(' ')} ${r.subject ?? ''} ${(r.aliases ?? []).join(' ')}`));
         const frequencies = new Map();
         for (const word of wordList(e.content)) frequencies.set(word, (frequencies.get(word) || 0) + 1);
@@ -464,7 +468,7 @@ export function validateWorkflow(input) {
 }
 export function makeBundle(books, metadata, settings) {
     const meta = copy(metadata); delete meta.undo;
-    return { sceneArchivistStory: SCHEMA, version: '1.0.6', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
+    return { sceneArchivistStory: SCHEMA, version: '1.0.7', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
 }
 export function parseBundle(raw) {
     const obj = typeof raw === 'string' ? parseJSON(raw) : copy(raw);

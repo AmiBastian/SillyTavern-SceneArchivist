@@ -29,6 +29,7 @@ export function renderRecovery(w) {
     const entries = subject ? memoryEntries(w, subject).filter(e => e.content.toLocaleLowerCase().includes(query)) : [];
     w.root.querySelector('#sa-character-memories').innerHTML = entries.map(e => `<article class="sa-result"><b>${h(M.title(e))}</b> <span class="sa-badge">${h(M.record(e).status)}${e.disable ? ' · disabled' : ''}</span><p class="sa-hint">${h(e.world)}</p><div class="sa-prose">${h(e.content)}</div><div class="sa-row">${button('inspect','🔬 Inspect / edit',`data-id="${h(M.record(e).id)}"`)}${button('sources','🔗 Sources',`data-id="${h(M.record(e).id)}"`)}${button('characterUpdate','✨ AI update…',`data-id="${h(M.record(e).id)}"`)}</div></article>`).join('') || `<p class="sa-hint">${subject ? 'No matching memory text.' : 'Choose a character to read their memories here.'}</p>`;
     w.renderFindings(w.state().findings || []);
+    w.layout?.help.refresh(w.root.querySelector('#sa-character-memories'));
 }
 
 function quickFilter(w, key) {

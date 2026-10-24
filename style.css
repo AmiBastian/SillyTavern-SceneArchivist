@@ -1,4 +1,4 @@
-/* Scene Archivist 1.0.6: a quiet workspace around a busy story. */
+/* Scene Archivist 1.0.7: a quiet workspace around a busy story. */
 .sa-panel, .sa-panel *, .sa-review, .sa-review * { box-sizing: border-box; }
 .sa-panel {
   --sa-accent: #c9b4ef;
@@ -229,3 +229,33 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
 @media (prefers-reduced-motion: reduce) {
   .sa-panel *, .sa-help-scope * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+
+/* Compact navigation with visible working controls. */
+.sa-sidebar-workspace { display:grid; grid-template-columns:145px minmax(0,1fr); gap:0 18px; padding:18px; }
+.sa-sidebar-workspace > .sa-title { grid-column:1/-1; margin:0 0 14px; padding-bottom:12px; border-bottom:1px solid var(--sa-line); }
+.sa-sidebar-workspace .sa-brand-mark { width:32px; height:32px; font-size:22px; }
+.sa-sidebar-workspace .sa-brand .sa-eyebrow,.sa-sidebar-workspace .sa-page-heading .sa-eyebrow { display:none; }
+.sa-sidebar-workspace .sa-wordmark { font:650 20px/1.4 system-ui,sans-serif; letter-spacing:0; }
+.sa-sidebar-workspace > .sa-tabs { display:flex; flex-direction:column; align-self:start; border:0; padding:0 10px 0 0; border-right:1px solid var(--sa-line); margin:0; }
+.sa-sidebar-workspace > .sa-tabs button { justify-content:flex-start; padding:12px 8px; }
+.sa-workspace-main { min-width:0; }
+.sa-sidebar-workspace .sa-workspace-toolbar { border:0; padding:0 0 8px; gap:10px; }
+.sa-sidebar-workspace .sa-display-note { display:none; }
+.sa-sidebar-workspace .sa-page-heading { padding:4px 0; }
+.sa-sidebar-workspace .sa-page-heading h2 { font:650 20px/1.3 system-ui,sans-serif; margin:0 0 3px; }
+.sa-sidebar-workspace .sa-page-heading p { font-size:.82em; }
+.sa-sidebar-workspace .sa-dashboard { padding:6px 0 10px; gap:6px 12px; }
+.sa-sidebar-workspace .sa-start-banner { grid-column:1/-1; padding:10px 12px; margin:0; }
+.sa-sidebar-workspace .sa-start-banner .sa-eyebrow,.sa-sidebar-workspace .sa-start-banner p { display:none; }
+.sa-sidebar-workspace .sa-start-banner h3 { font:600 .85em/1.4 system-ui,sans-serif; margin:0; }
+.sa-range-message-preview { max-height:240px; overflow:auto; border-left:2px solid var(--sa-accent); padding:0 12px; margin:10px 0; overflow-wrap:anywhere; }
+.sa-range-message-preview p { display:grid; gap:3px; margin:10px 0; font-size:.85em; }
+.sa-range-message-preview b { color:var(--sa-muted); font-size:.85em; }
+.sa-range-message-preview span { white-space:pre-wrap; }
+@media(max-width:720px) {
+ .sa-sidebar-workspace { display:block; padding:12px; }
+ .sa-sidebar-workspace > .sa-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border:0; padding:0; margin-bottom:12px; }
+ .sa-sidebar-workspace > .sa-tabs button { justify-content:center; padding:9px 3px; }
+}
+#sa_drawer .sa-sidebar-workspace { display:block; }
+#sa_drawer .sa-sidebar-workspace > .sa-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border:0; }

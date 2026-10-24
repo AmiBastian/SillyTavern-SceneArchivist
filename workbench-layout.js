@@ -66,7 +66,7 @@ export class WorkspaceLayout {
         root.classList.add('sa-workspace');
         const labels = { sa_lorebook: 'Story archive lorebook', sa_newname: 'New archive name', sa_tr_sel: 'Tracker', sa_pl_sel: 'Archive prompt preset', sa_pl_name: 'Prompt name', sa_prompt: 'Archive prompt', sa_mem_prompt: 'Character memory prompt', sa_cond_prompt: 'Character memory condense prompt', sa_tr_prompt: 'Tracker prompt', sa_mem_from: 'First story unit', sa_mem_to: 'Last story unit, inclusive', sa_through: 'Mark archived through message' };
         for (const [id, label] of Object.entries(labels)) root.querySelector('#' + id)?.setAttribute('aria-label', label);
-        const title = root.querySelector('.sa-title'), version = title.querySelector('.sa-ver')?.textContent || 'v1.0.6';
+        const title = root.querySelector('.sa-title'), version = title.querySelector('.sa-ver')?.textContent || 'v1.0.7';
         title.innerHTML = `<div class="sa-brand"><span class="sa-brand-mark" aria-hidden="true">🗂️</span><div><span class="sa-eyebrow">YOUR STORY, KEPT TOGETHER</span><div class="sa-wordmark">Scene Archivist <span class="sa-ver">${h(version)}</span></div></div></div><div class="sa-header-actions"><button type="button" class="sa-toolbar-button" data-sa-ui="guide">🌱 Start here</button><button type="button" class="sa-toolbar-button" data-sa-ui="help">? Help & examples</button></div>`;
         const toolbar = document.createElement('div'); toolbar.className = 'sa-workspace-toolbar';
         toolbar.innerHTML = `<div class="sa-view-choice" role="group" aria-label="Interface detail"><button type="button" data-sa-ui="essentials" aria-pressed="true">Essentials</button><button type="button" data-sa-ui="all" aria-pressed="false">All tools</button></div><label class="sa-explain-switch"><input type="checkbox" data-sa-ui="explain"><span>Show help buttons</span></label><span class="sa-display-note">Choose how much you see.</span>`;
@@ -111,6 +111,12 @@ export class WorkspaceLayout {
         this.help.observe(root); this.help.setExplain(this.preferences.explain);
         root.querySelector('[data-sa-ui="explain"]').checked = this.preferences.explain;
         this.setMode(this.preferences.mode, false); this.select(this.w.currentTab);
+        const nav = root.querySelector('.sa-tabs');
+        const main = document.createElement('div'); main.className = 'sa-workspace-main';
+        for (const node of [...root.children]) if (node !== title && node !== nav) main.append(node);
+        root.append(main); this.w.panes.archive.append(welcome);
+        welcome.querySelector('h3').textContent = 'Need a hand?';
+        root.classList.add('sa-sidebar-workspace');
     }
     arrangeActions() {
         const root = this.root;
@@ -147,6 +153,10 @@ export class WorkspaceLayout {
         const rows = [...ledger.children];
         for (const row of rows) if (!['sa_ledger', 'sa_ledger_sum'].includes(row.id)) ledgerTools.lastElementChild.append(row);
         ledger.append(ledgerTools);
+        // Full-width coverage belongs before the two smaller advanced cards.
+        // Inserting it between them leaves an empty column on both rows.
+        const ledgerCard = ledger.closest('.sa-card'), tidyCard = root.querySelector('[data-sa-section="archive-tidy"]');
+        if (tidyCard) tidyCard.before(ledgerCard);
         const range = root.querySelector('[data-sa-section="archive-range"] .sa-body');
         range.querySelector('.sa-hint').textContent = 'Both message numbers are included. Preview the range before summarizing.';
         const visibility = document.createElement('details'); visibility.className = 'sa-inline-tools';
@@ -177,12 +187,14 @@ export class WorkspaceLayout {
         if (persist) this.savePreferences();
         this.help.hide();
         this.refresh();
+        this.help.refresh(this.w.panes[this.w.currentTab]);
     }
     select(tab) {
         const metadata = TAB_GUIDE[tab] || TAB_GUIDE.archive;
-        this.root.querySelector('#sa-page-heading').innerHTML = `<div><span class="sa-eyebrow">${h(metadata.label.toUpperCase())}</span><h2>${h(metadata.title)}</h2><p>${h(metadata.note)}</p></div>`;
+        this.root.querySelector('#sa-page-heading').innerHTML = `<div><span class="sa-eyebrow">${h(metadata.label.toUpperCase())}</span><h2>${h(metadata.label)}</h2><p>${h(metadata.note)}</p></div>`;
         this.root.querySelector('.sa-header-actions [data-sa-ui="guide"]').hidden = tab === 'archive';
         this.help.hide();
+        this.help.refresh(this.w.panes[tab]);
     }
     refresh() {
         const count = this.w.selected.size, selection = this.root.querySelector('#sa-selection-strip');

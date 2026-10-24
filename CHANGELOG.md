@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.7 · October 24, 2026
+
+- Added compact sidebar navigation on desktop, a short workspace header, visible everyday actions, and compact navigation on narrow screens.
+- Added bounded original-message excerpts to Preview range without changing the inclusive summary range.
+
+- Fixed empty Archive grid slots when the full-width Ledger separated the smaller Tidy and Repair cards.
+- Removed repeated full-panel help scans. Hover and keyboard explanations resolve on demand; separate help buttons are prepared in batches when enabled or needed for touch.
+- Deferred Library rendering while its tab or panel is hidden, and refresh the current results when the panel opens again.
+- Coalesced rapid search input, kept unchanged result rows in place, and avoided tokenizing entry bodies for an empty search while preserving filtering and ordering.
+- Added large-archive regression checks using 1,000 invented records and refreshed the guide, screenshots and walkthroughs.
+
 ## 1.0.6 · October 24, 2026
 
 - Redesigned the workspace with a clearer visual hierarchy, readable action labels, workflow tab order, responsive layouts, and host theme colors.

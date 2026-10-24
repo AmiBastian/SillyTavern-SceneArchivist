@@ -1,4 +1,4 @@
-# Scene Archivist 1.0.6
+# Scene Archivist 1.0.7
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -30,7 +30,7 @@ If your characters can hide a body but cannot remember where they had dinner, we
 
 ### About the screenshots and videos
 
-This guide includes **62 screenshots and three animated walkthroughs**, with MP4 versions beside each animation. The 1.0.6 captures use the extension in **SillyTavern 1.19.0**, with an invented story and scripted model replies. They demonstrate the controls and real lorebook saves, not live provider output or private chats. Your theme and fonts can look different.
+This guide includes **63 screenshots and three animated walkthroughs**, with MP4 versions beside each animation. The 1.0.7 captures use the extension in **SillyTavern 1.19.0**, with an invented story and scripted model replies. They demonstrate the controls and real lorebook saves, not live provider output or private chats. Your theme and fonts can look different.
 
 ## Install and make your first archive
 
@@ -44,6 +44,16 @@ This guide includes **62 screenshots and three animated walkthroughs**, with MP4
 8. Use **Library → Sources** to check the evidence and **Settings → Backups and workflow presets → Export complete story** to keep a backup.
 
 For a manual setup, **Archive → Your archive** has the archive selector and Create. Expand **Archive setup & tools** for Check setup, Attach to chat, Paste a summary, Fix delivery and Diagnostics. **Help & examples** explains the workflow before you change a real story.
+
+## Smoother layout and Library in 1.0.7
+
+Desktop navigation now uses a compact sidebar, with a short header and the everyday archive controls open. Narrow screens keep a compact tab grid. Preview range shows up to six message excerpts, with long messages shortened for display; summarizing still uses the entire selected range. Help and guided setup remain available without a large welcome banner.
+
+The Ledger now sits before the two smaller advanced Archive sections, so collapsing them in All tools keeps Tidy and Repair together without empty grid slots.
+
+Library refreshes when you are viewing it. Search waits for a brief pause while you type, and unchanged results keep their existing rows. Hover and keyboard help remain available; separate help buttons are prepared when you enable them or use a touch device.
+
+![Collapsed advanced cards stay together below the Ledger](docs/media/63-collapsed-grid.png)
 
 ## A clearer way to use the archive
 
@@ -78,7 +88,7 @@ The **Worked example** shows two invented chat messages becoming a reviewed summ
 
 </details>
 
-## Correct, rebuild, and continue in 1.0.6
+## Correct, rebuild, and continue
 
 ### Find one character’s memories
 
@@ -176,7 +186,7 @@ Each record has its proposed text, original text, and highlighted added and remo
 
 ### Control request size and review timing
 
-![Version 1.0.6 settings for character request size and combined or per-step review](docs/media/36-bulk-settings.png)
+![Version 1.0.7 settings for character request size and combined or per-step review](docs/media/36-bulk-settings.png)
 
 In **Settings → Story memory settings**:
 
@@ -186,7 +196,7 @@ In **Settings → Story memory settings**:
 
 A whole run can still use several model requests. Grouping suitable character lists reduces repeated request overhead without forcing the entire cast into an oversized response. No need to click Apply 33 bloody times.
 
-**Updating to 1.0.6:** finish or discard an old unfinished job before starting a new run. **Review later** keeps a prepared result for **Resume / review**; **Discard unfinished job** abandons its unapproved results while keeping records already written. Old jobs retain their original review behavior. Replace all extension files together. This release also needs `recovery-tools.js`, `workbench-recovery.js`, `workbench-help.js`, and `workbench-layout.js` alongside the existing modules. Keep all extension files together.
+**Updating to 1.0.7:** finish or discard an old unfinished job before starting a new run. **Review later** keeps a prepared result for **Resume / review**; **Discard unfinished job** abandons its unapproved results while keeping records already written. Old jobs retain their original review behavior. Replace all extension files together. This release also needs `recovery-tools.js`, `workbench-recovery.js`, `workbench-help.js`, and `workbench-layout.js` alongside the existing modules. Keep all extension files together.
 
 ## Find your way around
 
@@ -549,7 +559,7 @@ Use **Show activation source** to filter Keyword, Vector, Always On, AI Recall, 
 <details>
 <summary>See the budget decision and the model-context view</summary>
 
-![Version 1.0.6 memory budget showing native keyword and vector activation separately, vector search status, and omitted records](docs/media/22-loading-budget.png)
+![Version 1.0.7 memory budget showing native keyword and vector activation separately, vector search status, and omitted records](docs/media/22-loading-budget.png)
 
 **Memory budget and loading reasons** shows the entries selected by SillyTavern and why others were omitted. Native World Info finishes its scan first, including keyword rules, vector activations, recursion, probability, inclusion groups, cooldowns and delays. Scene Archivist then trims the activated story entries to one total content-token cap. A covering recap and its sources do not spend that cap twice. Pins change priority among activated entries; they do not activate unmatched records.
 
@@ -561,7 +571,7 @@ Normal-reply evidence survives quiet helpers and previews. An observed vector re
 
 **What the model saw** shows records activated in the last observed World Info scan, their token counts, and recorded selection reasons. Reasons can overlap. Check it alongside the budget view when a memory seems to be missing. A pin increases priority; it does not override the cap. Use SillyTavern's prompt inspection to verify the exact final prompt.
 
-![Version 1.0.6 model-context view with recorded keyword, vector, and Always on activation reasons](docs/media/23-model-context.png)
+![Version 1.0.7 model-context view with recorded keyword, vector, and Always on activation reasons](docs/media/23-model-context.png)
 
 </details>
 
@@ -652,7 +662,7 @@ AI summaries, memory generation, condensation, diaries, continuity checks, and e
 <details>
 <summary>See native World Info vector guidance</summary>
 
-![Version 1.0.6 guidance for configuring vectors in native Vector Storage and individual lorebook entries](docs/media/29-native-vectors.png)
+![Version 1.0.7 guidance for configuring vectors in native Vector Storage and individual lorebook entries](docs/media/29-native-vectors.png)
 
 Enable World Info in SillyTavern's **Vector Storage**, then use each lorebook entry's vector setting, or native **Enabled for all** if you deliberately want that behavior. Scene Archivist observes the native integration and never marks every story entry as vector eligible. Native keyword activation continues to follow the entry's primary and secondary keywords and other World Info rules. Activated story entries share the archive memory budget.
 
@@ -677,7 +687,7 @@ Back up your skeletons. The closet is not version control.
 
 ### Paused jobs, saved results, and Undo
 
-![Version 1.0.6 paused archive job with Resume / review, Pause after this request, and Discard unfinished job](docs/media/30-job-recovery.png)
+![Version 1.0.7 paused archive job with Resume / review, Pause after this request, and Discard unfinished job](docs/media/30-job-recovery.png)
 
 Bulk jobs retain their generated results and proposed book changes before the combined review. The progress panel distinguishes prepared steps from approved changes being saved. **Review later** closes the review and keeps the prepared result for **Resume / review**. **Pause after this request** stops between requests. **Discard unfinished job** ends the job and makes its unapproved results unavailable; records already written to lorebooks are kept. A failed job also offers **Retry / review saved result**, so a usable prepared result can be reviewed again without another model call.
 

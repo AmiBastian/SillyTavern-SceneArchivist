@@ -150,11 +150,13 @@ export const helpHtml = data => `<div class="sa-help-badges"><span class="sa-bad
 export class ControlHelp {
     constructor(w) {
         this.w = w; this.roots = new WeakSet(); this.tooltip = null; this.anchor = null; this.timer = null;
-        this.explain = false;
+        this.explain = false; this.pendingRoots = new Set(); this.enhanceFrame = null;
+        this.touch = matchMedia('(hover: none), (pointer: coarse)');
+        this.touch.addEventListener?.('change', () => this.setExplain(this.explain));
         this.listen = (name, fn, capture = false) => document.addEventListener(name, fn, capture);
-        this.listen('pointerover', e => { if (e.pointerType === 'touch') return; const target = e.target.closest?.('[data-sa-help-ready]'); if (target && !target.contains(e.relatedTarget)) this.schedule(target); });
+        this.listen('pointerover', e => { if (e.pointerType === 'touch') return; const target = this.control(e.target); if (target && !target.contains(e.relatedTarget)) this.schedule(target); });
         this.listen('pointerout', e => { if (this.anchor?.contains(e.target) && !this.anchor.contains(e.relatedTarget)) this.hide(); });
-        this.listen('focusin', e => { const target = e.target.closest?.('[data-sa-help-ready]'); if (target) this.schedule(target, 120); });
+        this.listen('focusin', e => { const target = this.control(e.target); if (target) this.schedule(target, 120); });
         this.listen('focusout', e => { if (this.anchor?.contains(e.target)) this.hide(); });
         this.listen('pointerdown', () => this.hide(), true);
         this.listen('keydown', e => { if (e.key !== 'Escape') return; if (this.tooltip || this.timer) { this.escapeDialog = this.anchor?.closest('dialog'); this.escapeAt = performance.now(); this.hide(); e.preventDefault(); e.stopImmediatePropagation(); } else this.escapeDialog = null; }, true);
@@ -162,6 +164,7 @@ export class ControlHelp {
         // handler prevented the key event. Stop that separate cancel event.
         this.listen('cancel', e => { if (this.escapeDialog === e.target && performance.now() - this.escapeAt < 500) { e.preventDefault(); e.stopImmediatePropagation(); this.escapeDialog = null; } }, true);
         this.listen('scroll', () => { const focused = this.anchor === document.activeElement ? this.anchor : null; this.hide(); if (focused) this.schedule(focused, 180); }, true);
+        this.listen('toggle', e => { if (e.target instanceof Element && e.target.open && e.target.closest('.sa-help-scope')) this.refresh(e.target); }, true);
         this.listen('click', e => {
             const button = e.target.closest?.('[data-sa-help-for]'); if (!button) return;
             e.preventDefault(); e.stopPropagation(); this.hide();
@@ -172,29 +175,56 @@ export class ControlHelp {
     observe(root) {
         if (!(root instanceof Element) || this.roots.has(root)) return;
         this.roots.add(root); root.classList.add('sa-help-scope'); root.classList.toggle('sa-explain-on', this.explain);
-        this.decorate(root);
-        const observer = new MutationObserver(() => this.decorate(root));
-        observer.observe(root, { childList: true, subtree: true });
-        root._saHelpObserver = observer;
+        this.refresh(root);
+    }
+    control(target) {
+        const control = target.closest?.('button.menu_button,input.menu_button,[data-review-include],input.text_pole,select.text_pole,[data-sa-option],[data-sa-field]');
+        if (!control || !control.closest('.sa-help-scope') || control.closest('.sa-help-hub') || !helpFor(control)) return null;
+        return this.prepare(control);
+    }
+    prepare(control) {
+        if (control.hasAttribute('data-sa-help-ready')) return control;
+        const data = helpFor(control); if (!data) return control;
+        control.dataset.saHelpReady = 'true';
+        if (control.title) { control.dataset.saOriginalTitle = control.title; control.removeAttribute('title'); }
+        control.setAttribute('aria-description', `${data.description} ${data.changes}`.trim());
+        return control;
+    }
+    refresh(root = this.w.root) {
+        if (!(root instanceof Element) || !(this.explain || this.touch.matches)) return;
+        this.pendingRoots.add(root);
+        if (this.enhanceFrame != null) return;
+        this.enhanceFrame = requestAnimationFrame(() => {
+            this.enhanceFrame = null;
+            const roots = [...this.pendingRoots]; this.pendingRoots.clear();
+            if (!(this.explain || this.touch.matches)) return;
+            for (const scope of roots) if (scope.isConnected) this.decorate(scope);
+        });
     }
     decorate(root) {
-        for (const control of root.querySelectorAll('button.menu_button,input.menu_button,[data-review-include],input.text_pole,select.text_pole,[data-sa-option],[data-sa-field]')) {
-            if (control.hasAttribute('data-sa-help-ready') || control.closest('.sa-help-hub') || control.dataset.saHelpFor != null) continue;
-            const data = helpFor(control); if (!data) continue;
-            control.dataset.saHelpReady = 'true';
-            // The detailed tooltip replaces native title so two bubbles do not overlap.
-            if (control.title) { control.dataset.saOriginalTitle = control.title; control.removeAttribute('title'); }
-            control.setAttribute('aria-description', `${data.description} ${data.changes}`.trim());
-            if (control.matches('button.menu_button,input.menu_button') && !control.closest('.sa-help-control')) {
-                const wrapper = document.createElement('span'); wrapper.className = 'sa-help-control';
-                control.before(wrapper); wrapper.append(control);
-                const help = document.createElement('button'); help.type = 'button'; help.className = 'sa-context-help'; help.textContent = '?';
-                help.dataset.saHelpFor = helpKey(control); help.setAttribute('aria-label', `Help: ${data.title}`); help.setAttribute('aria-haspopup', 'dialog');
-                wrapper.append(help);
+        if (!(this.explain || this.touch.matches)) return;
+        // Read visibility in one pass before making DOM changes. Interleaving
+        // a geometry read with each wrapper forces repeated browser layouts.
+        const controls = [...root.querySelectorAll('button.menu_button,input.menu_button')].filter(control => !control.closest('.sa-help-control,.sa-help-hub') && helpFor(control) && control.getClientRects().length);
+        for (const control of controls) {
+            const data = helpFor(this.prepare(control));
+            const wrapper = document.createElement('span'); wrapper.className = 'sa-help-control';
+            control.before(wrapper); wrapper.append(control);
+            const help = document.createElement('button'); help.type = 'button'; help.className = 'sa-context-help'; help.textContent = '?';
+            help.dataset.saHelpFor = helpKey(control); help.setAttribute('aria-label', `Help: ${data.title}`); help.setAttribute('aria-haspopup', 'dialog');
+            wrapper.append(help);
+        }
+    }
+    setExplain(value) {
+        this.explain = !!value;
+        for (const root of document.querySelectorAll('.sa-help-scope')) {
+            root.classList.toggle('sa-explain-on', this.explain);
+            if (this.explain || this.touch.matches) this.refresh(root);
+            else for (const wrapper of root.querySelectorAll('.sa-help-control')) {
+                const control = wrapper.querySelector('button.menu_button,input.menu_button'); if (control) wrapper.replaceWith(control);
             }
         }
     }
-    setExplain(value) { this.explain = !!value; document.querySelectorAll('.sa-help-scope').forEach(root => root.classList.toggle('sa-explain-on', this.explain)); }
     schedule(anchor, delay = 420) {
         if (!helpFor(anchor) || anchor.closest('[hidden]') || !anchor.getClientRects().length) return;
         this.hide(); this.anchor = anchor; this.timer = setTimeout(() => { this.timer = null; this.show(anchor); }, delay);
