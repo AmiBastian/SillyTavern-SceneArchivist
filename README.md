@@ -1,4 +1,4 @@
-# Scene Archivist 1.0.5
+# Scene Archivist 1.0.6
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -15,6 +15,7 @@ If your characters can hide a body but cannot remember where they had dinner, we
 - [Install and make your first archive](#install-and-make-your-first-archive)
 - [Share an archive across chats](#share-an-archive-across-chats)
 - [Run the whole job, then review](#run-the-whole-job-then-review)
+- [The new layout and built-in help](#a-clearer-way-to-use-the-archive)
 - [Find your way around](#find-your-way-around)
 - [Archive exactly what you choose](#archive-exactly-what-you-choose)
 - [Inspect, correct, and protect records](#inspect-correct-and-protect-records)
@@ -29,24 +30,128 @@ If your characters can hide a body but cannot remember where they had dinner, we
 
 ### About the screenshots and videos
 
-This guide includes **46 screenshots and three animated walkthroughs**, with MP4 versions linked beside each animation. The captures render the extension's actual interface in a demonstration host using an invented story and scripted model replies. They show how the controls work; they are not recordings of live API calls or Mira's private chats. All screenshots and walkthroughs were recaptured from **1.0.5**. Your SillyTavern theme, fonts, and popup styling can look different.
+This guide includes **62 screenshots and three animated walkthroughs**, with MP4 versions beside each animation. The 1.0.6 captures use the extension in **SillyTavern 1.19.0**, with an invented story and scripted model replies. They demonstrate the controls and real lorebook saves, not live provider output or private chats. Your theme and fonts can look different.
 
 ## Install and make your first archive
 
-1. In SillyTavern, open the **Extensions** panel and click **Install extension**.
+1. In SillyTavern, open **Extensions → Install extension**.
 2. Paste [https://github.com/AmiBastian/SillyTavern-SceneArchivist](https://github.com/AmiBastian/SillyTavern-SceneArchivist), leave the branch field at its default, and confirm installation.
-3. Reload SillyTavern after installation and open a chat.
-4. Open the wand menu and choose **Scene Archivist**. **Archive scene** in that menu runs a summary directly.
-5. In **Archive → Your archive**, select a lorebook or enter a new name and press **Create**. Use **Check setup**, then **Attach to chat** if needed.
-6. In **Settings → Prompts**, choose a prompt and its story unit. Check your delivery settings and leave **Review before writing** enabled while setting up.
-7. For guided setup, open **Settings → Your first archive → Guide me through an archive**. Choose an existing helper connection profile or your current model, an archive, and a message range. The guide previews the range without sending a model request.
-8. Choose **Summarize this range**, review the result, then inspect it in **Library**. Export a complete story backup once you are happy with the setup.
+3. Reload SillyTavern and open a chat with your model connection ready.
+4. Open the wand menu and choose **Scene Archivist**.
+5. In **Archive**, choose **Start here**. Select or create an archive, choose an optional helper connection profile, and preview one short inclusive message range. This setup step makes no model request.
+6. Use the built-in archive prompt, or choose one under **Settings → Prompts**. Leave **Review before writing** enabled while setting up.
+7. Choose **Summarize this range**, review the result, and save it. In **Characters**, choose **Create next batch** to make memories from the saved summary.
+8. Use **Library → Sources** to check the evidence and **Settings → Backups and workflow presets → Export complete story** to keep a backup.
+
+For a manual setup, **Archive → Your archive** has the archive selector and Create. Expand **Archive setup & tools** for Check setup, Attach to chat, Paste a summary, Fix delivery and Diagnostics. **Help & examples** explains the workflow before you change a real story.
+
+## A clearer way to use the archive
+
+The default **Essentials** view puts everyday actions first. **All tools** reveals advanced sections in place; switching views keeps your entered values and unfinished jobs. This is a display preference, so enabled automation continues and is named above the workspace. Your choice is remembered on this device.
+
+- **Archive → Start here** opens guided setup: choose a book, preview one scene, then review its summary.
+- **Help & examples** stays at the top of every tab. It includes a three-step quick start, a searchable button guide and a four-stage worked example.
+- Hover or keyboard-focus an action for a detailed explanation, including whether it uses AI and what changes. **Escape** dismisses the explanation. Enable **Show help buttons** to open it separately; touch devices show the help buttons automatically.
+- Expand **Archive setup & tools**, **Message visibility**, or **Reset & rebuild memories** for occasional actions. Their names explain their purpose before you open them.
+- The six tabs follow the workflow: **Archive**, **Characters**, **Library**, **Search**, **Condense**, and **Settings**. Each tab has a short description of what belongs there.
+
+![Built-in quick start and navigation guide](docs/media/56-guided-help.png)
+
+![Detailed action help, including model use and practical effects](docs/media/58-button-help.png)
+
+### Explore a sample before changing your story
+
+The **Worked example** shows two invented chat messages becoming a reviewed summary, then a dated character memory, followed by separate keyword and vector loading explanations. It is read-only: changing example stages makes no model request and writes nothing to your chat or books. The loading illustrations are examples, not a live vector scan.
+
+![Read-only character memory example](docs/media/59-worked-example.png)
+
+![Searchable guide explaining the redo action](docs/media/60-button-guide.png)
+
+<details>
+<summary>All tools, touch help, and light host colors</summary>
+
+![All tools reveals additional sections in place](docs/media/57-all-tools.png)
+
+![Touch help opens separately from the action](docs/media/61-mobile-help.png)
+
+![Workspace following light host theme colors](docs/media/62-light-theme.png)
+
+</details>
+
+## Correct, rebuild, and continue in 1.0.6
+
+### Find one character’s memories
+
+![Character memory browser with search and update controls](docs/media/47-character-memory-browser.png)
+
+Open **Characters → Character memory browser**, choose a character, and search within their memory text. **Inspect / edit**, **Sources**, and **AI update…** are available beside their lists. Library has quick filters for **All**, **Current chat**, **Active characters**, **Memories**, **Story units**, and **Needs review**. The advanced filters remain available below them.
+
+### Ask the AI to check or update a memory
+
+![Reviewed AI update with an exact original-message range](docs/media/48-ai-memory-update.png)
+
+Choose **AI update…** and optionally provide the last 20 or 40 messages, all unarchived messages, or an exact inclusive message range. Add a correction or focus if needed. Existing memory text and linked source records are supplied. The full replacement is reviewed before saving; previous versions remain in revisions and Undo. Author instructions are recorded separately from transcript evidence. A changed list clears its whole-list learning date and historical knowledge states so new facts are not presented as earlier knowledge; dated memory groups and revision history remain. Set an explicit learning date in Inspect when supported. Locked, exact, or keep-detailed lists require their protection to be reviewed first.
+
+**Review & organize memories** also offers original chat evidence. With evidence, a list may grow to recover omitted details rather than being forced to shrink. Without added evidence or instructions, the existing chunked organization workflow is used. A selection exceeding the request budget is rejected before a model call. Use a smaller range or adjust the budget.
+
+![Memory organization with additional original chat evidence](docs/media/50-memory-audit-chat-range.png)
+
+Additional source messages remain linked to the revised memory. If those messages change later, the memory needs review. To replace an invalid transcript source, include its complete old range in the new evidence selection. Shared scenes do not prove that every character witnessed or learned every fact.
+
+### Clear or re-extract memories
+
+Under **Characters → Character memory browser → Reset & rebuild memories**, **Clear this character’s memories** and **Clear all character memories** preview the scope before clearing. Previous text is retained in revisions and Undo, emptied lists are disabled, linked dependents need review, and affected memory receipts are reset. Archive summaries and original chat messages remain available.
+
+**Re-extract all source units** reads every current archived unit again, even with existing receipts. This uses model requests. Reviewed additions are merged into the existing lists and exact duplicate memory bullets are removed. It does not automatically wipe existing lists. Use **AI update…** for a reviewed replacement, or clear a list first when intentionally starting over. Re-extraction can discover characters without an existing memory list.
+
+### Redo a ledger range
+
+![Ledger coverage and redo actions](docs/media/51-ledger-redo.png)
+
+Each ledger row now offers:
+
+- **Mark unprocessed:** remove that coverage marker, keeping summaries and message visibility. Overlapping coverage from other ledger rows still counts.
+- **Redo summaries:** preview linked source units and regenerate replacements from each unit’s complete original message ranges. Existing record identities are retained, previous text stays in revisions, and dependent memories need repair. A summary crossing the selected row uses its complete source range, shown before starting.
+
+![Preview of linked summaries and complete source ranges](docs/media/54-redo-preview.png)
+
+Legacy summaries without recorded message ranges need manual correction or a newly selected transcript range. Material skipped by an earlier heading collision is not automatically reconstructed; review the affected chat ranges and redo or re-archive them deliberately.
+
+### Repair and approval messages
+
+![Guidance for finding records that need review](docs/media/52-repair-guidance.png)
+
+Repair explains how to find stale records and opens **Library → Needs review**. Correct or rebuild a source first, then use **Repair selected records and dependents** to rebuild the affected derived records in order.
+
+Combined reviews include **Select all** and **Deselect all**. If a result cannot be saved, the error names the record and distinguishes an unchecked source from one that is missing, stale, or changed after generation. Retained superseded originals remain valid evidence when their recorded hashes match. Independent approvals can still be saved while blocked proposals remain for review. Selecting every checkbox does not make outdated evidence current. If only outdated selected results remain, **Save as needing review** can retain their text in the books while keeping their original evidence hashes and excluding them from injection. New memory receipts are held when their accepted memory results still need repair. This option does not bypass unchecked source approvals.
+
+![Explicitly retaining outdated results for repair](docs/media/55-approval-recovery.png)
+
+### Branch backwards without future memories
+
+![Three branch-history options](docs/media/53-branch-history.png)
+
+Switch to **All tools**, then under **Settings → When branching a chat**, choose:
+
+| Option | Behaviour |
+| --- | --- |
+| **Inherit archive; flag changed evidence** | Inherit the books and flag invalid evidence in private branches. An archive already in shared mode stays shared. |
+| **Start with empty private archive books** | Create empty private books and reset this branch’s coverage and processing state. |
+| **Keep verified history before the split** | Keep only hash-verified earlier records and supported dependents. Entire summaries crossing the split, mixed earlier/later memory lists, unknown legacy evidence, and unsupported dependency chains are excluded from the new books. |
+
+The parent’s books remain available. Fresh and verified-history modes detach copied chats into private books even when the parent archive is shared. A separate new chat can still join a shared archive normally. The verified-history option does not guess which sentences to salvage from a mixed record; rebuild missing memories from the retained earlier units. Copied unfinished jobs do not resume against the new branch. Interrupted branch creation retains its intended book mapping for retry.
+
+### Keep continuity findings on screen
+
+![Accumulated continuity findings with recent and whole-archive controls](docs/media/49-continuity-results.png)
+
+**Check recent continuity** uses the configured number of newest eligible records, 20 by default. **Check whole archive** processes all eligible records. The displayed scope names the selection. Findings accumulate across every batch of that run, remain separate from Ask answers, and survive reopening the panel. Another check starts a new set of findings. Findings propose corrections; they do not edit canon automatically.
 
 ## Share an archive across chats
 
 ![Opt-in shared archive controls](docs/media/37-shared-archive.png)
 
-Open the original chat and choose **Settings → Archive sharing → Share this archive across chats**. Then select that same archive in another chat. New summaries continue from the archive's highest Day, Chapter, or other unit. Character memories use the shared destinations. Each chat keeps its own message coverage and source evidence; a source from another chat is labeled with its origin instead of being checked against the wrong transcript.
+Open the original chat and choose **Settings → Archive sharing → Share this archive across chats**. Then select that same archive in another chat. New summaries continue from the archive's highest Day, Chapter, or other unit. Later messages from the original source chat can continue the latest unit; another chat starts a new unit after the current highest number. Character memories use the shared destinations. Each chat keeps its own message coverage and source evidence; a source from another chat is labeled with its origin instead of being checked against the wrong transcript.
 
 Sharing is **off by default**. Private chats keep the existing branching behavior. Turning sharing off makes participating chats create private branches before their next write. Restored backups are private too; enable sharing explicitly if you want it again.
 
@@ -56,12 +161,12 @@ Keep one writer active at a time. SillyTavern saves entire lorebooks without a c
 
 **Together at the end is the default.** Start a bulk job and let it process the full selection. Review the proposed records together in one window, edit any text you want, then save. Larger reviews start with the individual records collapsed, so 33 character lists do not immediately become a wall of text.
 
-This applies to scene-summary passes, new character memories and their follow-up audit, character-memory condensation, archive condensation, fact/knowledge extraction, and tracker updates. **Archive thoroughly** can prepare its archive, memory, audit, and enabled tracker stages before that same final review. Approved records are saved after review. Message coverage and visibility are finalized when the complete bulk job is accepted. If you discard a partially approved job, its written records stay; check coverage before summarizing the same range again. Opt-in automatic archive recap creation still runs without a review, and the archive review checkbox still controls archive-only runs.
+This applies to scene-summary passes, new character memories and their follow-up audit, character-memory condensation, archive condensation, fact/knowledge extraction, and tracker updates. **Full archive pass** can prepare its archive, memory, audit, and enabled tracker stages before that same final review. Approved records are saved after review. Message coverage and visibility are finalized when the complete bulk job is accepted. If you discard a partially approved job, its written records stay; check coverage before summarizing the same range again. Opt-in automatic archive recap creation still runs without a review, and the archive review checkbox still controls archive-only runs.
 
 <details>
-<summary>See the combined review for a 33-character demonstration</summary>
+<summary>See a combined review of source units and character memories</summary>
 
-![One combined review containing all 33 character memory lists, with expandable records](docs/media/35-combined-review.png)
+![One combined review containing source units and character memories, with expandable records](docs/media/35-combined-review.png)
 
 Each record has its proposed text, original text, and highlighted added and removed lines. Tick the results you want to save and choose **Save approved results**. Unticked results and your edits stay in the draft for the next review. A dependent result is deferred when it needs a source you have not approved. **Review later** keeps the prepared results; **Resume / review** opens them again without repeating completed requests. **Undo** groups the job's accepted changes, including earlier partial approvals, and previews which changes can safely be undone.
 
@@ -71,7 +176,7 @@ Each record has its proposed text, original text, and highlighted added and remo
 
 ### Control request size and review timing
 
-![Version 1.0.5 settings for character request size and combined or per-step review](docs/media/36-bulk-settings.png)
+![Version 1.0.6 settings for character request size and combined or per-step review](docs/media/36-bulk-settings.png)
 
 In **Settings → Story memory settings**:
 
@@ -81,7 +186,7 @@ In **Settings → Story memory settings**:
 
 A whole run can still use several model requests. Grouping suitable character lists reduces repeated request overhead without forcing the entire cast into an oversized response. No need to click Apply 33 bloody times.
 
-**Updating:** finish or discard an old unfinished job before starting a new run. **Review later** keeps a prepared result for **Resume / review**; **Discard unfinished job** abandons its unapproved results while keeping records already written. Old jobs retain their original review behavior. Replace all extension files together. This release includes `entry-journal.js`, `workflow-tools.js`, and `workbench-tools.js` alongside the existing modules.
+**Updating to 1.0.6:** finish or discard an old unfinished job before starting a new run. **Review later** keeps a prepared result for **Resume / review**; **Discard unfinished job** abandons its unapproved results while keeping records already written. Old jobs retain their original review behavior. Replace all extension files together. This release also needs `recovery-tools.js`, `workbench-recovery.js`, `workbench-help.js`, and `workbench-layout.js` alongside the existing modules. Keep all extension files together.
 
 ## Find your way around
 
@@ -94,7 +199,7 @@ A whole run can still use several model requests. Grouping suitable character li
 | **Search** | Ask with evidence, check continuity, get a return recap, configure Recall, and inspect memory loading. |
 | **Settings** | Choose prompts and units, configure delivery and connections, set budgets, and manage backups. |
 
-The counters show units, recaps, memory records, records needing review, and your current selection. A character memory record can contain many dated memories; the counter does not count every bullet. Sections collapse when you click their titles. Keyboard users can switch tabs with **Left**, **Right**, **Home**, and **End**.
+The counters show saved summaries, recaps, character memory lists and records needing review. A selection count appears when records are selected. One character memory list can contain many dated memories; the counter does not count every bullet. Advanced sections are visible in **All tools**. Sections collapse when you click their titles. Keyboard users can switch tabs with **Left**, **Right**, **Home**, and **End**. Choose **All tools** for the optional sections described in the rest of this guide; your current settings stay in place.
 
 <details>
 <summary>See the narrow-screen layout</summary>
@@ -107,15 +212,15 @@ Controls wrap into a single column where needed. The same six tabs and features 
 
 ## Archive exactly what you choose
 
-### Your archive: a quickie or the full treatment
+### Your archive: one scene or a full pass
 
 ![Archive selection, Create, quick summary, thorough archive, Paste, and setup controls](docs/media/02-your-archive.png)
 
 | Control | What happens |
 | --- | --- |
 | **Archive selector / Create** | Choose the lorebook for this story or create one. |
-| **Summarize new, a quickie** | Process uncovered messages, including earlier gaps. |
-| **Archive thoroughly** | Run the archive workflow and its character memory and tracker stages. Allow more requests than a quick summary. |
+| **Summarize new messages** | Process uncovered messages, including earlier gaps. |
+| **Full archive pass** | Run the archive workflow and its character memory and tracker stages. Allow more requests than a quick summary. |
 | **Paste** | Review and file a compatible archivist reply you generated elsewhere or wrote yourself. |
 | **Check setup** | Inspect the archive setup and delivery configuration. |
 | **Attach to chat** | Attach the selected archive to the open chat. |
@@ -123,15 +228,15 @@ Controls wrap into a single column where needed. The same six tabs and features 
 | **Undo** | Preview safe entry changes from the last job or standalone write. See [recovery](#backups-and-recovery) for scope. |
 | **Diagnostics** | Copy a short setup report for troubleshooting. |
 
-A quickie still leaves receipts. **Archive thoroughly** just has more stamina.
+Both workflows keep source evidence and processing receipts. The full pass includes more stages and can use more model requests.
 
 ### Pick your messages
 
-![Exact range controls set to messages 311 through 372 with a preview](docs/media/03-message-range.png)
+![Exact range controls set to messages 30 through 31 with a preview](docs/media/03-message-range.png)
 
-Enter the **First message** and **Last message, inclusive**, then press **Preview range**. **311 to 372 includes both 311 and 372. Messages 373 and 374 stay outside that range.** Message numbers are chat message indices, not Day or Chapter numbers.
+Enter the **First message** and **Last message, inclusive**, then press **Preview range**. **311 to 372 includes both 311 and 372. Messages 373 and 374 stay outside that range.** The screenshot uses the shorter example 30 to 31 with the same inclusive rule. Message numbers are chat message indices, not Day or Chapter numbers.
 
-**Summarize this range**, **Hide this range**, and **Show this range** are separate actions. Tick **Hide this range after a successful summary** if you want the selected messages hidden after the summary is accepted. Explicit range summaries use the transcript, even when the general archive mode uses the chat.
+**Summarize this range**, **Message visibility → Hide this range**, and **Message visibility → Show this range** are separate actions. Tick **Hide this range after a successful summary** if you want the selected messages hidden after the summary is accepted. Explicit range summaries use the transcript, even when the general archive mode uses the chat.
 
 ![Animated guide to selecting, summarizing, reviewing, resuming, and hiding an exact range](docs/media/range-walkthrough.gif)
 
@@ -151,7 +256,7 @@ The ledger records which message ranges have been archived and shows whether the
 - **Hide messages once archived** enables automatic hiding; **Keep visible** leaves the configured number of newest messages visible during normal archive runs.
 - **Mark archived through** and **Import list** update coverage records. They do not generate missing summaries. Use them when reconciling an existing archive.
 
-Normal updates skip an exact heading already in the archive. To intentionally correct an existing unit, use **Inspect / edit** or **Rebuild and review** in Library.
+Continuation blocks can share a heading without losing their different contents. Exact repeated output is checked against its recorded source, and job receipts prevent replaying confirmed writes. To correct an existing unit, use **Inspect / edit**, **Rebuild and review**, or the ledger’s **Redo summaries** action.
 
 </details>
 
@@ -159,7 +264,7 @@ Normal updates skip an exact heading already in the archive. To intentionally co
 
 ![Tidy controls with an optional exact-duplicate checkbox](docs/media/05-tidy.png)
 
-**Tidy up, hands off the prose** sorts the archive, groups character memories by date, and removes repeated keyword strings **without an AI request**. Memory sentences keep their wording. The separate checkbox also removes exact duplicate memories within the same date group. Review proposed text layout changes before saving.
+**Tidy layout** sorts the archive, groups character memories by date, and removes repeated keyword strings **without an AI request**. Memory sentences keep their wording. The separate checkbox also removes exact duplicate memories within the same date group. Review proposed text layout changes before saving.
 
 This is housekeeping. Nobody asked the filing cabinet to develop a writing career.
 
@@ -293,15 +398,15 @@ Triggers can use the number of newer story units, fictional calendar days passed
 
 ## Character memories, knowledge, and trackers
 
-### Memories that sound like memories
+### Create character memories
 
 ![Character memory coverage and the next-batch, all-unprocessed, audit, and recheck actions](docs/media/14-memory-actions.png)
 
 | Action | Use it for |
 | --- | --- |
-| **Next unprocessed batch** | Read the next uncovered sources in manageable batches. |
-| **Read all unprocessed** | Process pending sources across batches and audit the character lists before the combined review. |
-| **Read and organize all memories** | Read complete character lists, merge repeated meaning, and preserve consequential details and knowledge differences. |
+| **Create next batch** | Read the next uncovered sources in manageable batches. |
+| **Create remaining memories** | Process pending sources across batches and audit the character lists before the combined review. |
+| **Review & organize memories** | Read complete character lists, merge repeated meaning, and preserve consequential details and knowledge differences. |
 | **Recheck coverage** | Refresh source-by-source progress, including gaps and changed sources. |
 
 Memories group readable sentences under a shared date and story unit:
@@ -326,7 +431,7 @@ Coverage follows each source entry and its saved content, rather than assuming e
 
 Use **Only Days** (or your chosen unit) to limit the source range. Choose a separate memories lorebook, the archive itself, or each character's own lorebook as the destination. Set the lorebook name, units per batch, and the memory-count warning threshold. **Warn above** is a warning, not a command to discard older memories.
 
-Enable **Run after every archive write** if desired. The memory prompt is editable and can be reset. Manual controls remain in **Memories that sound like memories** above it.
+Enable **Run after every archive write** if desired. The memory prompt is editable and can be reset. Manual controls remain in **Create character memories** above it.
 
 </details>
 
@@ -405,6 +510,8 @@ Find saved diaries using the **diary** type filter. Their injection exclusion is
 
 ## Search, continuity, and recall
 
+Ask is visible immediately. Expand **Check a claim or find continuity issues** for the claim, recent-continuity and whole-archive checks. The other optional Search sections are available in **All tools**.
+
 ### Ask with evidence or check a claim
 
 ![Archive question, answer, and source buttons in the evidence section](docs/media/19-ask-evidence.png)
@@ -442,7 +549,7 @@ Use **Show activation source** to filter Keyword, Vector, Always On, AI Recall, 
 <details>
 <summary>See the budget decision and the model-context view</summary>
 
-![Version 1.0.5 memory budget showing native keyword and vector activation separately, vector search status, and omitted records](docs/media/22-loading-budget.png)
+![Version 1.0.6 memory budget showing native keyword and vector activation separately, vector search status, and omitted records](docs/media/22-loading-budget.png)
 
 **Memory budget and loading reasons** shows the entries selected by SillyTavern and why others were omitted. Native World Info finishes its scan first, including keyword rules, vector activations, recursion, probability, inclusion groups, cooldowns and delays. Scene Archivist then trims the activated story entries to one total content-token cap. A covering recap and its sources do not spend that cap twice. Pins change priority among activated entries; they do not activate unmatched records.
 
@@ -454,7 +561,7 @@ Normal-reply evidence survives quiet helpers and previews. An observed vector re
 
 **What the model saw** shows records activated in the last observed World Info scan, their token counts, and recorded selection reasons. Reasons can overlap. Check it alongside the budget view when a memory seems to be missing. A pin increases priority; it does not override the cap. Use SillyTavern's prompt inspection to verify the exact final prompt.
 
-![Version 1.0.5 model-context view with recorded keyword, vector, and Always on activation reasons](docs/media/23-model-context.png)
+![Version 1.0.6 model-context view with recorded keyword, vector, and Always on activation reasons](docs/media/23-model-context.png)
 
 </details>
 
@@ -517,12 +624,12 @@ Keep the structured heading format when editing prompts so the parser can identi
 
 </details>
 
-### Connections and the More section
+### Connections & preferences
 
 <details>
 <summary>See connection selection and other options</summary>
 
-![More section with Connection Manager profile selection, connection test, keywords, reply limits, reminders, review, and ignored keywords](docs/media/27-connection-settings.png)
+![Connections and preferences with Connection Manager profile selection, connection test, keywords, reply limits, reminders, review, and ignored keywords](docs/media/27-connection-settings.png)
 
 Scene Archivist uses SillyTavern's connections, including compatible proxy configurations. Configure the connection in SillyTavern. **Small requests on** chooses a Connection Manager profile for auxiliary work or uses the **current model**. **Test** makes a small request to check that choice. If the chosen profile fails, the existing fallback uses the current model and shows a warning.
 
@@ -545,7 +652,7 @@ AI summaries, memory generation, condensation, diaries, continuity checks, and e
 <details>
 <summary>See native World Info vector guidance</summary>
 
-![Version 1.0.5 guidance for configuring vectors in native Vector Storage and individual lorebook entries](docs/media/29-native-vectors.png)
+![Version 1.0.6 guidance for configuring vectors in native Vector Storage and individual lorebook entries](docs/media/29-native-vectors.png)
 
 Enable World Info in SillyTavern's **Vector Storage**, then use each lorebook entry's vector setting, or native **Enabled for all** if you deliberately want that behavior. Scene Archivist observes the native integration and never marks every story entry as vector eligible. Native keyword activation continues to follow the entry's primary and secondary keywords and other World Info rules. Activated story entries share the archive memory budget.
 
@@ -570,15 +677,15 @@ Back up your skeletons. The closet is not version control.
 
 ### Paused jobs, saved results, and Undo
 
-![Version 1.0.5 paused archive job with Resume / review, Pause after this request, and Discard unfinished job](docs/media/30-job-recovery.png)
+![Version 1.0.6 paused archive job with Resume / review, Pause after this request, and Discard unfinished job](docs/media/30-job-recovery.png)
 
 Bulk jobs retain their generated results and proposed book changes before the combined review. The progress panel distinguishes prepared steps from approved changes being saved. **Review later** closes the review and keeps the prepared result for **Resume / review**. **Pause after this request** stops between requests. **Discard unfinished job** ends the job and makes its unapproved results unavailable; records already written to lorebooks are kept. A failed job also offers **Retry / review saved result**, so a usable prepared result can be reviewed again without another model call.
 
-Accepted stages have completion receipts to help prevent duplicate writes after a reload or partial failure. **Archive thoroughly** retains its remaining memory and tracker stages when paused. If a queued source changed, cancel that job and choose the corrected sources rather than applying old output blindly.
+Accepted stages have completion receipts to help prevent duplicate writes after a reload or partial failure. **Full archive pass** retains its remaining memory and tracker stages when paused. If a queued source changed, cancel that job and choose the corrected sources rather than applying old output blindly.
 
 **Undo** groups all confirmed entry changes from one job, including step-by-step jobs and partial approvals. Standalone corrections create their own restore points. The preview lists safe changes and conflicts. It compares the complete entry after-state, including keys, activation settings, protections, and metadata. Entries edited later are kept. Sources needed by retained memories or recaps are kept too, across all registered story books, including transitive `covers` links.
 
-![Safe partial Undo with a retained dependent](docs/media/38-partial-undo.png)
+![Undo preview before restoring a cleared memory list](docs/media/38-partial-undo.png)
 
 You can undo the safe changes while leaving conflicts untouched. A partial Undo keeps the unresolved journal and progress; it does not reset the whole job's receipts or coverage. Once every entry is undone, matching progress and message visibility can be restored without replacing later unrelated changes. Newly created empty books may remain. Earlier 1.0.4 whole-book restore points stay in chat data but are not blindly applied over newer work. For earlier text, use saved revisions in Inspect.
 

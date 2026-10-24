@@ -1,5 +1,6 @@
 import * as M from './memory-engine.js';
 import { same } from './entry-journal.js';
+import { dependencyProblems } from './recovery-tools.js';
 
 export const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const sourceChat = e => M.record(e)?.source?.actualChatId || M.record(e)?.originChat || '';
@@ -41,25 +42,30 @@ export const diffHtml = (before, after) => lineDiff(before, after).map(line => `
 
 /** Proposals may be saved only when their final dependencies are present at the recorded version. */
 export function approvedChanges(changes, before, proposed) {
-    const accepted = changes.filter(c => c.include !== false), deferred = changes.filter(c => c.include === false), blocked = [];
+    const accepted = changes.filter(c => c.include !== false), deferred = changes.filter(c => c.include === false), blocked = [], receiptHolds = [];
     let again = true;
     while (again) {
         again = false; const final = M.copy(before);
         for (const c of accepted) { final[c.book] ??= { entries: {} }; final[c.book].entries[c.uid] = proposed[c.book].entries[c.uid]; }
         const byId = new Map(Object.values(final).flatMap(b => Object.values(b.entries || {})).filter(M.record).map(e => [M.record(e).id, e]));
+        const deferredIds = new Set(deferred.map(c => M.record(proposed[c.book]?.entries?.[c.uid])?.id).filter(Boolean));
         for (const c of [...accepted]) {
             const e = proposed[c.book].entries[c.uid], r = M.record(e); if (!r) continue;
-            const missing = r.status === 'current' ? [...(r.derivedFrom || []), ...(r.covers || [])].filter(id => !byId.has(id) || M.record(byId.get(id))?.status !== 'current' || (r.derivedHashes?.[id] && M.hash(byId.get(id).content) !== r.derivedHashes[id])) : [];
+            const problems = dependencyProblems(r, byId, deferredIds);
+            const missing = problems.map(p => p.id);
             if (!same(M.record(before[c.book]?.entries?.[c.uid])?.memoryReceipt, r.memoryReceipt)) {
                 for (const other of changes) {
                     const child = M.record(proposed[other.book]?.entries?.[other.uid]);
-                    if (child?.type === 'memory' && child.derivedFrom?.includes(r.id) && !accepted.includes(other)) missing.push(child.id);
+                    if (child?.type === 'memory' && child.derivedFrom?.includes(r.id)) {
+                        if (!accepted.includes(other)) { missing.push(child.id); problems.push({id: child.id, title: M.title(proposed[other.book].entries[other.uid]), reason: 'receipt'}); }
+                        else if(child.status !== 'current') receiptHolds.push(c);
+                    }
                 }
             }
-            if (missing.length) { accepted.splice(accepted.indexOf(c), 1); deferred.push(c); blocked.push({ title: M.title(e), ids: missing }); again = true; }
+            if (missing.length) { accepted.splice(accepted.indexOf(c), 1); deferred.push(c); blocked.push({ title: M.title(e), book:c.book, uid:c.uid, ids: missing, problems }); again = true; }
         }
     }
-    return { accepted, deferred, blocked };
+    return { accepted, deferred, blocked, receiptHolds: [...new Set(receiptHolds)].filter(c=>accepted.includes(c)) };
 }
 
 export function entrySettings(e) {
@@ -103,7 +109,7 @@ export function knowledgeAt(entries, subject, date) {
         const r = M.record(e); if (!r || !['memory', 'knowledge'].includes(r.type) || ['superseded', 'resolved'].includes(r.status) || ![r.subject, ...(r.aliases || [])].some(n => String(n || '').toLocaleLowerCase() === subject.toLocaleLowerCase())) continue;
         if (r.status !== 'current') { unknown.push(e); continue; }
         const versions = [...(r.knowledgeHistory || []), { ...r, content: e.content }];
-        const proven = v => Object.entries(v.derivedHashes || {}).every(([id, hash]) => byId.has(id) && M.record(byId.get(id)).status === 'current' && M.hash(byId.get(id).content) === hash);
+        const proven = v => Object.entries(v.derivedHashes || {}).every(([id, hash]) => byId.has(id) && ['current','superseded','resolved'].includes(M.record(byId.get(id)).status) && M.hash(byId.get(id).content) === hash);
         const candidates = versions.map(v => ({ ...v, learned: calendarDay(v.learnedAt) }))
             .filter(v => v.learned && v.learned <= cutoff && (!v.until || (calendarDay(v.until) && cutoff < calendarDay(v.until))) && proven(v))
             .sort((a, b) => b.learned.localeCompare(a.learned));
@@ -121,22 +127,25 @@ export function selectionExport(entries, selected, includeSources = false) {
     }
     const records = [...ids].map(id => byId.get(id)).filter(Boolean);
     if (!records.length) throw new Error('Select records in Library first.');
-    return { sceneArchivistSelection: 1, version: '1.0.5', created: M.now(), includesSources: includeSources, entries: M.copy(records),
+    return { sceneArchivistSelection: 1, version: '1.0.6', created: M.now(), includesSources: includeSources, entries: M.copy(records),
         markdown: records.map(e => `${e.content}\n\n<!-- Record ${M.record(e).id}; source: ${sourceLabel(e)} -->`).join('\n\n---\n\n') };
 }
 
 export function proposalKey(c) { return `${c.book || ''}:${c.uid ?? c.id ?? c.title ?? ''}`; }
-export function validateSharedUnits(data, proposed) {
+export function validateSharedUnits(data, proposed, source = null) {
     if (!data?.sceneArchivistStory?.shared) return;
-    const numbers = new Set(Object.values(data.entries || {}).filter(e => M.record(e)?.type === 'unit' && M.record(e).unit?.number != null).map(e => M.record(e).unit.number));
-    const highest = Math.max(0, ...numbers);
+    const units = Object.values(data.entries || {}).filter(e => M.record(e)?.type === 'unit' && M.record(e).unit?.number != null);
+    let highest = Math.max(0, ...units.map(e=>M.record(e).unit.number));
+    const emitted = new Set();
     for (const e of proposed) if (e.kind === 'day' && e.dayNum != null) {
-        if (e.dayNum <= highest || numbers.has(e.dayNum)) throw new Error(`This shared archive already reaches unit ${highest}. New units must continue at ${highest + 1}; review the prepared output or restart with the current archive. Earlier events need retrospective entries.`);
-        numbers.add(e.dayNum);
+        const previous = units.filter(old=>M.record(old).unit.number===e.dayNum);
+        const sameChatContinuation = source?.ranges?.length && previous.length && previous.every(old=>M.record(old).status==='current' && M.record(old).source?.chatId===source.chatId && M.record(old).source.ranges?.length) && source.ranges.every(fresh=>previous.every(old=>M.record(old).source.ranges.every(saved=>fresh.from>saved.to)));
+        if (e.dayNum < highest || (e.dayNum === highest && !emitted.has(e.dayNum) && !sameChatContinuation)) throw new Error(`This shared archive reaches unit ${highest}. Another chat starts at ${highest + 1}. Only later messages from the original source chat can continue the latest unit. Use Redo summaries to replace earlier work, or retrospective entries for earlier events.`);
+        highest=Math.max(highest,e.dayNum);emitted.add(e.dayNum);
     }
 }
 export function summarizeJob(kind, steps, entries, archive, limit = 0) {
     const byId = new Map(entries.filter(M.record).map(e => [M.record(e).id, e]));
-    const input = steps.reduce((n, p) => n + (p.ids || []).reduce((t, id) => t + M.tokens(byId.get(id)?.content || ''), 0) + (p.messages || []).reduce((t, m) => t + M.tokens(m.text || m.mes || ''), 0), 0);
+    const input = steps.reduce((n, p) => n + (p.ids || []).reduce((t, id) => t + M.tokens(byId.get(id)?.content || ''), 0) + (p.messages || []).reduce((t, m) => t + M.tokens(m.text || m.mes || ''), 0) + (p.target && !(p.ids || []).includes(p.target) ? M.tokens(byId.get(p.target)?.content || '') : 0) + (p.evidence?.messages || []).reduce((t,m)=>t+M.tokens(m.text || ''),0) + M.tokens(p.instruction || ''), 0);
     return { kind, batches: steps.length, input, archive, limit, dynamic: kind === 'archive' || kind === 'memories' };
 }

@@ -452,9 +452,11 @@ export function validateWorkflow(input) {
     if ('trackers' in w && (!Array.isArray(w.trackers) || w.trackers.some(t => !t || typeof t.id !== 'string' || typeof t.name !== 'string' || typeof t.prompt !== 'string' || typeof t.enabled !== 'boolean'))) throw new Error('The workflow trackers are invalid.');
     if ('workbench' in w) {
         if (!w.workbench || Array.isArray(w.workbench) || typeof w.workbench !== 'object') throw new Error('Invalid memory workflow settings.');
-        const allowed = ['budget', 'requestBudget', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview'];
+        const allowed = ['budget', 'requestBudget', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview', 'branchMode', 'continuityRecent'];
         w.workbench = Object.fromEntries(Object.entries(w.workbench).filter(([k]) => allowed.includes(k)));
         for (const [k, v] of Object.entries(w.workbench)) if (!['number', 'string', 'boolean'].includes(typeof v) || (typeof v === 'number' && (!Number.isFinite(v) || v < 0 || v > 1000000))) throw new Error(`Invalid memory workflow value: ${k}.`);
+        if ('branchMode' in w.workbench && !['inherit','fresh','prune'].includes(w.workbench.branchMode)) throw new Error('Invalid branch history mode.');
+        if ('continuityRecent' in w.workbench && (!Number.isInteger(w.workbench.continuityRecent) || w.workbench.continuityRecent < 1 || w.workbench.continuityRecent > 1000)) throw new Error('Recent continuity records must be a whole number from 1 to 1000.');
         if ('reviewMode' in w.workbench && !['end', 'step'].includes(w.workbench.reviewMode)) throw new Error('Invalid bulk review mode.');
         if ('charactersPerBatch' in w.workbench && (!Number.isInteger(w.workbench.charactersPerBatch) || w.workbench.charactersPerBatch < 1 || w.workbench.charactersPerBatch > 8)) throw new Error('Characters per memory audit request must be an integer from 1 to 8.');
     }
@@ -462,7 +464,7 @@ export function validateWorkflow(input) {
 }
 export function makeBundle(books, metadata, settings) {
     const meta = copy(metadata); delete meta.undo;
-    return { sceneArchivistStory: SCHEMA, version: '1.0.5', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
+    return { sceneArchivistStory: SCHEMA, version: '1.0.6', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
 }
 export function parseBundle(raw) {
     const obj = typeof raw === 'string' ? parseJSON(raw) : copy(raw);

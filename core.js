@@ -348,9 +348,16 @@ export function planChanges(data, parsed, opts) {
     const m = managed(data);
     const hasLog = m.some(x => x.cl.type === 'state' || x.cl.type === 'day' || x.cl.type === 'retro');
     const plan = { seed: !hasLog, adds: [], states: [], demotions: [], warnings: [...parsed.warnings] };
-    const existingHeads = new Set(m.map(x => (x.cl.heading ?? '').trim()));
+    const normalized = text => String(text || '').replace(/\r\n?/g, '\n').trim();
+    const sourceKey = source => source?.ranges?.length ? JSON.stringify([source.chatId, source.ranges]) : '';
+    const incomingSource = sourceKey(opts?.source);
+    const existingCopies = m.filter(x => !incomingSource || sourceKey(x.e.sceneArchivist?.source) === incomingSource);
+    const existingTexts = new Set(existingCopies.map(x => normalized(x.e.content)));
+    const seenOutput = new Set();
     for (const en of parsed.entries) {
-        if (existingHeads.has(en.heading.trim())) { plan.warnings.push('Skipped "' + en.heading.slice(0, 60) + '" because an entry with that exact heading already exists.'); continue; }
+        const text = normalized(en.content);
+        if (existingTexts.has(text) || seenOutput.has(text)) { plan.warnings.push('An exact copy of "' + en.heading.slice(0, 60) + '" is already filed for this source or repeated in this response.'); continue; }
+        seenOutput.add(text);
         const constant = en.kind !== 'retro';
         plan.adds.push({ include: true, kind: en.kind, heading: en.heading, content: en.content, dayNum: en.dayNum, constant, label: comment(en.kind, en.heading, constant), keys: [] });
     }
@@ -793,7 +800,7 @@ export function planMemories(data, chars, { cap = 30, tag = '', unit = 'Day', da
             if (!k || have.some(old => textKey(old.text) === k && old.a === it.a && old.b === it.b && (!old.date || !it.date || comparableDate(old.date) === comparableDate(it.date)))) continue;
             have.push(it); bullets.push(flatLine(it, unit));
         }
-        if (!bullets.length || ex?.e.sceneArchivist?.protection?.locked || ex?.e.sceneArchivist?.protection?.exact) continue;
+        if (!bullets.length || ex?.e.sceneArchivist?.protection?.locked || ex?.e.sceneArchivist?.protection?.exact || ex?.e.sceneArchivist?.protection?.detailed) continue;
         const total = (ex ? parseMemoryDoc(ex.e.content).length : 0) + bullets.length;
         out.push({
             include: true, name: ex ? ex.cl.name : c.name, aliases: c.aliases, uid: ex?.e.uid ?? null, bullets,

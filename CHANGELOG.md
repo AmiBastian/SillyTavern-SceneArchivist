@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.0.6 · October 24, 2026
+
+- Redesigned the workspace with a clearer visual hierarchy, readable action labels, workflow tab order, responsive layouts, and host theme colors.
+- Added Essentials and All tools display modes, with remembered preferences and retained form values and prepared jobs. Enabled automation stays visible.
+- Added detailed action explanations for hover and keyboard focus, separate tap-to-open help, a visible Start here guide, searchable button reference, and a read-only four-stage example.
+- Grouped occasional archive utilities, message visibility, and memory reset/rebuild controls into named expandable sections.
+- Fixed continuation blocks being skipped because an earlier entry shared their heading. Different contents survive; source-aware exact-copy checks and saved job receipts retain replay protection.
+- Improved approval validation and messages for unchecked, missing, stale, or changed sources. Retained superseded originals with matching hashes remain valid evidence. Combined reviews add Select all and Deselect all, explain independent partial saves, and can explicitly retain outdated results as Needs review without changing their old source hashes or injecting them.
+- Added a searchable character memory browser and Library quick filters.
+- Added reviewed AI character memory updates and original chat evidence for memory organization, with saved evidence links, author correction notes, request-budget checks, and validation after source edits.
+- Added confirmed clearing of one character’s or all story memory lists, retaining revisions and Undo, disabling emptied lists, resetting affected receipts, and invalidating dependents.
+- Added forced re-extraction from all current archived units, including already processed sources, with reviewed merging and duplicate-memory checks.
+- Added Mark unprocessed and Redo summaries to ledger rows. Redo replaces linked source units from their complete recorded ranges instead of appending another summary.
+- Added Repair guidance with a direct Library Needs review route.
+- Added fresh and verified-history private branch modes, including conservative overlap/dependency checks and retained retry intent after interrupted book creation. Parent books are kept.
+- Continuity findings now accumulate within a persisted run, separate from Ask answers. Recent scope is configurable, with a separate whole-archive check.
+- Updated the guide and release media from SillyTavern 1.19.0 using sample data and scripted model replies.
+
+### Updating
+
+Update through SillyTavern’s extension manager and reload. Keep all extension files together, including `recovery-tools.js`, `workbench-recovery.js`, `workbench-help.js`, and `workbench-layout.js`. Finish or discard unfinished older jobs first and export a complete story backup before a large rebuild. Previously skipped content is not reconstructed automatically; review and redo the affected source ranges. Shared books still support one writer at a time.
+
 ## 1.0.5 · October 22, 2026
 
 - Added optional shared archives across chats, off by default. Participating chats continue unit numbering and share memory destinations while keeping their transcript evidence and progress separate.

@@ -4,6 +4,7 @@ import * as M from './memory-engine.js';
 import * as Core from './core.js';
 import { approvedChanges, entrySettings } from './workflow-tools.js';
 import { same } from './entry-journal.js';
+import { approvalMessage, recordSources } from './recovery-tools.js';
 
 export class BulkRun {
     constructor(workbench, job) {
@@ -64,7 +65,7 @@ export class BulkRun {
     async acceptArchive(text, source, stepId) {
         const w = this.w, d = this.data, name = d.settings.lorebook;
         const data = M.copy(d.books[name] || { entries: {} }), before = M.copy(data);
-        const { parsed, plan } = await this.real.prepareArchive(text, data);
+        const { parsed, plan } = await this.real.prepareArchive(text, data, source);
         if (!plan.adds.some(a => a.include && a.content.trim()) && !plan.states.some(a => a.include && a.content.trim())) {
             throw new Error('This archive pass proposed no new entries or state changes. Its range remains pending.');
         }
@@ -105,8 +106,8 @@ export class BulkRun {
         for (const data of Object.values(d.books)) for (const e of Object.values(data.entries || {})) {
             const r = M.record(e);
             if (r?.storyId !== state.storyId || r.status !== 'current') continue;
-            const check = M.checkSource(r.source, this.w.sourceId(), chat);
-            if (!check.valid && !check.foreign) throw new Error('A source transcript changed during this bulk run. Cancel it and select the current messages.');
+            const checks = recordSources(r).map(source=>M.checkSource(source, this.w.sourceId(), chat));
+            if (checks.some(check=>!check.valid&&!check.foreign)) throw new Error('A source transcript changed during this bulk run. Cancel it and select the current messages.');
         }
         for (const step of this.job.steps) if (step.payload.source && !M.checkSource(step.payload.source, this.w.sourceId(), chat).valid) {
             throw new Error('An archive source range changed during this bulk run. Cancel it and select the current messages.');
@@ -173,9 +174,18 @@ export class BulkRun {
                 }
                 M.invalidate(Object.values(d.books).flatMap(b => Object.values(b.entries || {})), reviewEdited, 'A proposed source was corrected during review');
                 if (!accepted) return false;
-                const selection = approvedChanges(changes, d.before, d.books);
+                let selection = approvedChanges(changes, d.before, d.books);
+                const repairable = selection.blocked.filter(b => b.problems?.length && b.problems.every(p => !['unchecked','receipt'].includes(p.reason)) && changes.some(c=>c.book===b.book&&c.uid===b.uid&&c.include!==false));
+                if (!selection.accepted.length && repairable.length) {
+                    const keep = await this.real.confirmText(approvalMessage(selection.blocked) + '\n\nYou can also save the selected outdated results as Needs review. They stay excluded from memory injection until their sources are repaired. Their text, old source hashes, and revisions are retained; new memory receipts stay pending.', {okButton:'Save as needing review',cancelButton:'Review later'});
+                    if(!keep)return false;
+                    for(const b of repairable){const r=M.record(d.books[b.book].entries[b.uid]);r.status='stale';r.staleReason='Saved for repair after approval: '+b.problems.map(p=>`${p.title}: ${p.reason}`).join('; ');}
+                    selection=approvedChanges(changes,d.before,d.books);
+                }
+                for(const c of selection.receiptHolds)delete M.record(d.books[c.book].entries[c.uid]).memoryReceipt;
                 if (selection.deferred.length) {
-                    if (!selection.accepted.length) throw new Error('The selected changes depend on deferred sources. Approve those sources first or keep the results for later.');
+                    if (!selection.accepted.length) throw new Error(approvalMessage(selection.blocked));
+                    if (selection.blocked.length && !(await this.real.confirmText(approvalMessage(selection.blocked) + `\n\nSave the ${selection.accepted.length} independent approved changes and keep the other results for later?`, {okButton: 'Save independent results', cancelButton: 'Review later'}))) return false;
                     const books = M.copy(d.before);
                     for (const c of selection.accepted) books[c.book].entries[c.uid] = M.copy(d.books[c.book].entries[c.uid]);
                     const approval = { id: `${job.id}:approval:${M.uid()}`, books: {}, bases: {}, accepted: selection.accepted.map(c => ({ book: c.book, uid: c.uid })), deferred: selection.deferred.length };

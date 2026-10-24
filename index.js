@@ -22,7 +22,7 @@ import { validateSharedUnits } from './workflow-tools.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.5';
+const VERSION = '1.0.6';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -518,14 +518,14 @@ async function commit(plan, parsed, name, expectedHash = '') {
     toastr.success(parts.length ? `Archive updated: ${parts.join(', ')}.` : 'Nothing was changed.');
 }
 
-async function prepareArchive(text, data) {
+async function prepareArchive(text, data, source = archiveSource) {
     const s = settings();
     const parsed = Core.parseArchivistOutput(text);
-    validateSharedUnits(data, parsed.entries);
+    validateSharedUnits(data, parsed.entries, source);
     if (!parsed.entries.length && !Object.keys(parsed.states).length) {
         throw new Error(`I could not find any ${s.unit || 'story unit'} entries or states in that output. Nothing was marked complete.`);
     }
-    const plan = Core.planChanges(data, parsed, coreOpts());
+    const plan = Core.planChanges(data, parsed, { ...coreOpts(), source });
     const stale = Object.values(data.entries ?? {}).filter(e => Core.classifyEntry(e) && !Core.matchesDelivery(e, coreOpts())).length;
     if (stale) plan.warnings.push(`${stale} existing log entries use a different delivery setting. Writing will move them to ${deliveryLabel(coreOpts())}.`);
     await fillKeys(plan, data);
@@ -542,6 +542,7 @@ async function handleOutput(text) {
         const ok = await showReview(plan, parsed, s.lorebook);
         if (!ok) { toastr.info(archiveStep ? 'Review postponed. Use Resume / review to reopen the prepared result.' : 'Cancelled. Nothing was written.'); return false; }
     }
+    if (archiveSource && (plan.adds.some(a => !a.include) || plan.states.some(a => !a.include))) throw new Error('This transcript pass was only partly selected. Its coverage cannot be marked complete. Keep all source results checked, or use Review later and choose a smaller range.');
     assertCurrentChat();
     if (!plan.adds.some(a => a.include && a.content.trim()) && !plan.states.some(a => a.include && a.content.trim())) { toastr.info('No changes were accepted. The source range stays pending.'); return false; }
     await commit(plan, parsed, s.lorebook, Memory.bookHash(data));
@@ -888,7 +889,7 @@ async function renderLedger() {
         ? `Continuous coverage: messages 0 to ${through}${m.lastDay ? ` (${settings().unit} ${m.lastDay})` : ''}. ${pend.length} messages remain unarchived${pend.length ? ` (about ${fmtTok(tok)} tokens, ${passes} passes)` : ''}.`
         : `${Core.archivedRanges(m).length ? 'Some ranges are archived; earlier gaps remain.' : 'Nothing archived in this chat yet.'} ${pend.length} messages (about ${fmtTok(tok)} tokens, ${passes} ${passes === 1 ? 'pass' : 'passes'}).`);
     const rows = Core.ledgerRows(m);
-    list.html(rows.map(r => { const row = m.ranges[r.i]; const visible = chat.slice(row.from, row.to + 1).filter(x => !x.is_system).length; return `<div class="sa-ledgerrow"><b>Messages ${esc(r.label)}</b> <span class="sa-badge">summarized</span> <span class="sa-hint">${visible} visible / ${row.to - row.from + 1} total · ${esc(r.note.replace(/Day/g, settings().unit))}</span> <a class="sa-ledgerlink" data-i="${r.i}">${visible ? 'hide exactly this range' : 'show exactly this range'}</a></div>`; }).join('') || '<div class="sa-hint">No summarized ranges yet. Use Pick your messages for an exact interval.</div>');
+    list.html(rows.map(r => { const row = m.ranges[r.i]; const visible = chat.slice(row.from, row.to + 1).filter(x => !x.is_system).length; return `<div class="sa-ledgerrow"><b>Messages ${esc(r.label)}</b> <span class="sa-badge">summarized</span> <span class="sa-hint">${visible} visible / ${row.to - row.from + 1} total · ${esc(r.note.replace(/Day/g, settings().unit))}</span> <a class="sa-ledgerlink" data-i="${r.i}">${visible ? 'hide exactly this range' : 'show exactly this range'}</a><button type="button" class="menu_button" data-sa-action="ledgerForget" data-row="${r.i}">🧽 Mark unprocessed</button><button type="button" class="menu_button" data-sa-action="ledgerRedo" data-row="${r.i}">🔄 Redo summaries</button></div>`; }).join('') || '<div class="sa-hint">No summarized ranges yet. Use Pick your messages for an exact interval.</div>');
     list.find('.sa-ledgerlink').on('click', async function () { await toggleLedgerRow(Number($(this).data('i'))); });
 }
 
@@ -1062,7 +1063,10 @@ function memoryBookFor(c) {
     if (s.memoryTarget === 'archive') return s.lorebook;
     if (s.memoryTarget === 'character') {
         const w = findCharacter(c)?.data?.extensions?.world;
-        if (w && getContext().getWorldInfoNames().includes(w)) return w;
+        const names = getContext().getWorldInfoNames();
+        const privateBook = workbench?.state().branchBooks?.[w];
+        if (privateBook && s.storyBooks[s.lorebook]?.[privateBook] && names.includes(privateBook)) return privateBook;
+        if (w && names.includes(w)) return w;
     }
     return memoryBookName();
 }
@@ -1739,9 +1743,9 @@ jQuery(async () => {
             ensureArchive: ensureLorebook,
             attach: async name => { chat_metadata[METADATA_KEY] = name; await saveMetadata(); $('.chat_lorebook_button').addClass('world_set'); },
             trackers: () => runTrackers(null, true),
-            confirm: async (root, opts = {}) => (await new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true, ...opts }).show()) === POPUP_RESULT.AFFIRMATIVE,
+            confirm: async (root, opts = {}) => { workbench?.layout?.help.observe(root); return (await new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true, ...opts }).show()) === POPUP_RESULT.AFFIRMATIVE; },
             confirmText: async (text, opts = {}) => { const result = await callGenericPopup(esc(text), POPUP_TYPE.CONFIRM, '', opts); return result === true || result === POPUP_RESULT.AFFIRMATIVE; },
-            show: root => new Popup(root, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true }).show(),
+            show: (root, opts = {}) => { workbench?.layout?.help.observe(root); return new Popup(root, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true, ...opts }).show(); },
             notify: (message, kind = 'info') => toastr[kind](message, 'Scene Archivist'),
             offerRecap: callback => toastr.info('Welcome back. Click for a dated recap of this story.', 'Scene Archivist', { timeOut: 20000, onclick: callback }),
             download: downloadFile, rebindSettings: () => { renderPromptLib(); renderTrackers(); void refreshLorebookList(); },

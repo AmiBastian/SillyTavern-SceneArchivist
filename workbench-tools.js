@@ -63,7 +63,7 @@ export async function previewJob(w, kind, steps, options) {
     const summary=T.summarizeJob(kind,steps,w.entries,w.h.settings().lorebook,limit),root=document.createElement('div');root.className='sa-review';
     const books=M.unique([summary.archive,...(kind.includes('memor')?[w.h.memoryBook(),...Object.keys(w.h.settings().storyBooks?.[summary.archive]||{})]:[])]);
     root.innerHTML=`<h3>Preview ${h(kind)} job</h3><p>${summary.batches} initial processing batches, about ${summary.input} source-text tokens.</p><p class="sa-note">Prompts, existing records, retries${summary.dynamic?', and follow-up stages':''} add to input and request counts. This is an estimate, not a provider charge quote.</p><p>Possible destinations: ${h(books.join('; '))}</p>${field('previewLimit','Requests allowed per Resume, 0 for no limit','number',limit)}<p class="sa-hint">A request limit pauses the job before its next model call. Prepared usable results are kept. Resume grants the same allowance again.</p>`;
-    if(!(await w.h.confirm(root,{okButton:'Start job',cancelButton:'Back'})))return null;
+    if(!(await w.h.confirm(root,{okButton:'Start job',cancelButton:'Back',large:false})))return null;
     limit=Number(root.querySelector('[data-sa-field=previewLimit]').value);
     if(!Number.isInteger(limit)||limit<0||limit>100000)throw new Error('Choose a whole request limit from 0 to 100000.');
     return limit;
@@ -88,13 +88,18 @@ async function protect(w) {
 
 async function repair(w, selectedOnly) {
     await w.refresh();const roots=selectedOnly?[...w.selected]:w.entries.filter(e=>M.record(e)?.status==='stale').map(e=>M.record(e).id);
-    if(!roots.length)throw new Error('Select corrected records in Library, or choose a story with stale records.');
+    if(!roots.length){
+        const guide=document.createElement('div');guide.className='sa-review';
+        guide.innerHTML='<h3>Find records that need repair</h3><p>A record needs review when its original messages or a linked source changed. Repair rebuilds its derived memories and recaps after the source is corrected.</p><p>Open Library and choose Needs review to locate affected records. Use Inspect / edit to correct a source, or Rebuild and review to regenerate it from its evidence. Then select the corrected source and choose Repair selected records and dependents.</p><p>For a normal character update from recent chat events, use Characters → Character memory browser → AI update.</p>';
+        if(await w.h.confirm(guide,{okButton:'Open Library: Needs review',cancelButton:'Close',large:false})){w.showTab('library');w.root.querySelector('#sa-library-status').value='stale';w.renderLibrary();}
+        return;
+    }
     const ordered=T.repairOrder(w.entries,roots);if(!ordered.length)return w.h.notify('No dependent records need repair.','info');
     const protectedEntries=ordered.filter(e=>['detailed','exact','locked'].some(flag=>M.record(e).protection?.[flag]));
     if(protectedEntries.length)throw new Error('Review protected records before repairing: '+protectedEntries.map(M.title).join('; '));
     const root=document.createElement('div');root.className='sa-review';root.innerHTML='<h3>Review repair order</h3><p>Each result is reviewed and saved before its dependents are generated.</p>';
     for(const e of ordered){const p=document.createElement('p');p.textContent=M.title(e);root.append(p);}
-    if(!(await w.h.confirm(root,{okButton:'Prepare repair job',cancelButton:'Back'})))return;
+    if(!(await w.h.confirm(root,{okButton:'Prepare repair job',cancelButton:'Back',large:ordered.length>8})))return;
     const steps=ordered.map(e=>({kind:'rebuild',repair:true,target:M.record(e).id,targetHash:M.hash(e.content),targetType:M.record(e).type,ids:[],hashes:{}}));
     return w.createJob('repair',steps);
 }
@@ -149,7 +154,7 @@ async function firstArchive(w) {
     const profiles=w.h.context().extensionSettings?.connectionManager?.profiles||[];
     root.innerHTML=`<h3>Make your first archive</h3><p class="sa-note">Summaries use your current SillyTavern model. Small helper requests can use an existing Connection Manager profile.</p><label class="sa-field"><span>Small-request connection</span><select class="text_pole" data-guide="profile">${option('','Current model')}${profiles.map(p=>option(p.id,p.name)).join('')}</select></label><div class="sa-grid"><label class="sa-field"><span>Use an existing archive</span><select class="text_pole" data-guide="book">${option('','Create a new archive')}${w.h.context().getWorldInfoNames().map(n=>option(n,n)).join('')}</select></label><label class="sa-field"><span>Or new archive name</span><input class="text_pole" data-guide="new" placeholder="My story archive"></label></div><div class="sa-grid">${field('guideFrom','First message','number',0)}${field('guideTo','Last message, inclusive','number',Math.max(0,(w.h.context().chat||[]).length-1))}</div><p class="sa-hint">The range is previewed before a model request. Results are reviewed before saving.</p>`;
     root.querySelector('[data-guide=profile]').value=w.h.settings().sideProfile||'';
-    if(!(await w.h.confirm(root,{okButton:'Set up and preview range',cancelButton:'Back'})))return;
+    if(!(await w.h.confirm(root,{okButton:'Set up and preview range',cancelButton:'Back',large:false})))return;
     const range=M.messageRange(w.h.context().chat||[],root.querySelector('[data-sa-field=guideFrom]').value,root.querySelector('[data-sa-field=guideTo]').value);
     const chosen=root.querySelector('[data-guide=book]').value,newName=root.querySelector('[data-guide=new]').value.trim(),name=chosen||newName;
     if(!name)throw new Error('Choose an archive name.');
