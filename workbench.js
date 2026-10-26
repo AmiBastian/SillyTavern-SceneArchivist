@@ -320,7 +320,12 @@ export class Workbench {
         }
         const accepted = await this.h.confirm(root, { okButton: options.partial ? 'Save approved results' : 'Save reviewed result', cancelButton: job?.status === 'running' ? 'Review later' : 'Cancel' });
         for (const c of changes) {
-            c.content = c.node.querySelector('textarea').value.trim(); c.include = c.node.querySelector('[data-review-include]')?.checked ?? true;
+            const editedText = c.node.querySelector('textarea').value;
+            const originalText = String(c.content || '');
+            // Accepting an untouched review must preserve source hashes, including
+            // existing trailing whitespace and normalized textarea line endings.
+            c.content = editedText.trim() === originalText.replace(/\r\n?/g, '\n').trim() ? originalText : editedText.trim();
+            c.include = c.node.querySelector('[data-review-include]')?.checked ?? true;
             if (job) edits[Tools.proposalKey(c)] = { content: c.content, include: c.include };
             delete c.node;
         }
