@@ -743,12 +743,18 @@ export class Workbench {
         });
     }
 
+    automaticMemoryAuditAllowed() {
+        // A shared update must not rewrite complete memory lists from other chats.
+        // Explicit, reviewed Audit/Condense actions are still available.
+        return !this.books[this.h.settings().lorebook]?.sceneArchivistStory?.shared;
+    }
     async createJob(kind, steps, options = {}) {
         if (!steps.length) throw new Error('There are no matching sources to process.');
         const bulk = this.options().reviewMode !== 'step' && ['archive', 'memories', 'memory-audit', 'condense', 'extract', 'trackers'].includes(kind);
         const followups = kind === 'archive' ? [...(this.state().followups || [])] : [];
-        const pipeline = options.auditAfter ? ['audit'] : followups.flatMap(s => s === 'memories' ? ['memories', 'audit'] : [s]);
         return this.withLock(async () => {
+            const pipeline = (options.auditAfter ? ['audit'] : followups.flatMap(s => s === 'memories' ? ['memories', 'audit'] : [s]))
+                .filter(stage => stage !== 'audit' || this.automaticMemoryAuditAllowed());
             for (const p of steps) if (p.source && M.checkSource(p.source, p.source.chatId, this.h.context().chat || []).valid) Object.assign(p.source, { chatId: this.sourceId(), actualChatId: this.identity(), label: String(this.h.context().chatId || '') });
             const requestLimit = await previewJob(this, kind, steps, options);
             if (requestLimit == null) return;
@@ -767,7 +773,7 @@ export class Workbench {
                     const pending = M.pendingMemoryUnits(this.entries);
                     steps = this.chunks(pending, this.h.settings().memoryDays || 4).map(g => this.inputStep(g, { kind: 'memories' }));
                 } else if (stage === 'audit') {
-                    const entries = this.memoryAuditEntries();
+                    const entries = this.automaticMemoryAuditAllowed() ? this.memoryAuditEntries() : [];
                     steps = this.auditSteps(entries);
                 } else if (stage === 'trackers') steps = this.trackerSteps(null, true);
                 job.options.pipeline.shift();
@@ -881,7 +887,7 @@ export class Workbench {
         const groups = this.chunks(pending, this.h.settings().memoryDays || 4);
         if (!groups.length) { this.h.notify('Every current source entry has a matching saved memory receipt. Use an explicit unit range to redo it, or Audit to review all character lists.', 'info'); return; }
         const result = await this.createJob('memories', (all ? groups : groups.slice(0, 1)).map(g => this.inputStep(g, {force})), { auditAfter: all });
-        if (all && !result?.options.bulk && result?.status === 'done') return (await this.startMemoryAudit(true)) || result;
+        if (all && !result?.options.bulk && result?.status === 'done' && this.automaticMemoryAuditAllowed()) return (await this.startMemoryAudit(true)) || result;
         return result;
     }
     auditSteps(entries) {
