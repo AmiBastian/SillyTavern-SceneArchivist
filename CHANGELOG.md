@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.8 · October 26, 2026
+
+- Shared archive updates preserve existing character lists by skipping automatic whole-list audits after full passes and all-memory extraction. Explicit reviewed organization and condensation remain available.
+- Apply the same protection to per-step follow-ups and retained automatic audit stages that have not started. Private archives keep their previous automatic organization behavior.
+- Preserved unchanged text when accepting review, preventing whitespace trimming from invalidating a newly generated summary cited by its memory results.
+- Fixed older heading-only character names appearing in the selector but showing no memories, including Active characters filtering.
+- Verified chat A to chat B full passes and return navigation in real SillyTavern with both review modes; refreshed the media and guide.
+
+
 ## 1.0.7 · October 24, 2026
 
 - Added compact sidebar navigation on desktop, a short workspace header, visible everyday actions, and compact navigation on narrow screens.

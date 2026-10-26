@@ -1,4 +1,4 @@
-# Scene Archivist 1.0.7
+# Scene Archivist 1.0.8
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -30,7 +30,7 @@ If your characters can hide a body but cannot remember where they had dinner, we
 
 ### About the screenshots and videos
 
-This guide includes **63 screenshots and three animated walkthroughs**, with MP4 versions beside each animation. The 1.0.7 captures use the extension in **SillyTavern 1.19.0**, with an invented story and scripted model replies. They demonstrate the controls and real lorebook saves, not live provider output or private chats. Your theme and fonts can look different.
+This guide includes **65 screenshots and three animated walkthroughs**, with MP4 versions beside each animation. The 1.0.8 captures use the extension in **SillyTavern 1.19.0**, with an invented story and scripted model replies. They demonstrate the controls and real lorebook saves, not live provider output or private chats. Your theme and fonts can look different.
 
 ## Install and make your first archive
 
@@ -44,6 +44,16 @@ This guide includes **63 screenshots and three animated walkthroughs**, with MP4
 8. Use **Library → Sources** to check the evidence and **Settings → Backups and workflow presets → Export complete story** to keep a backup.
 
 For a manual setup, **Archive → Your archive** has the archive selector and Create. Expand **Archive setup & tools** for Check setup, Attach to chat, Paste a summary, Fix delivery and Diagnostics. **Help & examples** explains the workflow before you change a real story.
+
+## Shared memory preservation in 1.0.8
+
+Shared updates no longer schedule automatic whole-list audits, including queued automatic audit stages that have not started. This prevents unrelated existing memory lists from being rewritten after a full pass in another chat. Explicit organization remains available for reviewed corrections. Older heading-only character names also work in the browser and Active characters filter.
+
+![Shared memories from both chats remain available](docs/media/64-shared-memory-retention.png)
+
+![Full pass review adds the new chat results](docs/media/65-shared-fullpass-review.png)
+
+This update does not automatically recover previously lost text. Check the affected entry’s revisions and your backups if an earlier rewrite removed details.
 
 ## Smoother layout and Library in 1.0.7
 
@@ -161,7 +171,7 @@ The parent’s books remain available. Fresh and verified-history modes detach c
 
 ![Opt-in shared archive controls](docs/media/37-shared-archive.png)
 
-Open the original chat and choose **Settings → Archive sharing → Share this archive across chats**. Then select that same archive in another chat. New summaries continue from the archive's highest Day, Chapter, or other unit. Later messages from the original source chat can continue the latest unit; another chat starts a new unit after the current highest number. Character memories use the shared destinations. Each chat keeps its own message coverage and source evidence; a source from another chat is labeled with its origin instead of being checked against the wrong transcript.
+Open the original chat and choose **Settings → Archive sharing → Share this archive across chats**. Then select that same archive in another chat. New summaries continue from the archive's highest Day, Chapter, or other unit. Later messages from the original source chat can continue the latest unit; another chat starts a new unit after the current highest number. Character memories use the shared destinations. Shared full passes and Create remaining memories add new memories without automatically reorganizing complete existing character lists. Absent characters keep their saved lists. Review & organize memories and Condense remain separate, deliberate actions. Each chat keeps its own message coverage and source evidence; a source from another chat is labeled with its origin instead of being checked against the wrong transcript.
 
 Sharing is **off by default**. Private chats keep the existing branching behavior. Turning sharing off makes participating chats create private branches before their next write. Restored backups are private too; enable sharing explicitly if you want it again.
 
@@ -171,7 +181,7 @@ Keep one writer active at a time. SillyTavern saves entire lorebooks without a c
 
 **Together at the end is the default.** Start a bulk job and let it process the full selection. Review the proposed records together in one window, edit any text you want, then save. Larger reviews start with the individual records collapsed, so 33 character lists do not immediately become a wall of text.
 
-This applies to scene-summary passes, new character memories and their follow-up audit, character-memory condensation, archive condensation, fact/knowledge extraction, and tracker updates. **Full archive pass** can prepare its archive, memory, audit, and enabled tracker stages before that same final review. Approved records are saved after review. Message coverage and visibility are finalized when the complete bulk job is accepted. If you discard a partially approved job, its written records stay; check coverage before summarizing the same range again. Opt-in automatic archive recap creation still runs without a review, and the archive review checkbox still controls archive-only runs.
+This applies to scene-summary passes, new character memories and their follow-up audit, character-memory condensation, archive condensation, fact/knowledge extraction, and tracker updates. **Full archive pass** can prepare its archive, memory, and enabled tracker stages (plus automatic memory organization for private archives only) before that same final review. Approved records are saved after review. Message coverage and visibility are finalized when the complete bulk job is accepted. If you discard a partially approved job, its written records stay; check coverage before summarizing the same range again. Opt-in automatic archive recap creation still runs without a review, and the archive review checkbox still controls archive-only runs.
 
 <details>
 <summary>See a combined review of source units and character memories</summary>
@@ -415,7 +425,7 @@ Triggers can use the number of newer story units, fictional calendar days passed
 | Action | Use it for |
 | --- | --- |
 | **Create next batch** | Read the next uncovered sources in manageable batches. |
-| **Create remaining memories** | Process pending sources across batches and audit the character lists before the combined review. |
+| **Create remaining memories** | Process pending sources across batches. Shared archives preserve existing lists; private archives also organize lists before the combined review. |
 | **Review & organize memories** | Read complete character lists, merge repeated meaning, and preserve consequential details and knowledge differences. |
 | **Recheck coverage** | Refresh source-by-source progress, including gaps and changed sources. |
 

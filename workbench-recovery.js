@@ -8,7 +8,7 @@ const card = (title, body) => `<details class="sa-card" open><summary>${title}</
 const option = (value, label) => `<option value="${h(value)}">${h(label)}</option>`;
 const field = (key, label, value = '', type = 'text') => `<label class="sa-field"><span>${label}</span><input class="text_pole" data-recovery="${key}" type="${type}" value="${h(value)}" ${type === 'number' ? 'min="0" step="1"' : ''}></label>`;
 const activeNames = w => M.unique([w.h.context().name2, w.h.context().name1]);
-const sameName = (e, subject) => [M.record(e)?.subject, ...(M.record(e)?.aliases || [])].some(n => n && n.toLocaleLowerCase() === subject.toLocaleLowerCase());
+const sameName = (e, subject) => [M.record(e)?.subject || Core.classifyEntry(e)?.name, ...(M.record(e)?.aliases || [])].some(n => n && n.toLocaleLowerCase() === subject.toLocaleLowerCase());
 const memoryEntries = (w, subject = '') => w.entries.filter(e => M.record(e)?.type === 'memory' && (!subject || sameName(e, subject)) && !['superseded', 'resolved'].includes(M.record(e).status));
 
 export function mountRecovery(w) {

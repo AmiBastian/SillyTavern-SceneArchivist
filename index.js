@@ -22,7 +22,7 @@ import { validateSharedUnits } from './workflow-tools.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.7';
+const VERSION = '1.0.8';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;

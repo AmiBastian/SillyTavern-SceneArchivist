@@ -468,7 +468,7 @@ export function validateWorkflow(input) {
 }
 export function makeBundle(books, metadata, settings) {
     const meta = copy(metadata); delete meta.undo;
-    return { sceneArchivistStory: SCHEMA, version: '1.0.7', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
+    return { sceneArchivistStory: SCHEMA, version: '1.0.8', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
 }
 export function parseBundle(raw) {
     const obj = typeof raw === 'string' ? parseJSON(raw) : copy(raw);
