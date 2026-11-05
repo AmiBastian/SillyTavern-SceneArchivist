@@ -101,7 +101,7 @@ export const FIELD_HELP = {
     memorySearch: 'Search the text of the selected character’s memory lists. It does not ask a model or change the lists.',
     branchMode: 'Choose what inherited history a copied chat receives before new writes: inherited books, empty books, or only verified earlier history. Parent books are kept.',
     continuityRecent: 'How many newest eligible records Check recent continuity reads. Check whole archive ignores this subset limit.',
-    requestBudget: 'Maximum estimated input tokens for one helper request. Smaller selections can fit without increasing this limit.',
+    requestBudget: 'Leave at 0 to use the selected model’s context after reserving room for the reply. Enter a positive number to cap helper input. If the connection exposes no context size, automatic mode uses an 18,000-token estimate.',
     requestLimit: 'Pause a job before its next model request after this many calls per Resume. 0 allows no fixed request-count limit.',
     budget: 'Memory tokens the extension may retain from entries already selected by native World Info or explicit recall. It does not make unrelated entries eligible.',
     reviewMode: 'Together at the end retains prepared output for one combined approval. After each step reviews and saves each step separately.',
@@ -115,7 +115,6 @@ export const FIELD_HELP = {
     sa_recall: 'Enable a helper-model selection before normal replies. This can add model calls; native keywords and native vectors keep their own behavior.',
     sa_side_profile: 'Choose an existing SillyTavern Connection Manager profile for helper requests, or use the current model. Credentials stay in SillyTavern.',
     sa_delivery: 'Choose where eligible archive records are inserted into context. Outlet delivery requires the matching outlet macro in your preset.',
-    sa_chunk: 'Estimated transcript tokens per archive pass. Smaller passes use more requests and may fit your model’s context more easily.',
     sa_keepvis: 'How many newest chat messages should stay visible when automatic archive hiding is enabled.',
     sa_unit: 'The singular story unit used in headings, such as Day, Episode or Chapter. It is separate from chat message numbering.',
 };

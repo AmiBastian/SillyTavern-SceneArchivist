@@ -431,11 +431,11 @@ export function tidyMemory(items, { removeExact = false } = {}) {
 export const memoryIdentity = (it, subject = '') => hash([subject.toLocaleLowerCase(), it.a, it.b, it.date, it.text.trim().toLocaleLowerCase()]);
 
 // Portable workflow settings deliberately exclude connection profiles, credentials and destination names.
-export const PRESET_KEYS = ['unit', 'keepDays', 'archiveMode', 'chunkTokens', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'condenseAbove', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt', 'workbench'];
+export const PRESET_KEYS = ['unit', 'keepDays', 'archiveMode', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'condenseAbove', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt', 'workbench'];
 export const workflow = settings => Object.fromEntries(PRESET_KEYS.filter(k => k in settings).map(k => [k, copy(settings[k])]));
 export function validateWorkflow(input) {
     const w = workflow(input || {});
-    const numbers = ['keepDays', 'chunkTokens', 'keepVisible', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'condenseAbove', 'trackerDays'];
+    const numbers = ['keepDays', 'keepVisible', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'condenseAbove', 'trackerDays'];
     const booleans = ['hideArchived', 'review', 'recall', 'memoryAuto', 'trackerAuto'];
     const strings = ['unit', 'archiveMode', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt'];
     for (const key of numbers) if (key in w && (!Number.isFinite(w[key]) || w[key] < 0 || w[key] > 1000000)) throw new Error(`Invalid workflow number: ${key}.`);
@@ -445,13 +445,14 @@ export function validateWorkflow(input) {
     if ('trackers' in w && (!Array.isArray(w.trackers) || w.trackers.some(t => !t || typeof t.id !== 'string' || typeof t.name !== 'string' || typeof t.prompt !== 'string' || typeof t.enabled !== 'boolean'))) throw new Error('The workflow trackers are invalid.');
     if ('workbench' in w) {
         if (!w.workbench || Array.isArray(w.workbench) || typeof w.workbench !== 'object') throw new Error('Invalid memory workflow settings.');
-        const allowed = ['budget', 'requestBudget', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview', 'branchMode', 'continuityRecent'];
+        const allowed = ['budget', 'requestBudget', 'modelAwareRequests', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview', 'branchMode', 'continuityRecent'];
         w.workbench = Object.fromEntries(Object.entries(w.workbench).filter(([k]) => allowed.includes(k)));
         for (const [k, v] of Object.entries(w.workbench)) if (!['number', 'string', 'boolean'].includes(typeof v) || (typeof v === 'number' && (!Number.isFinite(v) || v < 0 || v > 1000000))) throw new Error(`Invalid memory workflow value: ${k}.`);
+        if ('modelAwareRequests' in w.workbench && typeof w.workbench.modelAwareRequests !== 'boolean') throw new Error('Invalid request budget migration flag.');
         if ('branchMode' in w.workbench && !['inherit','fresh','prune'].includes(w.workbench.branchMode)) throw new Error('Invalid branch history mode.');
         if ('continuityRecent' in w.workbench && (!Number.isInteger(w.workbench.continuityRecent) || w.workbench.continuityRecent < 1 || w.workbench.continuityRecent > 1000)) throw new Error('Recent continuity records must be a whole number from 1 to 1000.');
         if ('reviewMode' in w.workbench && !['end', 'step'].includes(w.workbench.reviewMode)) throw new Error('Invalid bulk review mode.');
-        if ('charactersPerBatch' in w.workbench && (!Number.isInteger(w.workbench.charactersPerBatch) || w.workbench.charactersPerBatch < 1 || w.workbench.charactersPerBatch > 8)) throw new Error('Characters per memory audit request must be an integer from 1 to 8.');
+        if ('charactersPerBatch' in w.workbench && (!Number.isInteger(w.workbench.charactersPerBatch) || w.workbench.charactersPerBatch < 0 || w.workbench.charactersPerBatch > 8)) throw new Error('Characters per memory audit request must be 0 for automatic or a whole number from 1 to 8.');
     }
     return w;
 }

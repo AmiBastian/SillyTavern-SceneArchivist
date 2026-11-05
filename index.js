@@ -576,53 +576,8 @@ async function ensureLorebook() {
 }
 
 async function runSummarize(opts = {}) {
-    if (workbench) {
-        try { return await workbench.archiveWorkflow(opts?.thorough === true); }
-        catch (e) { console.error(LOG, e); toastr.error(e?.message ?? e); return false; }
-    }
-    const thorough = opts?.thorough === true;
-    if (busy) { toastr.info('The archivist is already running.'); return; }
-    if (!(getContext().chat?.length)) { toastr.warning('Open a chat first.'); return; }
-    if (!(await ensureLorebook())) return;
-    const startingChat = getContext().chat, startingRevision = chatRevision;
-    const s = settings();
-    busy = true; operationChat = getContext().chat; operationRevision = chatRevision;
-    let wrote = false;
-    $('.sa-run').prop('disabled', true);
-    const note = toastr.info('Running your archivist prompt. This can take a minute.', 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
-    try {
-        if (s.archiveMode === 'chat') {
-            let prompt = s.prompt;
-            if (s.appendLog) {
-                const data = await readFresh(s.lorebook);
-                const log = data ? Core.currentLogText(data) : '';
-                if (log) prompt += '\n\n---\n\nCURRENT SCENE LOG (always-on part):\n\n' + log;
-            }
-            const range = pendingRange();
-            const out = await generateQuietPrompt({ quietPrompt: prompt, responseLength: Number(s.maxTokens) > 0 ? Number(s.maxTokens) : null });
-            toastr.clear(note);
-            if (!out || !out.trim()) { toastr.error('The model returned nothing.'); return; }
-            const res = await handleOutput(out);
-            wrote = !!res;
-            if (res && range) await afterArchive(range, res.days);
-        } else {
-            toastr.clear(note);
-            wrote = await runPasses();
-        }
-    } catch (e) {
-        console.error(LOG, e);
-        toastr.error('Archivist failed: ' + (e?.message ?? e));
-    } finally {
-        try { toastr.clear(note); } catch { /* ignore */ }
-        busy = false; operationChat = null;
-        $('.sa-run').prop('disabled', false);
-    }
-    if ((getContext().chat !== startingChat || chatRevision !== startingRevision)) return wrote;
-    if (wrote && (settings().memoryAuto || thorough)) await runMemories(true);
-    if ((getContext().chat !== startingChat || chatRevision !== startingRevision)) return wrote;
-    if (wrote && (settings().trackerAuto || thorough)) await runTrackers(null, true);
-    if (getContext().chat === startingChat && chatRevision === startingRevision && wrote && thorough) await runCondense(true);
-    return wrote;
+    try { return await workbench.archiveWorkflow(opts?.thorough === true); }
+    catch (e) { console.error(LOG, e); toastr.error(e?.message ?? e); return false; }
 }
 
 async function pasteOutput() {
@@ -634,7 +589,7 @@ async function pasteOutput() {
     let wrote = false;
     try { wrote = !!(await handleOutput(text)); } catch (e) { console.error(LOG, e); toastr.error('Failed: ' + (e?.message ?? e)); } finally { busy = false; operationChat = null; }
     if ((getContext().chat !== startingChat || chatRevision !== startingRevision)) return;
-    if (wrote && settings().memoryAuto) await runMemories(true);
+    if (wrote && settings().memoryAuto) await runMemories();
     if ((getContext().chat !== startingChat || chatRevision !== startingRevision)) return;
     if (wrote && settings().trackerAuto) await runTrackers(null, true);
 }
@@ -756,9 +711,12 @@ function flowModelInfo(profile) {
     if (!profile) return { name: String(current.getCurrentModel?.() || (main_api === 'openai' ? oai_settings.openai_model : '') || 'Current SillyTavern model'), context: getMaxContextTokens(), output: getMaxResponseTokens() };
     const selected = current.extensionSettings?.connectionManager?.profiles?.find(p => p.id === profile);
     if (!selected) throw new Error('The selected connection profile is unavailable. Choose an available profile or retry on the current model.');
-    const preset = current.getPresetManager?.('openai')?.getCompletionPresetByName?.(selected.preset);
-    return { name: selected.name, context: Number(preset?.openai_max_context || selected.context_length) || 0,
-        output: Number(preset?.openai_max_tokens || selected.max_tokens) || 0 };
+    const api = current.CONNECT_API_MAP?.[selected.api]?.selected || 'openai';
+    const preset = current.getPresetManager?.(api)?.getCompletionPresetByName?.(selected.preset);
+    const context = api === 'textgenerationwebui' ? preset?.max_length : preset?.openai_max_context;
+    const output = api === 'textgenerationwebui' ? preset?.genamt : preset?.openai_max_tokens;
+    return { name: selected.name, context: Number(context || selected.context_length) || 0,
+        output: Number(output || selected.max_tokens) || 0 };
 }
 
 async function buildFlowContext(req) {
@@ -926,15 +884,9 @@ async function runCondense(quiet = false) {
     }
 }
 
-// ---------------------------------------------------------------- archive ledger, passes and hiding
+// ---------------------------------------------------------------- archive ledger and message visibility
 
 const meta = () => (chat_metadata[KEY] ??= {});
-
-function pendingRange() {
-    const chat = getContext().chat ?? [];
-    const p = Core.pendingMessages(chat, meta());
-    return p.length ? { ranges: Core.splitPasses(p, Infinity).map(p => ({ from: p.from, to: p.to })) } : null;
-}
 
 async function afterArchive(range, days, hideOverride = null) {
     assertCurrentChat();
@@ -1020,33 +972,6 @@ async function importLedger() {
 }
 
 /** Archive the transcript of the not-yet-archived messages in passes, writing and reviewing after each pass. */
-async function runPasses() {
-    const s = settings();
-    const chat = getContext().chat ?? [];
-    const num = (sel) => { const v = String($(sel).val() ?? '').trim(); return v === '' ? null : Number(v); };
-    const pend = Core.pendingMessages(chat, meta(), { from: num('#sa_range_from'), to: num('#sa_range_to') });
-    if (!pend.length) { toastr.info('There is nothing new to archive.'); return false; }
-    const passes = Core.splitPasses(pend, Math.max(2000, Number(s.chunkTokens) || 12000));
-    let wroteAny = false;
-    for (let i = 0; i < passes.length; i++) {
-        assertCurrentChat();
-        const pass = passes[i];
-        const note = toastr.info(`Pass ${i + 1} of ${passes.length}: messages ${pass.from} to ${pass.to} (about ${fmtTok(pass.tokens)} tokens).`, 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
-        let out = '';
-        try {
-            const data = (await readFresh(s.lorebook)) ?? { entries: {} };
-            const req = Core.buildArchivistRequest(s.prompt, Core.currentLogText(data), Core.buildTranscript(pass.messages), { from: pass.from, to: pass.to }, s.unit || 'Day');
-            out = await generateRaw({ prompt: req.prompt, systemPrompt: req.system, responseLength: Number(s.maxTokens) > 0 ? Number(s.maxTokens) : 6000 });
-        } finally { try { toastr.clear(note); } catch { /* ignore */ } }
-        if (!out || !out.trim()) { noteIssue('archive pass ' + (i + 1) + ' returned nothing'); toastr.error('The model returned nothing for pass ' + (i + 1) + '.'); break; }
-        const res = await handleOutput(out);
-        if (!res) { if (i < passes.length - 1) toastr.info('Stopped. The remaining passes were not run.'); break; }
-        wroteAny = true;
-        await afterArchive({ from: pass.from, to: pass.to }, res.days);
-    }
-    return wroteAny;
-}
-
 // ---------------------------------------------------------------- prompt library, exports
 
 function builtinTexts() {
@@ -1279,136 +1204,9 @@ function migrateStoryBooks() {
     }
 }
 
-async function showMemoryReview(plans, src) {
-    const root = document.createElement('div');
-    root.className = 'sa-review';
-    const total = plans.reduce((n, p) => n + p.items.length, 0);
-    root.innerHTML = `<h3>Character memories from Day ${esc(src.days.join(', '))}</h3><div class="sa-note">${total} ${total === 1 ? 'character' : 'characters'}. Edit anything, one memory per line. Untick a character to skip them.</div>`;
-    const refs = [];
-    for (const p of plans) for (const it of p.items) {
-        const d = document.createElement('details'); d.open = true;
-        d.innerHTML = `<summary><input type="checkbox" checked><b>${esc(it.name)}</b><span class="sa-badge">${it.uid == null ? 'new entry' : 'adds to existing'} in ${esc(p.book)}</span></summary>`;
-        if (it.warn) d.insertAdjacentHTML('beforeend', `<div class="sa-warnline">▲ ${esc(it.warn)}</div>`);
-        d.insertAdjacentHTML('beforeend', `<div class="sa-note">Keywords, comma separated. The memory loads when one appears in the recent chat${p.own ? ' (this entry is always on inside the character\'s own lorebook)' : ''}.</div><input class="text_pole sa-keys" type="text"><textarea class="text_pole" rows="6"></textarea>`);
-        d.querySelector('.sa-keys').value = it.keys.join(', ');
-        d.querySelector('textarea').value = it.bullets.join('\n');
-        root.append(d);
-        refs.push({ it, d });
-    }
-    const popup = new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Write memories', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true });
-    if ((await popup.show()) !== POPUP_RESULT.AFFIRMATIVE) return false;
-    for (const { it, d } of refs) {
-        it.include = d.querySelector('input[type=checkbox]').checked;
-        it.keys = Core.withVariants(d.querySelector('.sa-keys').value.split(',').map(x => x.trim()).filter(Boolean));
-        it.bullets = d.querySelector('textarea').value.split('\n').map(x => x.trim()).filter(Boolean);
-    }
-    return true;
-}
-
-async function commitMemories(plans, src) {
-    const s = settings(); const o = coreOpts();
-    const touched = [];
-    let created = 0, updated = 0;
-    beginUndoWrite();
-    for (const p of plans) {
-        if (!p.items.some(i => i.include && i.bullets.length)) continue;
-        assertCurrentChat();
-        registerStoryBook(s.lorebook, p.book, p.own ? 'character' : (p.book === s.lorebook ? 'archive' : 'separate'));
-        if (!getContext().getWorldInfoNames().includes(p.book)) {
-            if (!(await createBookConfirmed(p.book))) throw new Error(`Could not create the lorebook "${p.book}".`);
-            await updateWorldInfoList();
-        }
-        assertCurrentChat();
-        p.data = (await readFresh(p.book)) ?? { entries: {} };
-        await saveUndoSnapshot(p.book, p.data);
-        const untouched = clone(p.data.entries ?? {});
-        const rep = Core.applyMemories(p.data, p.items.filter(i => i.bullets.length), o, (d) => createWorldInfoEntry(p.book, d), { constant: p.own, dates: src.dates, unit: s.unit || 'Day' });
-        const accepted = p.items.filter(i => i.include && i.bullets.length);
-        for (const e of Object.values(p.data.entries ?? {})) {
-            const cl = Core.classifyEntry(e);
-            if (cl?.type === 'memory' && accepted.some(i => i.uid === e.uid || (i.uid == null && !(e.uid in untouched) && i.name === cl.name))) e.sceneArchivistArchive = s.lorebook;
-            else if (e.uid in untouched) p.data.entries[e.uid] = untouched[e.uid];
-        }
-        await saveConfirmed(p.book, p.data);
-        try { reloadEditor(p.book); } catch { /* editor closed */ }
-        touched.push(p.book); created += rep.created.length; updated += rep.updated.length;
-    }
-    assertCurrentChat();
-    if (plans.every(p => p.items.every(i => i.include && i.bullets.length))) s.memoryProgress = { ...(s.memoryProgress ?? {}), [s.lorebook]: Math.max(Number(s.memoryProgress?.[s.lorebook] ?? 0), src.lastDay) };
-    if (touched.length) s.lastWriteBooks = touched;
-    saveSettingsDebounced();
-    await updateInfoLine();
-    toastr.success(touched.length ? `Memories saved: ${created} new, ${updated} updated${touched.length > 1 ? ` across ${touched.length} lorebooks` : ''}.` : 'Nothing was written.');
-}
-
-/** One batch of Days. Returns {ok, remaining, lastDay}; ok is false when nothing was done or the user cancelled. */
-async function memoryStep(range, first) {
-    const s = settings();
-    let note = null;
-    try {
-        const data = await readFresh(s.lorebook);
-        if (!data) { toastr.error('Could not load the lorebook.'); return { ok: false }; }
-        const progress = Number(s.memoryProgress?.[s.lorebook] ?? 0);
-        const src = Core.selectMemorySource(data, progress, s.memoryDays, { fromDay: range?.from ?? null, toDay: range?.to ?? null });
-        if (!src.days.length) { if (first) toastr.info(range ? 'There are no Days in that range.' : 'Character memories are already up to date with the log.'); return { ok: false }; }
-        const label = src.days.length === 1 ? `Day ${src.days[0]}` : `Days ${src.days[0]} to ${src.days.at(-1)}`;
-        note = toastr.info(`Working out who remembers what (${label}).`, 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
-        const req = Core.buildMemoryRequest(Core.unitize(s.memoryPrompt, s.unit), src, getContext().name1 || 'the user');
-        const { value: parsedMem, text } = await sideJson({ prompt: req.prompt, system: req.system, maxTokens: Number(s.maxTokens) > 0 ? Number(s.maxTokens) : 3000 }, Core.parseMemoryResponse, 'memories');
-        toastr.clear(note); note = null;
-        const userName = String(getContext().name1 ?? '').toLowerCase();
-        const chars = parsedMem?.filter(c => !userName || ![c.name, ...c.aliases].some(n => n.toLowerCase() === userName)); // never write memories for the human's own character
-        if (!chars) { toastr.error('The model did not return usable memories (it sent an empty or example reply twice). Try a stronger model for side calls, or fewer Days per batch.'); noteIssue('memories: unusable reply'); console.warn(LOG, 'memory reply', text); return { ok: false }; }
-        const groups = new Map();
-        for (const c of chars) { const b = memoryBookFor(c); if (!groups.has(b)) groups.set(b, []); groups.get(b).push(c); }
-        const plans = [];
-        for (const [book, list] of groups) {
-            const d = book === s.lorebook ? data : ((await readFresh(book)) ?? { entries: {} });
-            plans.push({ book, data: d, own: s.memoryTarget === 'character' && book !== s.lorebook && book !== memoryBookName(), items: Core.planMemories(storyMemoryData(d, book), list, { cap: Number(s.memoryCap) || 30, tag: `[${s.unit || 'Day'} ${src.lastDay}]`, unit: s.unit || 'Day' }) });
-        }
-        const done = { ok: true, remaining: src.remaining, lastDay: src.lastDay };
-        if (!plans.some(p => p.items.length)) {
-            assertCurrentChat();
-            beginUndoWrite();
-            await saveUndoSnapshot(s.lorebook, data);
-            s.memoryProgress = { ...(s.memoryProgress ?? {}), [s.lorebook]: Math.max(progress, src.lastDay) }; saveSettingsDebounced(); await updateInfoLine();
-            toastr.info(`No new memories to add for ${label}.`); return done;
-        }
-        if (s.review && !(await showMemoryReview(plans, src))) { toastr.info('Cancelled. Nothing more was written.'); return { ok: false }; }
-        assertCurrentChat();
-        await commitMemories(plans, src);
-        if (plans.some(p => p.items.some(i => !i.include || !i.bullets.length))) { toastr.info('Memory progress was not advanced because some results were skipped.'); return { ok: false }; }
-        return done;
-    } finally { if (note) try { toastr.clear(note); } catch { /* ignore */ } }
-}
-
-/** `all` keeps going batch by batch until every unprocessed Day is done. An explicit From/To range is always worked through completely. */
-async function runMemories(all = false) {
-    if (workbench) { try { return await workbench.startMemories(all === true); } catch (e) { console.error(LOG, e); toastr.error(e?.message ?? e); return; } }
-    if (busy) { toastr.info('The archivist is already running.'); return; }
-    const s = settings();
-    if (!s.lorebook) { toastr.warning('Pick or create a lorebook first.'); return; }
-    busy = true; operationChat = getContext().chat; operationRevision = chatRevision;
-    $('.sa-mem-run').prop('disabled', true);
-    try {
-        const num = (v) => { const x = String(v ?? '').trim(); return x === '' ? null : Number(x); };
-        const from = num($('#sa_mem_from').val() ?? s.memoryFrom), to = num($('#sa_mem_to').val() ?? s.memoryTo);
-        const hasRange = from != null || to != null;
-        let range = hasRange ? { from: from ?? 1, to: to ?? Infinity } : null;
-        for (let n = 0; n < 200; n++) {
-            const r = await memoryStep(range, n === 0);
-            if (!r.ok) break;
-            if (!(all === true || hasRange) || !r.remaining) break;
-            range = { from: r.lastDay + 1, to: range?.to ?? Infinity };
-        }
-    } catch (e) {
-        console.error(LOG, e);
-        noteIssue('memories failed: ' + (e?.message ?? e));
-        toastr.error('Character memories failed: ' + (e?.message ?? e));
-    } finally {
-        busy = false; operationChat = null;
-        $('.sa-mem-run').prop('disabled', false);
-    }
+async function runMemories() {
+    try { return await workbench.startMemories(); }
+    catch (e) { console.error(LOG, e); toastr.error(e?.message ?? e); }
 }
 
 // ---------------------------------------------------------------- trackers, ask the archive, recap
@@ -1731,7 +1529,6 @@ function panelHtml() {
       <div class="sa-row"><label for="sa_remind">Remind me every</label><input id="sa_remind" class="text_pole" type="number" min="0" max="500" title="Messages, 0 = never"></div>
       <label class="checkbox_label"><input id="sa_autoarch" type="checkbox"><span>Archive automatically instead of reminding</span></label>
       <label class="checkbox_label"><input id="sa_review" type="checkbox"><span>Review before writing</span></label>
-      <label class="checkbox_label"><input id="sa_append" type="checkbox"><span>Append the log to my prompt (chat mode, no outlet)</span></label>
       <div class="sa-sub">Never use as keywords</div>
       <textarea id="sa_avoid" class="text_pole" rows="2" placeholder="Names in every scene, comma separated"></textarea>
     </div></details>
@@ -1780,7 +1577,6 @@ function bindUi() {
     $('#sa_log_md').on('click', exportLogMd);
  bindVal('#sa_opening', 'opening');
     $('#sa_review').prop('checked', s.review).on('change', function () { s.review = this.checked; saveSettingsDebounced(); });
-    $('#sa_append').prop('checked', s.appendLog).on('change', function () { s.appendLog = this.checked; saveSettingsDebounced(); });
     $('#sa_lorebook').on('change', async function () { if (busy) { $(this).val(s.lorebook); return; } s.lorebook = $(this).val(); s.memoryBook = ''; await refreshChatUi(); });
     $('#sa_create').on('click', createLorebook);
     $('#sa_run').on('click', () => runSummarize());
@@ -1819,13 +1615,10 @@ function bindUi() {
     bindVal('#sa_tr_days', 'trackerDays', true);
     $('#sa_autoarch').prop('checked', s.autoArchive).on('change', function () { s.autoArchive = this.checked; saveSettingsDebounced(); });
     $('#sa_recap').on('click', recap);
-    bindVal('#sa_archmode', 'archiveMode'); bindVal('#sa_chunk', 'chunkTokens', true); bindVal('#sa_keepvis', 'keepVisible', true);
+    bindVal('#sa_keepvis', 'keepVisible', true);
     $('#sa_hide').prop('checked', s.hideArchived).on('change', function () { s.hideArchived = this.checked; saveSettingsDebounced(); });
     $('#sa_through_set').on('click', setThrough); $('#sa_ledger_import').on('click', importLedger);
-    $('#sa_chunk').on('change input', () => renderLedger());
     renderLedger();
-    $('#sa_mem_run').on('click', () => runMemories(false));
-    $('#sa_mem_all').on('click', () => runMemories(true));
     $('#sa_cond_run').on('click', () => runCondense());
     bindVal('#sa_cond_above', 'condenseAbove', true); bindVal('#sa_cond_prompt', 'condensePrompt');
     $('#sa_cond_prompt_reset').on('click', () => { s.condensePrompt = DEFAULT_SETTINGS.condensePrompt; $('#sa_cond_prompt').val(s.condensePrompt); saveSettingsDebounced(); toastr.info('Condense prompt reset to the default.'); });
@@ -1893,7 +1686,7 @@ jQuery(async () => {
         }));
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'archivist-memories',
-            callback: async () => { await runMemories(true); return ''; },
+            callback: async () => { await runMemories(); return ''; },
             helpString: 'Create character memories using the source and range selected in Scene Archivist.',
         }));
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({

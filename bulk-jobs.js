@@ -27,8 +27,12 @@ export class BulkRun {
         this.data.meta.workbench.telemetry = this.w.liveState().telemetry;
         // Limits may be raised before retrying a retained job. Story prompts,
         // destinations and the queued selection remain the original snapshot.
-        const limit = this.real.settings().workbench?.requestBudget;
-        if (Number.isFinite(limit)) (this.data.settings.workbench ??= {}).requestBudget = limit;
+        const live = this.real.settings().workbench;
+        if (Number.isFinite(live?.requestBudget)) {
+            const options = (this.data.settings.workbench ??= {});
+            options.requestBudget = live.requestBudget;
+            if (live.modelAwareRequests) options.modelAwareRequests = true;
+        }
         // Never serialize a job inside its own draft.
         Object.defineProperty(this.data.meta.workbench, 'job', { value: this.job, configurable: true, writable: true, enumerable: false });
         const d = this.data, real = this.real;

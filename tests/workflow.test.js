@@ -6,7 +6,7 @@ import * as Core from '../core.js';
 import * as Flow from '../flow.js';
 import { placeSharedUnits } from '../workflow-tools.js';
 import { projectBranch } from '../recovery-tools.js';
-import { DEFAULT_SETTINGS } from '../defaults.js';
+import { DEFAULT_MEMORY_PROMPT, DEFAULT_SETTINGS, LEGACY_MEMORY_PROMPTS } from '../defaults.js';
 
 function fixture({ existing = {}, failTracker = false, limits = {}, prefs = {}, amendChat = false } = {}) {
     const config = { ...M.copy(DEFAULT_SETTINGS), lorebook: 'Story', memoryBook: 'Memories', sideProfile: 'notes', archiveProfile: 'summary',
@@ -14,14 +14,15 @@ function fixture({ existing = {}, failTracker = false, limits = {}, prefs = {}, 
             { id: 'places', name: 'Places', enabled: true, prompt: 'Track places.' }] };
     const metadata = { workbench: { storyId: 'story', originChat: 'Main', flowSettings: prefs, telemetry: { input: 0, output: 0, requests: 0 } } };
     const chat = [{ name: 'Mira', is_user: true, mes: 'I give Zelga the brass key.' }, { name: 'Zelga', mes: 'Zelga thanks Mira at the front gate.' }];
+    const identity = { chatId: 'Main', chatMetadata: {} };
     const books = { Story: { entries: {} }, ...M.copy(existing) };
     const calls = [], reviews = [], alerts = [];
     let busy = false, failed = false;
     const host = {
-        settings: () => config, meta: () => metadata, context: () => ({ chat, chatId: 'Main', name1: 'Mira', getWorldInfoNames: () => Object.keys(books) }),
+        settings: () => config, meta: () => metadata, context: () => ({ chat, ...identity, name1: 'Mira', getWorldInfoNames: () => Object.keys(books) }),
         load: async name => books[name] ? M.copy(books[name]) : null, save: async (name, data) => { books[name] = M.copy(data); },
         makeEntry: (_name, data) => { const uid = Math.max(-1, ...Object.keys(data.entries).map(Number)) + 1; return data.entries[uid] = { uid }; },
-        createBook: async name => { books[name] ??= { entries: {} }; }, own: data => data, register: (archive, book, type) => { config.storyBooks[archive][book] = type; },
+        createBook: async name => { books[name] ??= { entries: {} }; }, own: data => data, register: (archive, book, type) => { (config.storyBooks[archive] ??= {})[book] = type; },
         memoryBook: () => 'Memories', memoryBookFor: () => 'Memories', options: () => ({ delivery: 'depth', keepDays: 3 }),
         begin: () => { if (busy) return false; busy = true; return true; }, end: () => { busy = false; }, isBusy: () => busy,
         saveMeta: async () => {}, saveSettings: () => {}, ensureArchive: async () => true, assert: () => {}, attach: async () => {},
@@ -72,8 +73,87 @@ function fixture({ existing = {}, failTracker = false, limits = {}, prefs = {}, 
         };
         return workbench;
     };
-    return { w: create(), create, config, books, metadata, chat, calls, reviews, alerts };
+    return { w: create(), create, config, books, metadata, chat, identity, calls, reviews, alerts };
 }
+
+test('helpers migrate the old default and allow large requests within the configured context', async () => {
+    const f = fixture();
+    f.config.workbench = { requestBudget: 18000, batchSize: 6, charactersPerBatch: 4 };
+    assert.deepEqual(f.w.helperCapacity(6000), { input: 194000, output: 6000 });
+    assert.equal(f.w.options().batchSize, 0);
+    assert.equal(f.w.options().charactersPerBatch, 0);
+    const req = { system: 'Read this material.', prompt: 'Story material '.repeat(6500), maxTokens: 6000 };
+    const requests = [];
+    f.w.h.model = async request => { requests.push(request); return 'Done.'; };
+    await f.w.call(req, 'helper');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].maxTokens, 6000);
+    f.w.options().requestBudget = 18000;
+    await assert.rejects(f.w.call(req, 'helper'), /room for 18000/);
+    assert.equal(requests.length, 1);
+    assert.equal(M.validateWorkflow(M.workflow(f.config)).workbench.requestBudget, 18000);
+    f.w.options().requestBudget = 0;
+    f.w.h.flowModelInfo = () => ({ context: 22000, output: 2000 });
+    await assert.rejects(f.w.call(req, 'helper'), /room for 16000/);
+    assert.equal(requests.length, 1);
+});
+
+test('automatic helper grouping replaces the old unit and character counts', async () => {
+    const entries = Object.fromEntries(Array.from({ length: 9 }, (_, uid) => {
+        const name = 'Character ' + uid;
+        const e = { uid, content: `## ► Memories — ${name}\n\n- The brass key opened the front gate.` };
+        e.sceneArchivist = M.makeRecord(e, { type: 'memory', storyId: 'story' }, { subject: name });
+        return [uid, e];
+    }));
+    const f = fixture({ existing: { Memories: { entries } } });
+    await f.w.loadBooks();
+    assert.equal(f.w.chunks(f.w.entries).length, 1);
+    const [batch, ...rest] = f.w.auditSteps(f.w.entries);
+    assert.equal(rest.length, 0);
+    assert.equal(batch.audits.length, 9);
+    f.w.options().charactersPerBatch = 4;
+    assert.deepEqual(f.w.auditSteps(f.w.entries).map(step => step.ids.length), [4, 4, 1]);
+});
+
+test('a chat rename keeps its books while a native branch with copied integrity detaches', async () => {
+    const f = fixture();
+    f.metadata.workbench.chatIntegrity = 'saved-chat';
+    f.identity.chatMetadata.integrity = 'saved-chat';
+    f.identity.chatId = 'Renamed';
+    await f.w.ensureBranch();
+    assert.equal(f.metadata.workbench.originChat, 'Renamed');
+    assert.equal(f.config.lorebook, 'Story');
+    assert.deepEqual(Object.keys(f.books), ['Story']);
+    f.identity.chatId = 'Renamed - Branch #1';
+    f.identity.chatMetadata.main_chat = 'Renamed';
+    await f.w.ensureBranch();
+    assert.equal(f.config.lorebook, 'Story · Branch #1');
+    assert.equal(f.metadata.workbench.branchLineage.parent, 'Renamed');
+    assert.deepEqual(Object.keys(f.books), ['Story', 'Story · Branch #1']);
+});
+
+test('an interrupted branch setup reuses the same book after a rename', async () => {
+    const f = fixture();
+    f.metadata.workbench.chatIntegrity = 'parent-chat';
+    f.identity.chatId = 'Main - Branch #1';
+    f.identity.chatMetadata = { integrity: 'branch-chat', main_chat: 'Main' };
+    const createBook = f.w.h.createBook;
+    f.w.h.createBook = async () => { throw new Error('Write interrupted'); };
+    await assert.rejects(f.w.ensureBranch(), /Write interrupted/);
+    const destination = f.metadata.workbench.branchIntent.mapping.Story;
+    f.identity.chatId = 'Renamed branch';
+    f.w.h.createBook = createBook;
+    await f.w.ensureBranch();
+    assert.equal(f.config.lorebook, destination);
+    assert.equal(f.metadata.workbench.originChat, 'Renamed branch');
+    assert.deepEqual(Object.keys(f.books), ['Story', destination]);
+});
+
+test('the prompt default leaves persona policy to the workflow toggle', () => {
+    assert.doesNotMatch(DEFAULT_MEMORY_PROMPT, /Do not write memories for|Scene Log/);
+    assert.match(DEFAULT_MEMORY_PROMPT, /supplied roleplay evidence/);
+    assert.ok(LEGACY_MEMORY_PROMPTS.some(prompt => prompt.includes('Do not write memories for {{user}}') && prompt.includes('Read the entire excerpt')));
+});
 
 test('whole day runs one request per stage and one review with profile routing', async () => {
     const f = fixture({ prefs: { readReferences: true, references: [{ book: 'Lore' }] } });

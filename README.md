@@ -177,6 +177,8 @@ Optional recap automation can suggest or create a recap after newer units, ficti
 
 **Current SillyTavern model** uses your live connection. A failed profile can be retried directly, or you can explicitly select **Use current model**. Context checks use the capacity exposed by the configured connection. Custom proxies can apply additional limits.
 
+Helper tools such as memory organization and archive search use the helper model’s context with room reserved for the reply. In **Story memory settings**, leave the helper input and count limits at **0** to fit the connection automatically. Set a positive limit to cap a request. If a connection exposes no context size, the automatic helper input estimate is 18,000 tokens.
+
 ![Optional persona, reference lore, and prompt-preview settings](docs/media/17-reference-context.png)
 
 ![Archive and memory connection profile selectors](docs/media/18-connections.png)
@@ -199,6 +201,8 @@ Optional recap automation can suggest or create a recap after newer units, ficti
 Enable **Share this archive across chats** in the original chat, then select that book in the other chat. This is for chats that intentionally share one timeline. **Shared archive filing** can start a new unit, continue an existing unit, or file an earlier event. Each contribution keeps its own source range. Use one writer at a time when updating a shared archive.
 
 A native SillyTavern branch can use verified earlier history or start with empty private books. The branch view shows the parent and fork point when available. Later records stay in the parent when the extension cannot verify them as part of the branch.
+
+Renaming a chat keeps its books and progress when SillyTavern supplies the same chat identifier.
 
 ![Archive sharing controls](docs/media/24-sharing.png)
 

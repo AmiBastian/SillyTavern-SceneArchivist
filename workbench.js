@@ -15,10 +15,11 @@ const field = (key, label, value = '', type = 'text', extra = '') => `<label cla
 const card = (title, body, open = true) => `<details class="sa-card" ${open ? 'open' : ''}><summary>${title}</summary><div class="sa-body">${body}</div></details>`;
 const listValue = value => M.unique(String(value || '').split(/\s*;\s*/));
 const flat = (it, unit) => it.a == null ? it.text : `[${it.b != null && it.b !== it.a ? unit + 's ' + it.a + '-' + it.b : unit + ' ' + it.a}${it.date ? ', ' + it.date : ''}] ${it.text}`;
+const auditReplyTokens = (tokens, count = 1) => Math.max(3000, Math.min(16000, tokens + 500 * count));
 
 export const WORKBENCH_DEFAULTS = {
-    budget: 6000, requestBudget: 18000, autoCondense: 'off', trigger: 'units', afterUnits: 10,
-    afterDays: 30, pressureTokens: 16000, batchSize: 6, charactersPerBatch: 4, reviewMode: 'end', recapLabel: 'Arc', recapMode: 'recap',
+    budget: 6000, requestBudget: 0, modelAwareRequests: true, autoCondense: 'off', trigger: 'units', afterUnits: 10,
+    afterDays: 30, pressureTokens: 16000, batchSize: 0, charactersPerBatch: 0, reviewMode: 'end', recapLabel: 'Arc', recapMode: 'recap',
     continuityRecent: 20, branchMode: 'prune', continuityAuto: false, recapOnReturn: false, recapAfterHours: 24, semantic: false, requestLimit: 0, jobPreview: false,
 };
 
@@ -37,10 +38,28 @@ export class Workbench {
     }
 
     options() {
-        const settings = this.h.settings();
-        settings.workbench ??= {};
-        for (const [k, v] of Object.entries(WORKBENCH_DEFAULTS)) if (!(k in settings.workbench)) settings.workbench[k] = v;
-        return settings.workbench;
+        const options = (this.h.settings().workbench ??= {});
+        if (!options.modelAwareRequests) {
+            // Existing settings stored the old defaults as ordinary numbers.
+            if (Number(options.requestBudget) === 18000) options.requestBudget = 0;
+            if (Number(options.batchSize) === 6) options.batchSize = 0;
+            if (Number(options.charactersPerBatch) === 4) options.charactersPerBatch = 0;
+            options.modelAwareRequests = true;
+        }
+        for (const [k, v] of Object.entries(WORKBENCH_DEFAULTS)) if (!(k in options)) options[k] = v;
+        return options;
+    }
+    helperModel() {
+        try { return this.h.flowModelInfo?.(this.h.settings().sideProfile || ''); }
+        catch { return this.h.flowModelInfo?.(''); }
+    }
+    helperCapacity(maxTokens = 6000, model = this.helperModel()) {
+        const output = model?.context > 0 && maxTokens >= model.context && model.output > 0
+            ? Math.min(maxTokens, model.output) : maxTokens;
+        const cap = Number(this.options().requestBudget);
+        const override = cap > 0 && Number.isFinite(cap) ? cap : 0;
+        const input = model?.context > 0 ? Math.max(0, Math.min(model.context - output, override || Infinity)) : override || 18000;
+        return { output, input };
     }
     liveState() { return (this.baseHost.meta().workbench ??= { storyId: M.uid(), coverage: {}, telemetry: { requests: 0, input: 0, output: 0 }, applied: [] }); }
     state() { return this.bulkRun ? this.bulkRun.data.meta.workbench : this.liveState(); }
@@ -57,15 +76,16 @@ export class Workbench {
         if (job?.status === 'running' && job.options.requestLimit > 0 && (job.requestsThisResume || 0) >= job.options.requestLimit) {
             job.status = 'paused'; job.error = `Paused at the ${job.options.requestLimit}-request limit. Resume allows another ${job.options.requestLimit} requests.`; await this.persist(); throw new Error(job.error);
         }
-        const cost = M.tokens(req.system || '') + M.tokens(req.prompt || '');
-        const limit = Math.max(2000, Number(this.options().requestBudget) || 18000);
-        if (!archiveRange && cost > limit) throw new Error(`${label} needs about ${cost} input tokens, above the ${limit} request limit. Use a smaller selection or increase the request limit in Settings.`);
+        const text = (req.system || '') + '\n' + (req.prompt || '');
+        const cost = Number(await this.h.tokenCount?.(text)) || M.tokens(text);
+        const capacity = archiveRange ? null : this.helperCapacity(req.maxTokens || 1200);
+        if (capacity && cost > capacity.input) throw new Error(`${label} needs about ${cost} input tokens. This connection has room for ${capacity.input} with the reply reserved. Choose less material or a larger context, or check your helper input limit.`);
         const st = this.liveState(), meter = (st.telemetry ??= { requests: 0, input: 0, output: 0 });
         meter.requests++; meter.input += cost; meter.last = { label, at: M.now(), input: cost, state: 'requesting' };
         await this.persist();
         try {
             if (job?.status === 'running') { job.requestsThisResume = (job.requestsThisResume || 0) + 1; job.requestsTotal = (job.requestsTotal || 0) + 1; await this.persist(); }
-            const raw = archiveRange ? await this.h.archiveModel(req, archiveRange) : await this.h.model(req);
+            const raw = archiveRange ? await this.h.archiveModel(req, archiveRange) : await this.h.model({ ...req, maxTokens: capacity.output });
             this.h.assert();
             if (typeof raw !== 'string' || !raw.trim()) throw new Error('The model returned no text. A normal finish_reason of stop only means generation ended; empty or incomplete content is not accepted.');
             meter.output += M.tokens(raw); meter.last.state = 'received'; meter.last.output = M.tokens(raw);
@@ -141,19 +161,16 @@ export class Workbench {
         const branchMode = this.options().branchMode === 'fresh' ? 'fresh' : 'prune';
         const metadata = this.h.context().chatMetadata || {};
         const integrity = metadata.integrity || '';
-        if (integrity && state.chatIntegrity === integrity && state.originChat !== identity) {
+        const parentChat = String(metadata.main_chat || '');
+        // Older SillyTavern versions could reuse a parent's integrity on a native branch.
+        if (integrity && state.chatIntegrity === integrity && state.originChat !== identity && parentChat !== state.originChat) {
             state.originChat = identity;
             await this.persist();
         }
-        const nativeBranch = metadata.main_chat && /(?:^Branch #\d+ - | - Branch #\d+$)/i.test(identity);
+        const nativeBranch = parentChat && /(?:^Branch #\d+ - | - Branch #\d+$)/i.test(identity);
         const copiedChat = !!(state.originChat && state.originChat !== identity);
         const legacySharedBranch = nativeBranch && shared?.shared && state.sharedArchive === oldArchive && !state.branchLineage;
         if (shared?.shared && !copiedChat && !legacySharedBranch) {
-            if (state.originChat && state.originChat !== identity) {
-                state.sourceId = M.uid();
-                for (const key of ['ranges', 'archivedThrough', 'lastDay', 'at', 'messages']) delete this.h.meta()[key];
-                state.coverage = {}; state.applied = []; delete state.job;
-            }
             state.storyId = shared.id; state.sharedArchive = oldArchive; state.originChat = identity; state.chatIntegrity = integrity;
             if (shared.memoryBook) s.memoryBook = shared.memoryBook;
             if (shared.memoryTarget) s.memoryTarget = shared.memoryTarget;
@@ -167,7 +184,7 @@ export class Workbench {
             if (integrity && !state.chatIntegrity) { state.chatIntegrity = integrity; await this.persist(); }
             return;
         }
-        const parent = copiedChat ? state.originChat : String(metadata.main_chat || '');
+        const parent = copiedChat ? state.originChat : parentChat;
         const parentSource = legacySharedBranch && this.entries.map(e => M.record(e)?.source).find(source => source?.actualChatId === parent && source.ranges?.length)?.chatId;
         const oldSource = parentSource || this.sourceId(), newId = M.uid(), newSource = M.uid(), mapping = {};
         const existing = this.h.context().getWorldInfoNames();
@@ -183,10 +200,13 @@ export class Workbench {
         const projected = projectBranch(owned, {mode: branchMode, oldSource, sourceId: newSource, storyId: newId, chatId: identity, chat: this.h.context().chat || [], archive: oldArchive, mapping});
         // Persist a deterministic intent before creating any book. Retrying a
         // failed branch finishes the same destination instead of making copies.
-        state.branchIntent ??= {identity, mapping, newId, newSource, mode: branchMode, books: projected.books, oldId: state.storyId, oldSource, parent, split: legacySharedBranch ? null : (this.h.context().chat?.length ?? 0) - 1};
+        const intent = (state.branchIntent ??= {identity, chatIntegrity: integrity, mapping, newId, newSource, mode: branchMode, books: projected.books, oldId: state.storyId, oldSource, parent, split: legacySharedBranch ? null : (this.h.context().chat?.length ?? 0) - 1});
+        if (intent.identity !== identity && (!integrity || intent.chatIntegrity !== integrity || parentChat === intent.identity)) {
+            throw new Error('Return to the chat with the unfinished branch setup before continuing.');
+        }
+        intent.identity = identity;
+        intent.chatIntegrity ||= integrity;
         await this.persist();
-        const intent = state.branchIntent;
-        if (intent.identity !== identity) throw new Error('Return to the chat with the unfinished branch setup before continuing.');
         for (const [old, d] of Object.entries(intent.books)) {
             const name = intent.mapping[old];
             if (!this.h.context().getWorldInfoNames().includes(name)) await this.h.createBook(name);
@@ -389,10 +409,8 @@ export class Workbench {
             c.open = false; this.panes[tab].append(c);
         }
         root.querySelector('#sa_range_from')?.closest('.sa-row')?.remove();
-        root.querySelector('#sa_mem_run')?.closest('.sa-row')?.remove(); // the Characters card above has the memory buttons
         root.querySelector('#sa_run').value = '✨ Summarize new, a quickie';
         root.querySelector('#sa_thorough').value = '💋 Archive thoroughly';
-        { const ma = root.querySelector('#sa_mem_all'); if (ma) ma.value = 'Read all unprocessed'; }
         root.querySelector('#sa_cond_run').value = 'Condense memories (merge repeats)';
         this.panes.archive.insertAdjacentHTML('beforeend', card('🎯 Pick your messages', `<p class="sa-hint">Both numbers are inclusive. 311 to 372 summarizes exactly that range and leaves 373 and 374 alone. Visibility has its own controls.</p><div class="sa-grid">${field('rangeFrom', 'First message', '', 'number', 'min="0"')}${field('rangeTo', 'Last message, inclusive', '', 'number', 'min="0"')}</div><p id="sa-range-preview" class="sa-hint"></p><label class="checkbox_label"><input type="checkbox" data-sa-field="rangeHide"><span>Hide this range after a successful summary</span></label><label class="checkbox_label"><input type="checkbox" data-sa-field="rangeMemories"><span>Also create memories</span></label><div class="sa-row">${button('rangePreview', 'Preview range')}${button('rangeArchive', 'Summarize this range') + button('rangeCatchUp', 'Catch up this range')}${button('rangeHide', 'Hide this range')}${button('rangeShow', 'Show this range')}</div><p class="sa-hint">“Summarize new” uses uncovered messages. “Mark archived” only marks coverage and does not write a summary.</p>`));
         this.panes.archive.insertAdjacentHTML('beforeend', card('🧹 Tidy the shelves', `<p class="sa-hint">Sort the archive and group memories by date. Every memory sentence keeps its wording. No AI request is made.</p><label class="checkbox_label"><input type="checkbox" data-sa-field="tidyDuplicates"><span>Also remove exact duplicate memories within the same date group</span></label><div class="sa-row">${button('tidy', 'Tidy up, hands off the prose')}</div>`, false));
@@ -411,7 +429,7 @@ export class Workbench {
         this.panes.characters.insertAdjacentHTML('beforeend', card('📖 Character diaries', `<p class="sa-hint">Write from original chat messages, the character card and attached background lore. Update adds new material to the latest saved diary for the character. Diaries stay separate from RP memory injection.</p><label class="sa-field"><span>Character</span><select class="text_pole" data-sa-field="diaryCharacter"></select></label><div class="sa-grid">${field('diaryName', 'Character name (optional override)')}${field('diaryDate', 'Story date (optional)')}${field('diaryFrom', 'First message (optional)', '', 'number', 'min="0"')}${field('diaryTo', 'Last message (optional)', '', 'number', 'min="0"')}</div><label class="sa-field"><span>Style note, optional</span><textarea class="text_pole" data-sa-field="diaryStyle" rows="3"></textarea></label><div class="sa-row">${button('diary', 'Write diary')}${button('diaryUpdate', 'Update diary')}${button('diaryCondense', 'Condense diary')}</div>`, false));
         this.panes.search.insertAdjacentHTML('afterbegin', card('🔎 Search, evidence and continuity', `<p class="sa-hint">Ask uses relevant records across this story’s books. Source buttons open the original details, even when a recap is loaded.</p><div class="sa-row"><input class="text_pole" data-sa-field="question" placeholder="Ask, or enter a claim to check" aria-label="Archive question or continuity claim">${button('ask', 'Ask the archive')}${button('continuity', 'Check this claim')}${button('continuityAll', 'Check recent continuity')}${button('continuityFull', 'Check whole archive')}</div><p class="sa-hint">Recent checks use the configured number of newest eligible records. Findings stay below until another check replaces them.</p><div id="sa-evidence-results" aria-live="polite"></div><div id="sa-continuity-results" aria-live="polite"></div>`));
         this.panes.search.insertAdjacentHTML('beforeend', card('💰 Memory budget and loading reasons', `<div class="sa-row"><label>Show activation source<select class="text_pole" data-sa-field="activationFilter"><option value="">All sources</option><option value="keyword">Keyword</option><option value="native vector">Vector</option><option value="always on">Always On</option><option value="recall">AI Recall</option><option value="sticky">Sticky</option></select></label></div><div id="sa-budget-view"></div>`, false));
-        this.panes.settings.insertAdjacentHTML('afterbegin', card('🛠️ Story memory settings', `<div class="sa-grid">${this.optionField('budget', 'Total injected memory tokens', 'number')}${this.optionField('requestBudget', 'Maximum input tokens per side request', 'number')}${this.optionField('batchSize', 'Units per archive condensation or extraction batch', 'number')}${this.optionField('charactersPerBatch', 'Characters per memory audit request, up to 8', 'number')}<label class="sa-field"><span>Review bulk results</span><select class="text_pole" data-sa-option="reviewMode"><option value="end">Together at the end</option><option value="step">After each step</option></select></label></div><p class="sa-hint">Together at the end runs the whole job before one combined review. Requests stay within your input limit. Review later keeps prepared results for Resume / review.</p><label class="checkbox_label"><input type="checkbox" data-sa-option="continuityAuto"><span>Check continuity after new replies, findings only</span></label><label class="checkbox_label"><input type="checkbox" data-sa-option="recapOnReturn"><span>Offer a dated recap when returning to this story</span></label>${this.optionField('recapAfterHours', 'Hours before offering a return recap', 'number')}<div id="sa-telemetry" class="sa-hint"></div>`));
+        this.panes.settings.insertAdjacentHTML('afterbegin', card('🛠️ Story memory settings', `<div class="sa-grid">${this.optionField('budget', 'Total injected memory tokens', 'number')}${this.optionField('requestBudget', 'Helper input tokens (0 = use model context)', 'number')}${this.optionField('batchSize', 'Units per helper request (0 = fit context)', 'number')}${this.optionField('charactersPerBatch', 'Characters per audit request (0 = fit context)', 'number')}<label class="sa-field"><span>Review bulk results</span><select class="text_pole" data-sa-option="reviewMode"><option value="end">Together at the end</option><option value="step">After each step</option></select></label></div><p class="sa-hint">Together at the end runs the whole job before one combined review. Helpers fit the selected model’s context by default. Use a positive input or count limit to cap individual requests. Review later keeps prepared results.</p><label class="checkbox_label"><input type="checkbox" data-sa-option="continuityAuto"><span>Check continuity after new replies, findings only</span></label><label class="checkbox_label"><input type="checkbox" data-sa-option="recapOnReturn"><span>Offer a dated recap when returning to this story</span></label>${this.optionField('recapAfterHours', 'Hours before offering a return recap', 'number')}<div id="sa-telemetry" class="sa-hint"></div>`));
         this.panes.settings.insertAdjacentHTML('beforeend', card('🔗 Archive sharing', `<p id="sa-sharing-state" class="sa-hint"></p><div class="sa-row">${button('sharing', 'Share this archive across chats')}</div>`, false));
         this.panes.settings.insertAdjacentHTML('beforeend', card('💾 Backups and workflow presets', `<p class="sa-hint">A story backup includes its archive, character memories, recaps, dependencies, revisions, jobs and workflow settings. Imports show a preview and create separate books. Connection profiles stay on your device.</p><div class="sa-row">${button('exportStory', 'Export complete story')}${button('importStory', 'Import or restore story')}${button('exportWorkflow', 'Export workflow preset')}${button('importWorkflow', 'Import workflow preset')}${button('importLog', 'Import a plain Scene Log')}</div><input data-sa-field="file" type="file" accept=".json,.md,.txt" hidden>`, false));
         this.panes.settings.insertAdjacentHTML('beforeend', card('🧭 Existing SillyTavern vectors', `<p class="sa-hint">Configure World Info vectors in SillyTavern’s native Vector Storage and each lorebook entry’s vector setting. Scene Archivist observes those searches without changing entry eligibility, query text, result limits, or similarity thresholds. The memory budget only trims the entries selected by World Info.</p>`, false));
@@ -461,7 +479,7 @@ export class Workbench {
         this.syncOptions(); this.showTab('archive'); this.updateUnitLabels(); this.installVectorBridge();
     }
 
-    optionField(key, label, type) { return field(key, label, this.options()[key], type, `data-sa-option="${key}" ${key === 'charactersPerBatch' ? 'min="1" max="8" step="1"' : 'min="0"'}`); }
+    optionField(key, label, type) { return field(key, label, this.options()[key], type, `data-sa-option="${key}" ${key === 'charactersPerBatch' ? 'min="0" max="8" step="1"' : 'min="0"'}`); }
     value(key) { return this.root?.querySelector(`[data-sa-field="${key}"]`)?.value ?? ''; }
     checked(key) { return !!this.root?.querySelector(`[data-sa-field="${key}"]`)?.checked; }
     syncOptions() {
@@ -803,11 +821,13 @@ export class Workbench {
     }
     chunks(entries, size = this.options().batchSize) {
         const out = []; let current = [], used = 0;
-        const limit = Math.max(1500, Number(this.options().requestBudget) - 3500);
+        const input = this.helperCapacity().input;
+        const limit = input - Math.min(3500, Math.floor(input / 3));
+        const count = Number(size) > 0 ? Number(size) : Infinity;
         for (const e of entries) {
             const cost = M.tokens(e.content);
-            if (cost > limit) throw new Error(`${M.title(e)} is too large for one request. Increase the request limit or split this entry before processing it.`);
-            if (current.length && (current.length >= Math.max(1, Number(size)) || used + cost > limit)) { out.push(current); current = []; used = 0; }
+            if (cost > limit) throw new Error(`${M.title(e)} is too large for this connection’s input budget. Choose a larger context or split the entry.`);
+            if (current.length && (current.length >= count || used + cost > limit)) { out.push(current); current = []; used = 0; }
             current.push(e); used += cost;
         }
         if (current.length) out.push(current); return out;
@@ -1020,15 +1040,18 @@ export class Workbench {
     }
     async startMemories() { return this.startFlow('memories'); }
     auditSteps(entries) {
-        const steps = [], limit = Math.max(1000, Number(this.options().requestBudget) - 2000), unit = this.h.settings().unit;
+        const steps = [], s = this.h.settings(), unit = s.unit, model = this.helperModel();
+        const overhead = M.tokens(s.condensePrompt) + 450;
+        const fits = (tokens, count = 1) => tokens + overhead <= this.helperCapacity(auditReplyTokens(tokens, count), model).input;
         for (const e of entries) {
             const r = M.record(e), bullets = Core.memoryEntries({ entries: { [e.uid]: e } }, unit)[0]?.bullets || [];
             if (!bullets.length) continue;
             const groups = []; let group = [], used = 0;
             for (const b of bullets) {
-                if (M.tokens(b) > limit) throw new Error('A single memory is larger than the request limit. Increase the limit or split that memory.');
-                if (group.length && used + M.tokens(b) > limit) { groups.push(group); group = []; used = 0; }
-                group.push(b); used += M.tokens(b);
+                const cost = M.tokens(b);
+                if (!fits(cost)) throw new Error('A single memory is larger than this connection’s input budget. Choose a larger context or split that memory.');
+                if (group.length && !fits(used + cost)) { groups.push(group); group = []; used = 0; }
+                group.push(b); used += cost;
             }
             if (group.length) groups.push(group);
             if (groups.length === 1) { steps.push(this.inputStep([e], { kind: 'memory-audit', phase: 'final', auditBullets: groups[0] })); continue; }
@@ -1048,7 +1071,7 @@ export class Workbench {
             steps.push(this.inputStep([e], { kind: 'memory-audit', phase: 'final', dependencies: keys }));
         }
         if (this.options().reviewMode === 'step') return steps;
-        const cap = Math.max(1, Math.min(8, Number(this.options().charactersPerBatch) || 4));
+        const cap = Math.max(0, Math.min(8, Number(this.options().charactersPerBatch))) || Infinity;
         const singles = steps.filter(s => s.phase === 'final' && s.auditBullets);
         const rest = steps.filter(s => !singles.includes(s));
         let batch = [], used = 0;
@@ -1060,7 +1083,8 @@ export class Workbench {
         };
         for (const step of singles) {
             const cost = M.tokens(step.auditBullets.join('\n')) + 200;
-            if (batch.length && (batch.length >= cap || used + cost > limit)) flush();
+            const replyEstimate = used + cost + 500 * (batch.length + 1);
+            if (batch.length && (batch.length >= cap || replyEstimate > 16000 || !fits(used + cost, batch.length + 1))) flush();
             batch.push(step); used += cost;
         }
         flush(); return rest;
@@ -1462,10 +1486,11 @@ ${Core.buildTranscript(payload.messages)}`;
             const req = M.condensationRequest(inputs, job.options.mode, job.options.label, job.options.target);
             const profile = this.h.settings().sideProfile || '';
             const model = this.h.flowModelInfo?.(profile);
-            const maxTokens = model?.output || 6000;
+            const capacity = this.helperCapacity(model?.output || 6000, model);
+            const maxTokens = capacity.output;
             const count = async value => Number(await this.h.tokenCount(value)) || M.tokens(value);
             const cost = await count(req.system + '\n' + req.prompt);
-            if (model?.context && cost + maxTokens > model.context) throw new Error('This selection and its output allowance exceed the model context. Select fewer records or use a larger context.');
+            if (cost > capacity.input) throw new Error('This selection exceeds the input budget with the reply reserved. Select fewer records or use a larger context.');
             const raw = this.h.sendFlowRequest ? await this.h.sendFlowRequest({ ...req, maxTokens }, profile) : await this.call({ ...req, maxTokens }, 'condensation');
             const proposed = M.condensationResult(raw, inputs, job.options.mode, job.options.label);
             const result = [];
@@ -1483,7 +1508,8 @@ ${Core.buildTranscript(payload.messages)}`;
             const s = this.h.settings(), dateMap = Object.fromEntries(inputs.filter(e => M.record(e).unit?.number != null).map(e => [M.record(e).unit.number, (M.record(e).dates || []).join('; ')]));
             const previous = this.entries.filter(e => M.record(e).type === 'memory' && M.active(e));
             const context = previous.map(e => `${M.record(e).subject || Core.classifyEntry(e).name}: aliases ${(M.record(e).aliases || []).join(', ')}`).join('\n');
-            const req = { system: `${Core.unitize(s.memoryPrompt, s.unit)}\nRead every supplied source. Write natural character memories, not labels, jargon or a transcript of everything. Keep each consequential beat, each relevant full date, year, location, participant, promise and change. Merge duplicated meaning with previous memories, but never merge away dates or knowledge differences. State what this character experienced, learned, believes or is hiding and how. Do not leak narrator-only information. Multiple related sentences in one bullet are allowed. Start each memory with [${s.unit} N, exact full date]. Return complete JSON, not an empty placeholder.`,
+            const persona = this.h.context().name1 || 'the player persona';
+            const req = { system: `${Core.unitize(s.memoryPrompt, s.unit).replaceAll('{{user}}', persona)}\nExclude ${persona}, the player persona, from the output. Read every supplied source. Write natural character memories, not labels, jargon or a transcript of everything. Keep each consequential beat, each relevant full date, year, location, participant, promise and change. Merge duplicated meaning with previous memories, but never merge away dates or knowledge differences. State what this character experienced, learned, believes or is hiding and how. Do not leak narrator-only information. Multiple related sentences in one bullet are allowed. Start each memory with [${s.unit} N, exact full date]. Return complete JSON, not an empty placeholder.`,
                 prompt: `NEW SOURCES\n${inputs.map(e => `SOURCE ${M.record(e).id}\n${e.content}`).join('\n\n')}\n\nEXISTING CHARACTER NAME ROSTER, for matching names only\n${context || '(none)'}\n\nReturn {"characters":[{"name":"actual character name","aliases":[],"memories":["dated memory"]}]}. If genuinely no meaningful memories exist, return {"characters":[],"reason":"specific explanation"}. Whole-list organization happens in a separate reviewed audit, so include every meaningful new memory here.` };
             const result = await this.json({ ...req, maxTokens: Number(s.maxTokens) > 0 ? Number(s.maxTokens) : 6000 }, raw => {
                 const chars = Core.parseMemoryResponse(raw), obj = M.parseJSON(raw);
@@ -1502,7 +1528,7 @@ ${Core.buildTranscript(payload.messages)}`;
             const bullets = step.payload.auditBullets || fromParts;
             const req = { system: `${Core.unitize(this.h.settings().condensePrompt, this.h.settings().unit)}\nRead every supplied memory and organize it. Merge duplicate or repeated meaning. Keep natural, readable character memories with concrete experiences and how they learned things. Keep all consequential events, full dates including years, relevant locations, people, promises and asymmetric knowledge. No jargon, no redundant repeated date prefixes. Never invent knowledge or resolve contradictions without evidence. Do not drop memories because they are old. Return {"memories":["[unit N, full date] natural memory"]}. Ranges are allowed only if the exact first and last dates remain.`,
                 prompt: `CHARACTER ${r.subject || Core.classifyEntry(e).name}\n\n${step.payload.phase === 'map' ? 'COMPLETE AUDIT CHUNK, other chunks are retained separately' : 'COMPLETE MEMORY LIST OR MERGED AUDIT CHUNKS'}\n${bullets.join('\n')}` };
-            return this.json({ ...req, maxTokens: Math.max(3000, Math.min(16000, M.tokens(e.content) + 500)) }, raw => {
+            return this.json({ ...req, maxTokens: auditReplyTokens(M.tokens(bullets.join('\n'))) }, raw => {
                 return this.organizedMemory(raw, bullets, r.subject || Core.classifyEntry(e).name);
             }, 'read and organize memories');
         }
@@ -1512,7 +1538,7 @@ ${Core.buildTranscript(payload.messages)}`;
             const req = {
                 system: `${Core.unitize(this.h.settings().condensePrompt, this.h.settings().unit)}\nOrganize each supplied character's complete memory list independently. Merge repeated meaning within that character only. Keep every consequential event, full date and year, place, person, promise, uncertainty and knowledge difference. Never move memories between characters, infer shared knowledge, invent a fact, or discard memories just because they are old. Keep natural sentences and dated unit tags. Return {"characters":[{"id":"exact supplied id","memories":["[unit N, full date] natural memory"]}]}. Include every supplied id exactly once, no additional ids.`,
                 prompt: audits.map(a => `CHARACTER ID ${a.id}\nNAME ${names.get(a.id)}\nCOMPLETE MEMORIES\n${a.bullets.join('\n')}`).join('\n\n'),
-                maxTokens: Math.max(3000, Math.min(16000, audits.reduce((n, a) => n + M.tokens(a.bullets.join('\n')) + 500, 0))),
+                maxTokens: auditReplyTokens(audits.reduce((n, a) => n + M.tokens(a.bullets.join('\n')), 0), audits.length),
             };
             return this.json(req, raw => {
                 const chars = M.parseJSON(raw)?.characters;
@@ -1786,7 +1812,8 @@ ${update.content}`;
             await this.loadBooks();
             const ranked = M.search(this.entries, question).filter(x => M.active(x.entry) && !['diary', 'opening', 'closing', 'legend'].includes(M.record(x.entry).type));
             const selected = ranked.slice(0, 30).map(x => M.record(x.entry).id);
-            const budget = Math.max(1500, Number(this.options().requestBudget) - 2000);
+            const overhead = M.tokens(this.h.settings().askPrompt) + M.tokens(question) + 350;
+            const budget = Math.max(0, this.helperCapacity(2500).input - overhead);
             const allocation = M.allocate(ranked.map(x => x.entry), { budget, query: question, selected, details: selected.filter(id => M.record(this.find(id)).type !== 'recap') });
             const entries = allocation.accepted.map(c => c.entry);
             if (!entries.length) throw new Error('No current source matches that question. Try a different search in Library.');

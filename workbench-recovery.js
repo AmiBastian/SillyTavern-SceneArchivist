@@ -83,7 +83,7 @@ function updatePayload(w, target, evidence, instruction, kind='memory-update') {
     // Check before queue creation as well as before transport, so a too-large
     // selection spends no tokens and does not replace a completed job.
     const req=updateRequest(w,payload,target,sources);
-    if(M.tokens(req.system)+M.tokens(req.prompt)>Math.max(2000,Number(w.options().requestBudget)||18000)) throw new Error(`${M.title(target)} plus this evidence exceeds the request input budget. Choose fewer messages or raise the budget in Settings.`);
+    if(M.tokens(req.system)+M.tokens(req.prompt)>w.helperCapacity(req.maxTokens).input) throw new Error(`${M.title(target)} plus this evidence exceeds the connection’s input budget. Choose fewer messages or a larger context.`);
     return payload;
 }
 

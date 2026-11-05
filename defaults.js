@@ -165,23 +165,22 @@ export const DEFAULT_OPENING = `<Scene_Log>
 
 Running record of the roleplay so far. The Legend explains the flags. Older Days and retroactive (🔙) entries appear only when relevant to the current scene; the sections after the Days always apply.`;
 
-export const DEFAULT_MEMORY_PROMPT = `You extract CHARACTER MEMORIES from a roleplay's Scene Log. A memory is something a specific character knows, believes or remembers because they were present, were told, or worked it out. Another AI will later play these characters and must not let them know things they have no way of knowing.
+export const DEFAULT_MEMORY_PROMPT = `You extract CHARACTER MEMORIES from the supplied roleplay evidence. A memory is something a specific character knows, believes or remembers because they were present, were told, or worked it out. Another AI will later play these characters and must not let them know things they have no way of knowing.
 
 For each character who has at least one meaningful memory in the excerpt, write natural third-person memories of consequential experiences. Keep related details together when they belong to the same scene. Use the sentences needed to preserve what happened and how the character learned it: witnessed, was told by someone, concluded, or believes (unconfirmed).
 
 Rules:
 - Only include what that character could know. Never copy another character's private knowledge, secrets or thoughts into their memories.
-- Do not write memories for {{user}}, who is played by the human.
 - Skip trivia and banter. Keep promises, debts, grudges, secrets held, relationship shifts and anything that should change how the character acts later.
 - Keep what a character is hiding, and from whom, as its own memory.
 - Read the entire excerpt. Keep every consequential memory, including promises, deadlines, changes and important causes. Merge genuinely repeated meaning; never omit events just to meet a count.
-- Start every memory with its Day tag, for example "[Day 4] ".
+- Use the date and unit tags specified in the request. Leave unknown dates and unit numbers unspecified.
 - Use each character's most common short name as "name". Put other names people call them in "aliases".
 
 Return only JSON in this shape. The names and text below are placeholders that only show the format, so never copy them into your answer:
 {"characters":[{"name":"<character name>","aliases":["<other name>"],"memories":["[Day 4] <what they know and how>"]}]}
 
-If nobody has a meaningful memory in the excerpt, return {"characters":[]}.`;
+If nobody has a meaningful memory in the excerpt, return {"characters":[],"reason":"brief explanation"}.`;
 
 export const DEFAULT_CONDENSE_PROMPT = `You tidy one character's memory list from a roleplay. Merge duplicates and near-duplicates, and fold a sequence of small related memories into one clear memory, so the list is shorter without losing anything that affects how the character behaves later.
 
@@ -267,14 +266,12 @@ export const DEFAULT_SETTINGS = {
     scanDepth: 4,
     keyMode: 'ai',
     review: true,
-    appendLog: false,
     maxTokens: 0,
     avoid: DEFAULT_AVOID,
     prompt: DEFAULT_PROMPT,
     legend: DEFAULT_LEGEND,
     opening: DEFAULT_OPENING,
     archiveMode: 'isolated',
-    chunkTokens: 12000,
     keepVisible: 10,
     hideArchived: false,
     promptLibrary: [],
@@ -303,5 +300,10 @@ export const LEGACY_MEMORY_PROMPTS = ["You extract CHARACTER MEMORIES from a rol
 export const LEGACY_CONDENSE_PROMPTS = ["You tidy one character's memory list from a roleplay. Merge duplicates and near-duplicates, and fold a sequence of small related memories into one clear memory, so the list is shorter without losing anything that affects how the character behaves later.\n\nRules:\n- Never invent facts, and never add anything that is not already in the list.\n- Keep who knows what and how: witnessed, was told by someone, concluded, believes (unconfirmed).\n- Keep every Day tag. When memories from several Days are merged, use a range such as \"[Day 4-9]\".\n- Keep promises, debts, grudges, secrets held and relationship shifts. Drop only what is repeated or trivial.\n- Keep each memory under 40 words.\n\nReturn only JSON in exactly this shape:\n{\"memories\":[\"[Day 4] ...\",\"[Day 5-9] ...\"]}", "You tidy one character's memory list from a roleplay. Merge duplicates and near-duplicates, and fold a sequence of small related memories into one clear memory, so the list is shorter without losing anything that affects how the character behaves later.\n\nRules:\n- Never invent facts, and never add anything that is not already in the list.\n- Keep who knows what and how: witnessed, was told by someone, concluded, believes (unconfirmed).\n- Keep every Day tag. When memories from several Days are merged, use a range such as \"[Day 4-9]\".\n- Keep promises, debts, grudges, secrets held and relationship shifts. Drop only what is repeated or trivial.\n- Keep each memory under 40 words.\n\nReturn only JSON in this shape. The text below is a placeholder that only shows the format, so never copy it into your answer:\n{\"memories\":[\"[Day 4] <memory>\",\"[Day 5-9] <merged memory>\"]}"];
 
 // Exact prior defaults migrate; user-edited prompts are preserved.
+LEGACY_MEMORY_PROMPTS.push(DEFAULT_MEMORY_PROMPT
+    .replace('from the supplied roleplay evidence', "from a roleplay's Scene Log")
+    .replace('- Skip trivia and banter.', '- Do not write memories for {{user}}, who is played by the human.\n- Skip trivia and banter.')
+    .replace('- Use the date and unit tags specified in the request. Leave unknown dates and unit numbers unspecified.', '- Start every memory with its Day tag, for example "[Day 4] ".')
+    .replace('{"characters":[],"reason":"brief explanation"}', '{"characters":[]}'));
 LEGACY_MEMORY_PROMPTS.push("You extract CHARACTER MEMORIES from a roleplay's Scene Log. A memory is something a specific character knows, believes or remembers because they were present, were told, or worked it out. Another AI will later play these characters and must not let them know things they have no way of knowing.\n\nFor each character who has at least one meaningful memory in the excerpt, write memories as short third-person sentences (one fact, or two closely linked ones, under 30 words) that say what the character knows and how: witnessed, was told by someone, concluded, or believes (unconfirmed).\n\nRules:\n- Only include what that character could know. Never copy another character's private knowledge, secrets or thoughts into their memories.\n- Do not write memories for {{user}}, who is played by the human.\n- Skip trivia and banter. Keep promises, debts, grudges, secrets held, relationship shifts and anything that should change how the character acts later.\n- Keep what a character is hiding, and from whom, as its own memory.\n- At most 8 memories per character. Fewer is better.\n- Start every memory with its Day tag, for example \"[Day 4] \".\n- Use each character's most common short name as \"name\". Put other names people call them in \"aliases\".\n\nReturn only JSON in this shape. The names and text below are placeholders that only show the format, so never copy them into your answer:\n{\"characters\":[{\"name\":\"<character name>\",\"aliases\":[\"<other name>\"],\"memories\":[\"[Day 4] <what they know and how>\"]}]}\n\nIf nobody has a meaningful memory in the excerpt, return {\"characters\":[]}.");
 LEGACY_CONDENSE_PROMPTS.push("You tidy one character's memory list from a roleplay. Merge duplicates and near-duplicates, and fold a sequence of small related memories into one clear memory, so the list is shorter without losing anything that affects how the character behaves later.\n\nRules:\n- Never invent facts, and never add anything that is not already in the list.\n- Keep who knows what and how: witnessed, was told by someone, concluded, believes (unconfirmed).\n- Keep every Day tag exactly as written, calendar date included. When memories from several Days are merged, use a range such as \"[Days 4-9, <first date> to <last date>]\".\n- Keep promises, debts, grudges, secrets held and relationship shifts. Drop only what is repeated or trivial.\n- Keep each memory under 40 words.\n\nReturn only JSON in this shape. The text below is a placeholder that only shows the format, so never copy it into your answer:\n{\"memories\":[\"[Day 4, <date>] <memory>\",\"[Days 5-9, <first date> to <last date>] <merged memory>\"]}");
