@@ -157,8 +157,7 @@ export class WorkspaceLayout {
         const rows = [...ledger.children];
         for (const row of rows) if (!['sa_ledger', 'sa_ledger_sum'].includes(row.id)) ledgerTools.lastElementChild.append(row);
         ledger.append(ledgerTools);
-        // Full-width coverage belongs before the two smaller advanced cards.
-        // Inserting it between them leaves an empty column on both rows.
+        // Keep Ledger and Tidy adjacent in the archive grid.
         const ledgerCard = ledger.closest('.sa-card'), tidyCard = root.querySelector('[data-sa-section="archive-tidy"]');
         if (tidyCard) tidyCard.before(ledgerCard);
         const range = root.querySelector('[data-sa-section="archive-range"] .sa-body');

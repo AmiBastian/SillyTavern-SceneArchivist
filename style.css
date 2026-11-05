@@ -48,7 +48,8 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
 .sa-automation-notice { padding: 10px 12px; margin: 0 0 16px; background: #c9b4ef0b; border-left: 2px solid #c9b4ef7a; border-radius: 0 6px 6px 0; color: var(--sa-muted); font-size: .8em; }
 .sa-pane { min-width: 0; }
 #sa-pane-archive:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 14px; align-items: start; }
-#sa-pane-archive > :is(.sa-start-banner, [data-sa-section=archive-ledger], .sa-more-tools) { grid-column: 1 / -1; }
+#sa-pane-archive > :is(.sa-start-banner, .sa-more-tools),
+.sa-workspace[data-sa-view=essentials] #sa-pane-archive > [data-sa-section=archive-ledger] { grid-column: 1 / -1; }
 .sa-start-banner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 18px 20px; border: 1px solid #c9b4ef4d; background: #c9b4ef09; border-radius: 12px; margin-bottom: 3px; }
 .sa-start-banner h3 { font: 500 23px/1.3 Georgia, 'Times New Roman', serif; margin: 5px 0; }
 .sa-start-banner p { margin: 0; color: var(--sa-muted); font-size: .86em; }
