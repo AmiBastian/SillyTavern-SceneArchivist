@@ -55,6 +55,7 @@ The **Ledger** shows which ranges are covered. Use **Redo summaries** to replace
 
 ![Archive ledger showing the saved range](docs/media/04-ledger.png)
 
+![Walkthrough of selecting a range and approving a Catch up job](docs/media/range-walkthrough.gif)
 
 [Watch the range walkthrough in MP4](docs/media/range-walkthrough.mp4)
 
@@ -110,6 +111,7 @@ Diaries are saved to the archive separately from active character memories. You 
 
 ![Walkthrough of writing and updating a diary](docs/media/diary-walkthrough.gif)
 
+[Watch the diary walkthrough in MP4](docs/media/diary-walkthrough.mp4)
 
 ## Library and history
 
