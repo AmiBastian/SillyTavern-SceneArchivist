@@ -920,7 +920,7 @@ async function toggleLedgerRow(i) {
     await renderLedger();
 }
 
-async function renderLedger() {
+function renderLedger() {
     const sum = $('#sa_ledger_sum'); const list = $('#sa_ledger');
     if (!sum.length) return;
     const chat = getContext().chat ?? [];
@@ -928,9 +928,11 @@ async function renderLedger() {
     const pend = uncoveredArchiveMessages(chat, m);
     const tok = pend.reduce((n, x) => n + Core.estimateTokens(x.text), 0);
     const through = m.archivedThrough ?? -1;
-    sum.text(through >= 0
-        ? `Continuous coverage: messages 0 to ${through}${m.lastDay ? ` (${settings().unit} ${m.lastDay})` : ''}. ${pend.length} messages remain unarchived${pend.length ? ` (about ${fmtTok(tok)} input tokens)` : ''}.`
-        : `${Core.archivedRanges(m).length ? 'Some ranges are archived; earlier gaps remain.' : 'Nothing archived in this chat yet.'} ${pend.length} messages (about ${fmtTok(tok)} input tokens).`);
+    const coverage = through >= 0
+        ? `Saved coverage reaches message ${through}${m.lastDay ? ` (${settings().unit} ${m.lastDay})` : ''}.`
+        : (Core.archivedRanges(m).length ? 'Some ranges are archived. Earlier gaps remain.' : 'Nothing archived in this chat yet.');
+    const remaining = `${pend.length} ${pend.length === 1 ? 'message remains' : 'messages remain'} unarchived${pend.length ? ` (about ${fmtTok(tok)} input tokens)` : ''}.`;
+    sum.text(`${coverage} ${remaining}`);
     const rows = Core.ledgerRows(m);
     list.html(rows.map(r => { const row = m.ranges[r.i]; const visible = chat.slice(row.from, row.to + 1).filter(x => !x.is_system).length; return `<div class="sa-ledgerrow"><b>Messages ${esc(r.label)}</b> <span class="sa-badge">summarized</span> <span class="sa-hint">${visible} visible / ${row.to - row.from + 1} total · ${esc(r.note.replace(/Day/g, settings().unit))}</span> <a class="sa-ledgerlink" data-i="${r.i}">${visible ? 'hide exactly this range' : 'show exactly this range'}</a><button type="button" class="menu_button" data-sa-action="ledgerForget" data-row="${r.i}">🧽 Mark unprocessed</button><button type="button" class="menu_button" data-sa-action="ledgerRedo" data-row="${r.i}">🔄 Redo summaries</button></div>`; }).join('') || '<div class="sa-hint">No summarized ranges yet. Use Pick your messages for an exact interval.</div>');
     list.find('.sa-ledgerlink').on('click', async function () { await toggleLedgerRow(Number($(this).data('i'))); });
@@ -1544,6 +1546,7 @@ function settingsHtml() {
 async function openPanelPopup() {
     const panel = document.querySelector('.sa-panel');
     if (!panel || panel.dataset.popped) return;
+    renderLedger();
     const home = panel.parentElement;
     const wrap = document.createElement('div');
     wrap.className = 'sa-popwrap';
