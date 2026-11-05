@@ -161,7 +161,7 @@ export class WorkspaceLayout {
         const ledgerCard = ledger.closest('.sa-card'), tidyCard = root.querySelector('[data-sa-section="archive-tidy"]');
         if (tidyCard) tidyCard.before(ledgerCard);
         const range = root.querySelector('[data-sa-section="archive-range"] .sa-body');
-        range.querySelector('.sa-hint').textContent = 'Both message numbers are included. Preview the range before summarizing.';
+        range.querySelector('.sa-hint').textContent = 'Use Start and End in the chat’s Range controls, or enter both message numbers here. Both messages are included.';
         const visibility = document.createElement('details'); visibility.className = 'sa-inline-tools';
         visibility.innerHTML = '<summary>Message visibility</summary><p class="sa-hint">Hide or show original messages in future chat context. Saved summaries and ledger coverage stay as they are.</p><div class="sa-row"></div>';
         for (const action of ['rangeHide', 'rangeShow']) visibility.lastElementChild.append(byAction(range, action));

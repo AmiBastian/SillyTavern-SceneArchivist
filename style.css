@@ -253,6 +253,27 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
 .sa-range-message-preview p { display:grid; gap:3px; margin:10px 0; font-size:.85em; }
 .sa-range-message-preview b { color:var(--sa-muted); font-size:.85em; }
 .sa-range-message-preview span { white-space:pre-wrap; }
+#chat :is(.mes_buttons, .extraMesButtons):has(> .sa-range-markers) { align-items: center; flex-wrap: wrap; }
+#chat .sa-range-markers {
+  display: inline-flex; align-items: center; flex: none; gap: 2px; padding: 2px;
+  color: var(--SmartThemeBodyColor, #eeeaf5); font-size: .75rem; font-weight: 600; line-height: 1.2;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent); border-radius: 8px;
+  background: color-mix(in srgb, currentColor 6%, transparent); filter: none; opacity: 1; cursor: default;
+}
+#chat .mes[type=assistant_message] .sa-range-markers { display: none; }
+.sa-range-markers > span { padding-inline: 4px; }
+.sa-range-markers > .sa-range-marker {
+  appearance: none; min-height: 24px; padding: 0 6px; border: 0; border-radius: 5px;
+  font: inherit; color: inherit; text-shadow: none; filter: none; opacity: 1;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.sa-range-markers > .sa-range-marker:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+.sa-range-markers > .sa-range-marker:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+@media (pointer: coarse) {
+  .sa-range-markers > .sa-range-marker { min-height: 36px; min-width: 36px; }
+}
 @media(max-width:720px) {
  .sa-sidebar-workspace { display:block; padding:12px; }
  .sa-sidebar-workspace > .sa-tabs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border:0; padding:0; margin-bottom:12px; }

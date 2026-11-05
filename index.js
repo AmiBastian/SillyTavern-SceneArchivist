@@ -1221,10 +1221,19 @@ function mountRangeMarkers(messageIndex) {
     for (const message of messages) {
         const toolbar = message.querySelector('.extraMesButtons, .mes_buttons');
         if (!toolbar || toolbar.querySelector('.sa-range-marker')) continue;
-        for (const [bound, label, glyph] of [['rangeFrom', 'Start archive range here', '►'], ['rangeTo', 'End archive range here', '◄']]) {
+        const markers = document.createElement('div');
+        markers.className = 'sa-range-markers';
+        markers.setAttribute('role', 'group');
+        markers.setAttribute('aria-label', 'Scene Archivist range');
+        const caption = document.createElement('span');
+        caption.textContent = 'Range';
+        caption.setAttribute('aria-hidden', 'true');
+        markers.append(caption);
+        for (const [bound, text] of [['rangeFrom', 'Start'], ['rangeTo', 'End']]) {
+            const label = `${text} archive range here`;
             const marker = document.createElement('button');
             marker.type = 'button'; marker.className = 'mes_button sa-range-marker'; marker.title = label;
-            marker.setAttribute('aria-label', label); marker.textContent = glyph;
+            marker.setAttribute('aria-label', label); marker.textContent = text;
             marker.addEventListener('click', event => {
                 event.stopPropagation();
                 const index = Number(message.getAttribute('mesid'));
@@ -1232,10 +1241,11 @@ function mountRangeMarkers(messageIndex) {
                 if (!input || !Number.isInteger(index)) return;
                 input.value = index;
                 input.dispatchEvent(new Event('input', { bubbles: true }));
-                toastr.info(label + ' · message ' + index, 'Scene Archivist');
+                toastr.info(`Range ${text.toLowerCase()} set to message ${index}. Preview it in Pick your messages.`, 'Scene Archivist');
             });
-            toolbar.append(marker);
+            markers.append(marker);
         }
+        toolbar.append(markers);
     }
 }
 

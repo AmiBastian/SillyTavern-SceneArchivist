@@ -43,7 +43,7 @@ For an existing installation, use SillyTavern’s extension update control. Befo
 | **Catch up this range** | Runs the enabled stages for the selected scene. |
 | **Preview range** | Shows message excerpts so you can check your selection before sending anything to a model. |
 
-Use **Start here** and **End here** on the original messages or enter the first and last message numbers in **Pick your messages**. A selection from 311 to 372 includes both endpoints. Day, Chapter, Episode, Session, Act, Part, Week, Scene, and custom units are available under **Settings → Prompts**.
+Use **Start** and **End** in the **Range** controls beside the original chat messages, or enter the first and last message numbers in **Pick your messages**. A selection from 311 to 372 includes both endpoints. Day, Chapter, Episode, Session, Act, Part, Week, Scene, and custom units are available under **Settings → Prompts**.
 
 ![Inclusive range preview and combined range actions](docs/media/02-message-range.png)
 
