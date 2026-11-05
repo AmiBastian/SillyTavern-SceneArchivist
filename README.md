@@ -69,6 +69,8 @@ The **Ledger** shows which ranges are covered. Use **Redo summaries** to replace
 | **Archive** | Saved scene summaries. |
 | **Both** | Original messages as event evidence, with archive units for chronology and background. |
 
+When you create **Chat** memories before choosing an archive, Scene Archivist creates an archive lorebook to link the story. By default, memories go into a separate lorebook and the archive starts empty.
+
 **Scope** can target new material, exact chat messages, an archive unit range, or the last several units. Use an exact selection to fill a gap even if coverage says the surrounding range was processed. **Create memories for my persona** is available in Settings and starts unchecked.
 
 ![Memory extraction from an exact chat range](docs/media/05-memory-source-range.png)
@@ -203,6 +205,8 @@ Enable **Share this archive across chats** in the original chat, then select tha
 A native SillyTavern branch can use verified earlier history or start with empty private books. The branch view shows the parent and fork point when available. Later records stay in the parent when the extension cannot verify them as part of the branch.
 
 Renaming a chat keeps its books and progress when SillyTavern supplies the same chat identifier.
+
+Copying a chat file by hand can preserve its internal identifier and leave both chats pointing to the same lorebooks. Use SillyTavern's **Branch** action for a separate timeline with its own books.
 
 ![Archive sharing controls](docs/media/24-sharing.png)
 
