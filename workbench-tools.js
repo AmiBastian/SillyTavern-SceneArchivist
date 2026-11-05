@@ -17,12 +17,11 @@ export function mountTools(w) {
         <label class="sa-field"><span>Event date from</span><input class="text_pole sa-library-filter" type="date" id="sa-library-dateFrom"></label>
         <label class="sa-field"><span>Event date through</span><input class="text_pole sa-library-filter" type="date" id="sa-library-dateTo"></label>
         <label class="sa-field"><span>Protection</span><select class="text_pole sa-library-filter" id="sa-library-protection">${option('', 'Any protection')}${option('detailed','Keep detailed')}${option('exact','Preserve exact wording')}${option('locked','Author locked')}${option('pinned','Budget priority')}</select></label></div></details>`);
-    w.panes.library.insertAdjacentHTML('beforeend', card('📋 Selected records', `<div class="sa-row"><select class="text_pole" data-sa-field="protectFlag">${option('detailed','Keep detailed')}${option('exact','Preserve exact wording')}${option('locked','Author locked')}</select><select class="text_pole" data-sa-field="protectValue">${option('true','Apply protection')}${option('false','Clear protection')}</select>${button('protectSelected','Update selected protections')}</div><label class="checkbox_label"><input type="checkbox" data-sa-field="exportSources"><span>Include linked original sources in selection exports</span></label><div class="sa-row">${button('exportMarkdown','Export selected as Markdown')}${button('exportSelection','Export selected as JSON')}${button('repairSelected','Repair selected records and dependents')}</div>`));
+    w.panes.library.insertAdjacentHTML('beforeend', card('📋 Selected records', `<div class="sa-row"><select class="text_pole" data-sa-field="protectFlag">${option('detailed','Keep detailed')}${option('exact','Preserve exact wording')}${option('locked','Author locked')}</select><select class="text_pole" data-sa-field="protectValue">${option('true','Apply protection')}${option('false','Clear protection')}</select>${button('protectSelected','Update selected protections')}</div><label class="checkbox_label"><input type="checkbox" data-sa-field="exportSources"><span>Include linked original sources in selection exports</span></label><div class="sa-row">${button('exportMarkdown','Export selected as Markdown')}${button('exportSelection','Export selected as JSON')}</div>`));
     w.panes.characters.insertAdjacentHTML('beforeend', card('🕰️ What did they know by this date?', `<p class="sa-hint">This uses recorded learning dates and historical states explicitly preserved in Inspect. An event date alone never proves when someone learned about it. Undated knowledge is shown separately.</p><div class="sa-grid"><label class="sa-field"><span>Character</span><select class="text_pole" data-sa-field="knowledgeSubject"></select></label>${field('knowledgeDate','Knowledge as of','date')}</div><div class="sa-row">${button('knowledgeAt','Show dated knowledge')}</div><div id="sa-knowledge-results"></div>`));
-    w.panes.characters.insertAdjacentHTML('beforeend', card('👥 Character roster and aliases', `<p class="sa-hint">Choose a canonical name and the names you have confirmed belong to that person. Matching memory lists can be combined, with original records retained as superseded sources. Knowledge records keep their own evidence. Protected lists must be unlocked first.</p><div id="sa-roster-list" class="sa-hint"></div><div class="sa-grid">${field('rosterName','Canonical character name')}${field('rosterAliases','Other confirmed names, separated by semicolons')}<label class="sa-field"><span>Destination for their memory list</span><select class="text_pole" data-sa-field="rosterBook"></select></label></div><label class="checkbox_label"><input type="checkbox" data-sa-field="rosterKeywords"><span>Also add these approved names as native lorebook keywords</span></label><div class="sa-row">${button('rosterApply','Preview identity changes')}</div>`));
+    w.panes.characters.insertAdjacentHTML('beforeend', card('👥 Character roster and aliases', `<p class="sa-hint">Choose a canonical name and the names you have confirmed belong to that person. Matching memory lists can be combined, with original records kept in History. Knowledge records keep their own evidence. Protected lists must be unlocked first.</p><div id="sa-roster-list" class="sa-hint"></div><div class="sa-grid">${field('rosterName','Canonical character name')}${field('rosterAliases','Other confirmed names, separated by semicolons')}<label class="sa-field"><span>Destination for their memory list</span><select class="text_pole" data-sa-field="rosterBook"></select></label></div><label class="checkbox_label"><input type="checkbox" data-sa-field="rosterKeywords"><span>Also add these approved names as native lorebook keywords</span></label><div class="sa-row">${button('rosterApply','Preview identity changes')}</div>`));
     w.panes.settings.insertAdjacentHTML('beforeend', card('🕒 Recent activity', `<p class="sa-hint">Jobs and Undo history from this chat, plus the latest confirmed record updates from other chats using this archive.</p><div id="sa-activity-list"></div>`));
     w.panes.settings.insertAdjacentHTML('afterbegin', card('🌱 Your first archive', `<p class="sa-hint">Choose an existing connection profile, select or create an archive, preview a message range, and review your first summary.</p><div class="sa-row">${button('firstArchive','Guide me through an archive')}</div>`));
-    w.panes.archive.insertAdjacentHTML('beforeend', card('🩹 Repair after a correction', `<p class="sa-hint">Choose corrected records in Library to rebuild affected memories and recaps in source order. Each repaired record is reviewed before the next one uses it.</p><div class="sa-row">${button('repairStale','Preview repairs for stale records')}</div>`));
     const settings = w.panes.settings.querySelector('[data-sa-option=reviewMode]').closest('.sa-grid');
     settings.insertAdjacentHTML('beforeend', `<label class="sa-field"><span>Requests allowed per Resume, 0 for no limit</span><input class="text_pole" type="number" min="0" step="1" data-sa-option="requestLimit"></label>`);
     settings.insertAdjacentHTML('afterend', `<label class="checkbox_label"><input type="checkbox" data-sa-option="jobPreview"><span>Preview manual jobs before starting</span></label>`);
@@ -91,7 +90,7 @@ async function repair(w, selectedOnly) {
     if(!roots.length){
         const guide=document.createElement('div');guide.className='sa-review';
         guide.innerHTML='<h3>Find records that need repair</h3><p>A record needs review when its original messages or a linked source changed. Repair rebuilds its derived memories and recaps after the source is corrected.</p><p>Open Library and choose Needs review to locate affected records. Use Inspect / edit to correct a source, or Rebuild and review to regenerate it from its evidence. Then select the corrected source and choose Repair selected records and dependents.</p><p>For a normal character update from recent chat events, use Characters → Character memory browser → AI update.</p>';
-        if(await w.h.confirm(guide,{okButton:'Open Library: Needs review',cancelButton:'Close',large:false})){w.showTab('library');w.root.querySelector('#sa-library-status').value='stale';w.renderLibrary();}
+        if(await w.h.confirm(guide,{okButton:'Open Library: Needs review',cancelButton:'Close',large:false})){w.showTab('library');w.renderLibrary();}
         return;
     }
     const ordered=T.repairOrder(w.entries,roots);if(!ordered.length)return w.h.notify('No dependent records need repair.','info');
@@ -118,11 +117,11 @@ async function roster(w) {
         await w.loadBooks();const books=M.copy(w.books),bases=w.bases(),matches=w.entries.filter(e=>['memory','knowledge'].includes(M.record(e)?.type)&&[M.record(e).subject,...(M.record(e).aliases||[])].some(s=>aliases.some(n=>n.toLocaleLowerCase()===String(s||'').toLocaleLowerCase())));
         if(!matches.length)throw new Error('No character records match those names.');
         if(matches.some(e=>M.record(e).protection?.locked||M.record(e).protection?.exact||M.record(e).protection?.detailed))throw new Error('Unlock matching protected records before combining identities.');
-        const memories=matches.filter(e=>M.record(e).type==='memory'&&M.record(e).status==='current');
+        const memories=matches.filter(e=>M.record(e).type==='memory'&&M.active(e));
         const main=memories.find(e=>M.record(e).subject.toLocaleLowerCase()===name.toLocaleLowerCase())||memories[0];
         const changes=[];
         for(const source of matches){const e=w.entryIn(books,M.record(source).id).entry,r=M.record(e),patch={subject:name,aliases:M.unique([...aliases,...(r.aliases||[])])};
-            if(r.type==='memory'&&r.status==='current'&&main&&r.id!==M.record(main).id){patch.status='superseded';patch.aliasOf=M.record(main).id;}
+            if(r.type==='memory'&&M.active(e)&&main&&r.id!==M.record(main).id){patch.status='superseded';patch.aliasOf=M.record(main).id;}
             let content=e.content;
             if(main&&r.id===M.record(main).id){
                 if(memories.length>1)Object.assign(patch,{learnedAt:'',howLearned:'',knowledgeHistory:[]});
@@ -135,7 +134,7 @@ async function roster(w) {
             if(w.checked('rosterKeywords'))e.key=M.unique([...(e.key||[]),...aliases]);
             changes.push({title:`${M.title(source)} (${source.world})`,before:source.content,content:e.content});
         }
-        if(!(await w.review(changes,'Review character identity changes','Original record identities and source evidence are retained. Combined secondary lists become superseded. Keyword changes occur only if you chose that option.')))return;
+        if(!(await w.review(changes,'Review character identity changes','Original record identities and source evidence are retained. Combined secondary lists move to History. Keyword changes occur only if you chose that option.')))return;
         // Keep edits made in review in the corresponding stable record identities.
         matches.forEach((source,i)=>{const e=w.entryIn(books,M.record(source).id).entry;if(e.content!==changes[i].content)M.revise(e,changes[i].content,'Identity review correction');});
         if(main&&main.world!==destination){
@@ -143,7 +142,7 @@ async function roster(w) {
             const target=w.h.makeEntry(destination,books[destination]);const key=target.uid;
             Object.assign(target,M.copy(source),{uid:key});delete location.data.entries[source.uid];
         }
-        M.invalidate(Object.values(books).flatMap(b=>Object.values(b.entries||{})),matches.map(e=>M.record(e).id),'A character identity or memory list was corrected');
+
         for(const source of matches){const e=w.entryIn(books,M.record(source).id).entry;if(M.record(e).status==='stale')M.record(e).status=M.record(source).type==='memory'&&main&&M.record(source).id!==M.record(main).id?'superseded':'current';}
         await w.write(books,bases,'Character roster and aliases');
     });
@@ -152,7 +151,7 @@ async function roster(w) {
 async function firstArchive(w) {
     const root=document.createElement('div');root.className='sa-review';
     const profiles=w.h.context().extensionSettings?.connectionManager?.profiles||[];
-    root.innerHTML=`<h3>Make your first archive</h3><p class="sa-note">Summaries use your current SillyTavern model. Small helper requests can use an existing Connection Manager profile.</p><label class="sa-field"><span>Small-request connection</span><select class="text_pole" data-guide="profile">${option('','Current model')}${profiles.map(p=>option(p.id,p.name)).join('')}</select></label><div class="sa-grid"><label class="sa-field"><span>Use an existing archive</span><select class="text_pole" data-guide="book">${option('','Create a new archive')}${w.h.context().getWorldInfoNames().map(n=>option(n,n)).join('')}</select></label><label class="sa-field"><span>Or new archive name</span><input class="text_pole" data-guide="new" placeholder="My story archive"></label></div><div class="sa-grid">${field('guideFrom','First message','number',0)}${field('guideTo','Last message, inclusive','number',Math.max(0,(w.h.context().chat||[]).length-1))}</div><p class="sa-hint">The range is previewed before a model request. Results are reviewed before saving.</p>`;
+    root.innerHTML=`<h3>Make your first archive</h3><p class="sa-note">Choose the model that will generate this archive.</p><label class="sa-field"><span>Archive model</span><select class="text_pole" data-guide="profile">${option('','Current model')}${profiles.map(p=>option(p.id,p.name)).join('')}</select></label><div class="sa-grid"><label class="sa-field"><span>Use an existing archive</span><select class="text_pole" data-guide="book">${option('','Create a new archive')}${w.h.context().getWorldInfoNames().map(n=>option(n,n)).join('')}</select></label><label class="sa-field"><span>Or new archive name</span><input class="text_pole" data-guide="new" placeholder="My story archive"></label></div><div class="sa-grid">${field('guideFrom','First message','number',0)}${field('guideTo','Last message, inclusive','number',Math.max(0,(w.h.context().chat||[]).length-1))}</div><p class="sa-hint">The range is previewed before a model request. Results are reviewed before saving.</p>`;
     root.querySelector('[data-guide=profile]').value=w.h.settings().sideProfile||'';
     if(!(await w.h.confirm(root,{okButton:'Set up and preview range',cancelButton:'Back',large:false})))return;
     const range=M.messageRange(w.h.context().chat||[],root.querySelector('[data-sa-field=guideFrom]').value,root.querySelector('[data-sa-field=guideTo]').value);
@@ -160,7 +159,7 @@ async function firstArchive(w) {
     if(!name)throw new Error('Choose an archive name.');
     await w.withLock(async()=>{
         if(!chosen)await w.h.createBook(name);
-        w.h.settings().lorebook=name;w.h.settings().sideProfile=root.querySelector('[data-guide=profile]').value;w.h.settings().review=true;
+        w.h.settings().lorebook=name;w.h.settings().archiveProfile=root.querySelector('[data-guide=profile]').value;w.h.settings().review=true;
         await w.h.attach(name);w.h.saveSettings();w.h.rebindSettings();await w.loadBooks();
     });
     w.showTab('archive');w.root.querySelector('[data-sa-field=rangeFrom]').value=range.from;w.root.querySelector('[data-sa-field=rangeTo]').value=range.to;w.previewRange();

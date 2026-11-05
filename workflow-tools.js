@@ -1,3 +1,4 @@
+import * as Core from './core.js';
 import * as M from './memory-engine.js';
 import { same } from './entry-journal.js';
 import { dependencyProblems } from './recovery-tools.js';
@@ -51,14 +52,13 @@ export function approvedChanges(changes, before, proposed) {
         const deferredIds = new Set(deferred.map(c => M.record(proposed[c.book]?.entries?.[c.uid])?.id).filter(Boolean));
         for (const c of [...accepted]) {
             const e = proposed[c.book].entries[c.uid], r = M.record(e); if (!r) continue;
-            const problems = dependencyProblems(r, byId, deferredIds);
+            const problems = dependencyProblems(r, byId, deferredIds).filter(problem => problem.reason === 'unchecked' || problem.reason === 'missing');
             const missing = problems.map(p => p.id);
             if (!same(M.record(before[c.book]?.entries?.[c.uid])?.memoryReceipt, r.memoryReceipt)) {
                 for (const other of changes) {
                     const child = M.record(proposed[other.book]?.entries?.[other.uid]);
                     if (child?.type === 'memory' && child.derivedFrom?.includes(r.id)) {
-                        if (!accepted.includes(other)) { missing.push(child.id); problems.push({id: child.id, title: M.title(proposed[other.book].entries[other.uid]), reason: 'receipt'}); }
-                        else if(child.status !== 'current') receiptHolds.push(c);
+                        if (!accepted.includes(other)) receiptHolds.push(c);
                     }
                 }
             }
@@ -127,7 +127,7 @@ export function selectionExport(entries, selected, includeSources = false) {
     }
     const records = [...ids].map(id => byId.get(id)).filter(Boolean);
     if (!records.length) throw new Error('Select records in Library first.');
-    return { sceneArchivistSelection: 1, version: '1.0.8', created: M.now(), includesSources: includeSources, entries: M.copy(records),
+    return { sceneArchivistSelection: 1, version: '1.1.0', created: M.now(), includesSources: includeSources, entries: M.copy(records),
         markdown: records.map(e => `${e.content}\n\n<!-- Record ${M.record(e).id}; source: ${sourceLabel(e)} -->`).join('\n\n---\n\n') };
 }
 
@@ -148,4 +148,33 @@ export function summarizeJob(kind, steps, entries, archive, limit = 0) {
     const byId = new Map(entries.filter(M.record).map(e => [M.record(e).id, e]));
     const input = steps.reduce((n, p) => n + (p.ids || []).reduce((t, id) => t + M.tokens(byId.get(id)?.content || ''), 0) + (p.messages || []).reduce((t, m) => t + M.tokens(m.text || m.mes || ''), 0) + (p.target && !(p.ids || []).includes(p.target) ? M.tokens(byId.get(p.target)?.content || '') : 0) + (p.evidence?.messages || []).reduce((t,m)=>t+M.tokens(m.text || ''),0) + M.tokens(p.instruction || ''), 0);
     return { kind, batches: steps.length, input, archive, limit, dynamic: kind === 'archive' || kind === 'memories' };
+}
+
+/** Allocate filing numbers locally so a model's suggestion cannot collide. */
+export function placeSharedUnits(data, entries, { mode = 'new', number, unit = 'Day' } = {}) {
+    if (!data.sceneArchivistStory?.shared) return entries;
+    const units = Object.values(data.entries || {}).map(Core.classifyEntry)
+        .filter(entry => entry?.type === 'day' && Number.isInteger(entry.dayNum));
+    const numbers = new Set(units.map(entry => entry.dayNum));
+    const highest = Math.max(0, ...numbers);
+    if (mode === 'continue' && !numbers.has(number)) throw new Error('Choose an existing shared unit to continue.');
+    const assigned = new Map();
+    let next = highest + 1;
+    for (const entry of entries) {
+        if (entry.kind === 'skip') continue;
+        const original = entry.heading;
+        const suffix = original.match(/\s(?:[—–-]|:)\s*(.*)$/)?.[1]?.replace(/\s*🔙\s*$/, '') || '';
+        let chosen = mode === 'continue' ? number : mode === 'earlier' ? entry.dayNum : null;
+        if (mode === 'new' && entry.kind !== 'retro') {
+            const key = entry.dayNum ?? Symbol();
+            if (!assigned.has(key)) assigned.set(key, next++);
+            chosen = assigned.get(key);
+        }
+        if (mode === 'earlier') entry.kind = 'retro';
+        if (mode === 'continue') entry.kind = 'day';
+        entry.dayNum = chosen ?? entry.dayNum;
+        entry.heading = `## ► ${unit} ${entry.dayNum ?? '?'}${suffix ? ' — ' + suffix : ''}${entry.kind === 'retro' ? ' 🔙' : ''}`;
+        entry.content = entry.heading + entry.content.slice(original.length);
+    }
+    return entries;
 }

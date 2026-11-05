@@ -36,10 +36,7 @@ export function projectBranch(books, { mode = 'inherit', oldSource, sourceId, st
             if (verified) { s.inheritedFrom = s.actualChatId || oldSource; s.chatId = sourceId; s.actualChatId = chatId; }
             else if (mode === 'prune' || s.chatId === oldSource) bad = true;
         }
-        if (bad) {
-            r.status = 'stale'; r.staleReason = 'This record includes changed, later, or unverifiable branch evidence.';
-            if (mode === 'prune') rejected.add(e);
-        }
+        if (bad) rejected.add(e);
         if (mode === 'prune' && !direct.length && !dependencies.length && !structural.has(r.type)) rejected.add(e);
         if (!rejected.has(e) && (direct.length || structural.has(r.type))) retained.add(r.id);
     }
@@ -66,14 +63,12 @@ export function projectBranch(books, { mode = 'inherit', oldSource, sourceId, st
             const lost = new Set([...rejected].map(e => M.record(e)?.id));
             for (const e of entries) if (!rejected.has(e) && [...(M.record(e)?.derivedFrom || []), ...(M.record(e)?.covers || [])].some(id => lost.has(id))) { rejected.add(e); moreRejected = true; }
         }
-    } else {
-        M.invalidate(entries, entries.filter(e => M.record(e)?.status === 'stale').map(e => M.record(e).id), 'A source does not belong to this branch history');
     }
     for (const [name, book] of Object.entries(result)) {
         delete book.sceneArchivistReceipts;
         for (const [key, e] of Object.entries(book.entries || {})) {
             if (mode === 'fresh' || rejected.has(e)) { excluded.push({ book: name, title: M.title(e) }); delete book.entries[key]; }
-            else if (M.record(e)?.status === 'stale') { M.record(e).branchDisabledFrom ??= !!e.disable; e.disable = true; }
+
         }
         if (name === archive) book.sceneArchivistStory = { schema: 1, id: storyId, shared: false, books: Object.fromEntries(Object.values(mapping).map(n => [n, n === mapping[archive] ? 'archive' : 'separate'])) };
     }
@@ -84,8 +79,8 @@ export function projectBranch(books, { mode = 'inherit', oldSource, sourceId, st
 export function dependencyProblems(r, byId, deferredIds = new Set()) {
     if (r?.status !== 'current') return [];
     return M.unique([...(r.derivedFrom || []), ...(r.covers || [])]).flatMap(id => {
-        const source = byId.get(id), sr = M.record(source);
-        const reason = deferredIds.has(id) ? 'unchecked' : !source ? 'missing' : sr?.status === 'stale' ? 'stale' : r.derivedHashes?.[id] && M.hash(source.content) !== r.derivedHashes[id] ? 'changed' : '';
+        const source = byId.get(id);
+        const reason = deferredIds.has(id) ? 'unchecked' : !source ? 'missing' : r.derivedHashes?.[id] && M.hash(source.content) !== r.derivedHashes[id] ? 'changed' : '';
         return reason ? [{ id, title: source ? M.title(source) : id, reason }] : [];
     });
 }

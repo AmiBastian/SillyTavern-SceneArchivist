@@ -56,6 +56,17 @@ export function extractLogText(raw) {
     const end = t.indexOf('=== End Scene Log ===');
     const hasEnd = end >= 0;
     if (hasEnd) t = t.slice(0, end);
+    t = t.split('\n').map(line => {
+        const match = line.match(/^\s*(#{1,3})\s+(?:[►▸▶]\s*)?(.+?)\s*#*\s*$/u);
+        if (!match) return line;
+        const canonical = '## ► ' + match[2];
+        if (RE_HEAD.test(canonical) || STATE_NAMES.some(name => name.toLowerCase() === match[2].toLowerCase()) || /^Legend\b/i.test(match[2])) {
+            const state = STATE_NAMES.find(name => name.toLowerCase() === match[2].toLowerCase());
+            return state ? '## ► ' + state : canonical;
+        }
+        if (/^STORY EPOCH\b/i.test(match[2])) return '# ► ' + match[2];
+        return line;
+    }).join('\n');
     const firstHeading = t.search(/^#{1,2} ► /m);
     if (firstHeading > 0) t = t.slice(firstHeading);
     return { text: t.trim(), hasEnd };
@@ -537,7 +548,7 @@ export function reorder(data, newUids, opts) {
 
 /** Text of what the model currently sees as always-on (for the optional "append log to prompt" fallback). */
 export function currentLogText(data) {
-    const list = managed(data).filter(x => x.e.constant && !x.e.disable && (!x.e.sceneArchivist || x.e.sceneArchivist.status === 'current'));
+    const list = managed(data).filter(x => x.e.constant && !x.e.disable && (!x.e.sceneArchivist || !['resolved', 'superseded'].includes(x.e.sceneArchivist.status)));
     const covered = new Set(list.filter(x => x.cl.type === 'recap').flatMap(x => x.e.sceneArchivist.covers || []));
     return list.filter(x => !covered.has(x.e.sceneArchivist?.id) && !['opening', 'closing', 'tracker'].includes(x.cl.type))
         .map(x => x.e.content.trim()).join('\n\n');
@@ -666,6 +677,8 @@ function memoryExpressions() {
 }
 memoryExpressions();
 
+const MEMORY_DATE = /^\[Date:\s*([^\]]+)\]\s*(.*)$/i;
+
 const dateFor = (a, b, dates) => {
     if (!dates) return '';
     if (b == null || b === a) return dates[a] || '';
@@ -681,10 +694,14 @@ export function parseMemoryDoc(content) {
         if (!l || l.startsWith('## ►')) continue;
         const g = l.match(GROUP_RE);
         if (g) { group = { date: g[1] || '', a: Number(g[2]), b: g[3] ? Number(g[3]) : null }; continue; }
+        const dateOnly = l.match(MEMORY_DATE);
+        if (dateOnly && !dateOnly[2]) { group = { date: dateOnly[1].trim(), a: null, b: null }; continue; }
         if (!/^[-*] /.test(l)) continue;
         const text = l.replace(/^[-*] /, '').trim();
         const i = text.match(INLINE_RE);
-        if (i) items.push({ a: Number(i[1]), b: i[2] ? Number(i[2]) : null, date: (i[3] || '').trim(), text: i[4].trim() });
+        const dateTag = text.match(MEMORY_DATE);
+        if (dateTag) items.push({ a: null, b: null, date: dateTag[1].trim(), text: dateTag[2].trim() });
+        else if (i) items.push({ a: Number(i[1]), b: i[2] ? Number(i[2]) : null, date: (i[3] || '').trim(), text: i[4].trim() });
         else items.push({ a: group?.a ?? null, b: group?.b ?? null, date: group?.date ?? '', text });
     }
     return items;
@@ -709,6 +726,7 @@ export function memoryDocText(name, items, dates = {}, unit = 'Day') {
             const label = g.b != null && g.b !== g.a ? `${u}s ${g.a}-${g.b}` : `${u} ${g.a}`;
             out.push(date ? `[${date} - ${label}]` : `[${label}]`);
         }
+        else if (g.date) out.push('[Date: ' + g.date + ']');
         for (const x of g.list) out.push('- ' + x);
         out.push('');
     }
@@ -717,7 +735,7 @@ export function memoryDocText(name, items, dates = {}, unit = 'Day') {
 
 /** "[Day 4] text" for one item, the flat form used in review lists and sent to Condense. */
 const flatLine = (it, unit = 'Day') => {
-    if (it.a == null) return it.text;
+    if (it.a == null) return it.date ? '[Date: ' + it.date + '] ' + it.text : it.text;
     const tag = it.b != null && it.b !== it.a ? `${unit}s ${it.a}-${it.b}` : `${unit} ${it.a}`;
     return `[${tag}${it.date ? ', ' + it.date : ''}] ${it.text}`;
 };
@@ -726,6 +744,8 @@ const flatLine = (it, unit = 'Day') => {
 function itemsFromFlat(lines, dates = {}) {
     return lines.map(raw => {
         const l = String(raw).replace(/^\s*[-*]\s+/, '').trim();
+        const dateOnly = l.match(MEMORY_DATE);
+        if (dateOnly) return { a: null, b: null, date: dateOnly[1].trim(), text: dateOnly[2].trim() };
         const dated = l.match(INLINE_RE);
         if (dated) {
             const a = Number(dated[1]), b = dated[2] ? Number(dated[2]) : null;
@@ -862,7 +882,7 @@ export function parseCondenseResponse(text, before) {
     let obj; try { obj = JSON.parse(m[0]); } catch { return null; }
     if (!Array.isArray(obj.memories)) return null;
     const bullets = obj.memories.map(x => String(x).replace(/\s+/g, ' ').replace(/^[-*]\s*/, '').trim()).filter(x => x.length >= 8 && !isPlaceholderText(x));
-    if (!bullets.length || bullets.length > before.length) return null;
+    if (!bullets.length) return null;
     return { bullets, suspicious: bullets.length * 3 < before.length };
 }
 

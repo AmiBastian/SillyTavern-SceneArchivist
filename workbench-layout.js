@@ -13,17 +13,21 @@ export const TAB_GUIDE = {
 // Essential sections remain visible. Advanced sections are revealed in place,
 // preserving their DOM, bindings, form values and any queued work.
 const SECTIONS = [
+    ['[data-sa-flow="persona"]', 'settings-flow-context', 'Optional persona memories and reference lore.', false],
+    ['[data-sa-flow="sharedMode"]', 'archive-shared-filing', 'Choose where to file summaries in a shared timeline.', false],
+    ['[data-sa-field="condenseTarget"]', 'condense-token-target', 'Choose a flexible token target for condensation.', false],
+    ['[data-sa-flow="rolling"]', 'settings-flow-automation', 'Optional rolling memories and combined generation.', true],
     ['#sa_lorebook', 'archive-book', 'Choose the book and summarize new messages.', false],
     ['[data-sa-action="rangePreview"]', 'archive-range', 'Choose an exact scene before sending it to the model.', false],
     ['#sa_ledger', 'archive-ledger', 'See what has been processed and redo a saved range.', false],
     ['[data-sa-action="tidy"]', 'archive-tidy', 'Reorder and group entries without an AI rewrite.', true],
     ['[data-sa-action="repairStale"]', 'archive-repair', 'Rebuild records affected by corrected sources.', true],
     ['#sa-character-memories', 'character-browser', 'Read one character’s memories and review proposed updates.', false],
-    ['[data-sa-action="memoriesNext"]', 'character-create', 'Make memories from summaries you have already saved.', false],
+    ['[data-sa-action="memoriesAll"]', 'character-create', 'Create memories from chat, archive units, or both.', false],
     ['#sa_mem_target', 'character-settings', 'Destinations, source units, batch size and extraction prompt.', true],
     ['#sa_tr_sel', 'character-trackers', 'Keep extra notes such as relationships or inventory.', true],
     ['[data-sa-action="extract"]', 'character-facts', 'Record knowledge, facts and unresolved promises.', true],
-    ['[data-sa-action="diary"]', 'character-diary', 'Creative diary entries based on recorded knowledge.', true],
+    ['[data-sa-action="diary"]', 'character-diary', 'Write, update, and condense a private diary from chat and attached lore.', true],
     ['[data-sa-action="knowledgeAt"]', 'character-knowledge', 'Check learning dates and historical knowledge states.', true],
     ['[data-sa-action="rosterApply"]', 'character-roster', 'Confirm aliases and combine matching memory lists.', true],
     ['#sa-library-results', 'library-records', 'Search, filter, inspect and select saved records.', false],
@@ -66,7 +70,7 @@ export class WorkspaceLayout {
         root.classList.add('sa-workspace');
         const labels = { sa_lorebook: 'Story archive lorebook', sa_newname: 'New archive name', sa_tr_sel: 'Tracker', sa_pl_sel: 'Archive prompt preset', sa_pl_name: 'Prompt name', sa_prompt: 'Archive prompt', sa_mem_prompt: 'Character memory prompt', sa_cond_prompt: 'Character memory condense prompt', sa_tr_prompt: 'Tracker prompt', sa_mem_from: 'First story unit', sa_mem_to: 'Last story unit, inclusive', sa_through: 'Mark archived through message' };
         for (const [id, label] of Object.entries(labels)) root.querySelector('#' + id)?.setAttribute('aria-label', label);
-        const title = root.querySelector('.sa-title'), version = title.querySelector('.sa-ver')?.textContent || 'v1.0.8';
+        const title = root.querySelector('.sa-title'), version = title.querySelector('.sa-ver')?.textContent || 'v1.1.0';
         title.innerHTML = `<div class="sa-brand"><span class="sa-brand-mark" aria-hidden="true">🗂️</span><div><span class="sa-eyebrow">YOUR STORY, KEPT TOGETHER</span><div class="sa-wordmark">Scene Archivist <span class="sa-ver">${h(version)}</span></div></div></div><div class="sa-header-actions"><button type="button" class="sa-toolbar-button" data-sa-ui="guide">🌱 Start here</button><button type="button" class="sa-toolbar-button" data-sa-ui="help">? Help & examples</button></div>`;
         const toolbar = document.createElement('div'); toolbar.className = 'sa-workspace-toolbar';
         toolbar.innerHTML = `<div class="sa-view-choice" role="group" aria-label="Interface detail"><button type="button" data-sa-ui="essentials" aria-pressed="true">Essentials</button><button type="button" data-sa-ui="all" aria-pressed="false">All tools</button></div><label class="sa-explain-switch"><input type="checkbox" data-sa-ui="explain"><span>Show help buttons</span></label><span class="sa-display-note">Choose how much you see.</span>`;
@@ -120,7 +124,7 @@ export class WorkspaceLayout {
     }
     arrangeActions() {
         const root = this.root;
-        const labels = { sa_run: '✨ Summarize new messages', sa_thorough: '🗂️ Full archive pass', sa_paste: '📋 Paste a summary', sa_cond_run: 'Condense long memory lists' };
+        const labels = { sa_run: '✨ Archive', sa_thorough: '🗂️ Catch up', sa_paste: '📋 Paste a summary', sa_cond_run: 'Condense character memories' };
         for (const [id, text] of Object.entries(labels)) { const node = root.querySelector('#' + id); if (node) node.value = text; }
         const replacements = [
             ['[data-sa-section="character-create"] > summary', '💭 Create character memories'],
@@ -131,9 +135,9 @@ export class WorkspaceLayout {
         for (const [selector, title] of replacements) {
             const summary = root.querySelector(selector); if (summary) summary.childNodes[0].textContent = title;
         }
-        const actionLabels = { memoriesNext: 'Create next batch', memoriesAll: 'Create remaining memories', memoryAudit: 'Review & organize memories', diary: '📖 Write diary', tidy: 'Tidy layout', condenseSelected: 'Condense selected records' };
+        const actionLabels = { memoriesAll: 'Create memories', memoryAudit: 'Review & organize memories', diary: '📖 Write diary', tidy: 'Tidy layout', condenseSelected: 'Condense selected records' };
         for (const [action, label] of Object.entries(actionLabels)) { const button = byAction(root, action); if (button) button.textContent = label; }
-        for (const action of ['rangeArchive', 'memoriesNext', 'characterUpdate', 'ask', 'condenseSelected']) primary(byAction(root, action));
+        for (const action of ['rangeArchive', 'memoriesAll', 'characterUpdate', 'ask', 'condenseSelected']) primary(byAction(root, action));
         primary(root.querySelector('#sa_run'));
         // Put occasional archive utilities in one named disclosure, keeping Undo close.
         const hero = root.querySelector('.sa-hero');

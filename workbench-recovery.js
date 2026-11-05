@@ -13,9 +13,9 @@ const memoryEntries = (w, subject = '') => w.entries.filter(e => M.record(e)?.ty
 
 export function mountRecovery(w) {
     const search = w.root.querySelector('#sa-library-query').closest('.sa-row');
-    search.insertAdjacentHTML('beforebegin', `<div class="sa-row sa-quick-filters" role="group" aria-label="Quick Library filters">${[['all','All'],['chat','Current chat'],['active','Active characters'],['memory','Memories'],['unit','Story units'],['review','Needs review']].map(([key,label]) => button('quickFilter', label, `data-filter="${key}" aria-pressed="false"`)).join('')}</div>`);
-    w.panes.characters.insertAdjacentHTML('afterbegin', card('🧠 Character memory browser', `<p class="sa-hint">Browse one character’s lists, inspect their sources, or propose an AI update. Clearing keeps a revision and disables the emptied list. Re-extraction reads archived source units again and merges reviewed additions.</p><div class="sa-grid"><label class="sa-field"><span>Character</span><select class="text_pole" data-sa-field="memorySubject"></select></label><label class="sa-field"><span>Find in these memories</span><input class="text_pole" data-sa-field="memorySearch" placeholder="Search this character’s memory text"></label></div><div class="sa-row">${button('characterUpdate','✨ AI update…')}${button('clearCharacter','🧽 Clear this character’s memories')}${button('forceMemories','🔄 Re-extract all source units')}${button('clearAllMemories','🗑️ Clear all character memories')}</div><div id="sa-character-memories"></div>`));
-    w.panes.settings.insertAdjacentHTML('beforeend', card('🌿 When branching a chat', `<p class="sa-hint">Applies when chat metadata was copied into a different chat. Fresh and verified-history modes create private books, even from a shared archive. The parent’s books stay available. Verified history excludes entire overlapping or unverifiable records and their dependents rather than guessing which sentences are earlier.</p><label class="sa-field"><span>Branch history</span><select class="text_pole" data-sa-option="branchMode">${option('inherit','Inherit archive; flag changed evidence')}${option('fresh','Start with empty private archive books')}${option('prune','Keep verified history before the split')}</select></label><label class="sa-field"><span>Recent continuity records</span><input class="text_pole" type="number" min="1" max="1000" data-sa-option="continuityRecent"></label>`));
+    search.insertAdjacentHTML('beforebegin', `<div class="sa-row sa-quick-filters" role="group" aria-label="Quick Library filters">${[['all','All'],['chat','Current chat'],['active','Active characters'],['memory','Memories'],['unit','Story units']].map(([key,label]) => button('quickFilter', label, `data-filter="${key}" aria-pressed="false"`)).join('')}</div>`);
+    w.panes.characters.insertAdjacentHTML('afterbegin', card('🧠 Character memory browser', `<p class="sa-hint">Browse one character’s lists, inspect their sources, or propose an AI update. Clearing keeps a revision and disables the emptied list. Use Create memories with an exact range to fill a gap.</p><div class="sa-grid"><label class="sa-field"><span>Character</span><select class="text_pole" data-sa-field="memorySubject"></select></label><label class="sa-field"><span>Find in these memories</span><input class="text_pole" data-sa-field="memorySearch" placeholder="Search this character’s memory text"></label></div><div class="sa-row">${button('characterUpdate','✨ AI update…')}${button('clearCharacter','🧽 Clear this character’s memories')}${button('clearAllMemories','🗑️ Clear all character memories')}</div><div id="sa-character-memories"></div>`));
+    w.panes.settings.insertAdjacentHTML('beforeend', card('🌿 When branching a chat', `<p class="sa-hint">Applies when chat metadata was copied into a different chat. Fresh and verified-history modes create private books, even from a shared archive. The parent’s books stay available. Verified history excludes entire overlapping or unverifiable records and their dependents rather than guessing which sentences are earlier.</p><label class="sa-field"><span>Branch history</span><select class="text_pole" data-sa-option="branchMode">${option('fresh','Start with empty private archive books')}${option('prune','Keep verified history before the split')}</select></label><label class="sa-field"><span>Recent continuity records</span><input class="text_pole" type="number" min="1" max="1000" data-sa-option="continuityRecent"></label>`));
     for (const key of ['memorySubject', 'memorySearch']) w.root.querySelector(`[data-sa-field=${key}]`).addEventListener(key === 'memorySearch' ? 'input' : 'change', () => renderRecovery(w));
 }
 
@@ -38,7 +38,7 @@ function quickFilter(w, key) {
     }
     w.quickLibrary = key;
     if (['memory','unit'].includes(key)) w.root.querySelector('#sa-library-type').value = key;
-    if (key === 'review') w.root.querySelector('#sa-library-status').value = 'stale';
+
     if (key === 'chat') {
         const select = w.root.querySelector('#sa-library-chat');
         if (![...select.options].some(o => o.value === w.identity())) select.add(new Option('Current chat',w.identity()));
@@ -77,7 +77,7 @@ function updatePayload(w, target, evidence, instruction, kind='memory-update') {
     const r=M.record(target);
     if (protectedRecord(target)) throw new Error(`${M.title(target)} is protected. Review its protections in Inspect first.`);
     const ids=M.unique([...(r.derivedFrom||[]),...(r.covers||[])]), sources=ids.map(id=>w.find(id));
-    if (sources.some(e=>!e||M.record(e)?.status==='stale')) throw new Error(`${M.title(target)} has missing or changed source records. Correct those in Library, then use Rebuild and review or retry this update.`);
+    if (sources.some(e=>!e)) throw new Error(`${M.title(target)} has missing or changed source records. Correct those in Library, then use Rebuild and review or retry this update.`);
     const payload=w.inputStep(sources,{kind,target:r.id,targetHash:M.hash(target.content),evidence: evidence||null,instruction,subject:r.subject||Core.classifyEntry(target)?.name});
     evidencePatch(w,r,evidence);
     // Check before queue creation as well as before transport, so a too-large
@@ -107,7 +107,7 @@ export async function startEvidenceAudit(w) {
     if(!(await w.h.confirm(root,{okButton:'Prepare reviewed job',cancelButton:'Back',large:false})))return;
     const evidence=chatEvidence(w,root),instruction=root.querySelector('[data-recovery=instruction]').value.trim();
     const entries=w.memoryAuditEntries();
-    if(!entries.length)return w.h.notify('No unprotected current memory lists are available. Rebuild stale records in Library first.','info');
+    if(!entries.length)return w.h.notify('No editable memory lists are available.','info');
     if(!evidence&&!instruction)return w.createJob('memory-audit',w.auditSteps(entries));
     return w.createJob('memory-audit-evidence',entries.map(e=>updatePayload(w,e,evidence,instruction,'memory-audit-evidence')));
 }
@@ -131,7 +131,7 @@ function updateRequest(w,p,target,inputs) {
 export async function performRecovery(w,job,step,inputs) {
     const p=step.payload,target=w.find(p.target);
     if(!target||M.hash(target.content)!==p.targetHash||protectedRecord(target))throw new Error('The memory entry changed or became protected. Start a new update with its current contents.');
-    if(inputs.some(e=>M.record(e)?.status==='stale'))throw new Error('A linked source needs correction before this update. Use Library to rebuild it first.');
+
     if(p.evidence&&!M.checkSource(p.evidence.source,w.sourceId(),w.h.context().chat||[]).valid)throw new Error('The selected original chat messages changed. Start a new update with the current messages.');
     evidencePatch(w,M.record(target),p.evidence);
     return w.json(updateRequest(w,p,target,inputs),raw=>{
@@ -155,7 +155,7 @@ export async function commitRecovery(w,job,step,inputs,books,bases) {
     M.revise(e,changes[0].content,'Reviewed character memory update',patch);
     if(wasCleared)e.disable=false;
     if(typeof branchDisabled==='boolean'){e.disable=branchDisabled;delete r.branchDisabledFrom;}
-    M.invalidate(Object.values(books).flatMap(b=>Object.values(b.entries||{})),[r.id],'A character memory was updated');
+
     await w.write(books,bases,'Character memory update',step.id);return true;
 }
 
@@ -164,12 +164,12 @@ async function clearMemories(w,all) {
     return w.withLock(async()=>{
         await w.loadBooks();const selected=memoryEntries(w,subject);if(!selected.length)throw new Error('No matching memory lists.');
         if(selected.some(protectedRecord))throw new Error('Some selected memory lists are protected. Review their protections in Inspect first.');
-        if(!(await w.h.confirmText(`Clear ${selected.length} memory ${selected.length===1?'list':'lists'}${subject?' for '+subject:' in this story'}? Their previous text stays in revisions and Undo. Emptied lists are disabled, linked memories and recaps need review, and affected extraction receipts are reset. Original chat messages and archive units stay available.`,{okButton:'Clear memory lists',cancelButton:'Keep memories'})))return;
+        if(!(await w.h.confirmText(`Clear ${selected.length} memory ${selected.length===1?'list':'lists'}${subject?' for '+subject:' in this story'}? Their previous text stays in revisions and Undo. Emptied lists are excluded from loading, and affected extraction receipts are reset. Original chat messages and archive units stay available.`,{okButton:'Clear memory lists',cancelButton:'Keep memories'})))return;
         const books=M.copy(w.books),bases=w.bases(),changed=[],affected=new Set();
         for(const source of selected){const e=w.entryIn(books,M.record(source).id).entry,r=M.record(e);for(const id of r.derivedFrom||[])affected.add(id);
             M.revise(e,`## ► Memories — ${r.subject||Core.classifyEntry(e)?.name}\n\n`,'Cleared character memory list',{cleared:true,status:'current',staleReason:'',derivedFrom:[],derivedHashes:{},covers:[],source:{chatId:w.sourceId(),ranges:[]},supplementalSources:[],learnedAt:'',howLearned:'',knowledgeHistory:[],dates:[],times:[],scenes:[],cast:[]});e.disable=true;changed.push(r.id);}
         for(const book of Object.values(books))for(const e of Object.values(book.entries||{}))if(affected.has(M.record(e)?.id))delete M.record(e).memoryReceipt;
-        M.invalidate(Object.values(books).flatMap(b=>Object.values(b.entries||{})),changed,'Character memories were cleared');
+
         await w.write(books,bases,'Clear character memories');
     });
 }
@@ -186,7 +186,7 @@ async function ledgerAction(w,index,redo) {
     const targets=w.entries.filter(e=>M.record(e)?.type==='unit'&&M.record(e).source?.chatId===w.sourceId()&&M.record(e).source.ranges?.some(r=>overlaps(r,row)));
     if(!targets.length)throw new Error('No summary is linked to this ledger range. Mark it unprocessed, then select the exact messages to archive. Legacy summaries can be corrected in Inspect.');
     if(targets.some(protectedRecord))throw new Error('A linked summary is protected. Review its protection in Library first.');
-    const root=document.createElement('div');root.className='sa-review';root.innerHTML='<h3>Redo linked summaries</h3><p>Replace these records from their complete original message ranges. A summary crossing the ledger boundary uses its full source range. Each result is reviewed, previous text stays in revisions, and dependent memories need rebuilding.</p>';
+    const root=document.createElement('div');root.className='sa-review';root.innerHTML='<h3>Redo linked summaries</h3><p>Replace these records from their complete original message ranges. A summary crossing the ledger boundary uses its full source range. Each result is reviewed, previous text stays in revisions, and their source links remain available.</p>';
     for(const e of targets){const p=document.createElement('p');p.textContent=M.title(e)+': '+M.record(e).source.ranges.map(r=>`${r.from}–${r.to}`).join(', ');root.append(p);}
     if(!(await w.h.confirm(root,{okButton:'Prepare replacement job',cancelButton:'Keep summaries',large:false})))return;
     return w.createJob('rebuild',targets.map(e=>w.inputStep([],{target:M.record(e).id,targetHash:M.hash(e.content),targetType:'unit'})));

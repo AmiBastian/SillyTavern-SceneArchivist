@@ -2,7 +2,7 @@
 // The log lives in lorebook entries delivered through a World Info outlet ({{outlet::scene_log}} in your preset).
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { saveSettingsDebounced, generateQuietPrompt, generateRaw, chat_metadata, saveMetadata, main_api, characters, this_chid, eventSource, event_types, getCurrentChatId, getRequestHeaders } from '../../../../script.js';
+import { saveSettingsDebounced, generateQuietPrompt, generateRaw, chat_metadata, saveMetadata, main_api, characters, this_chid, eventSource, event_types, getCurrentChatId, getRequestHeaders, getMaxContextTokens, getMaxResponseTokens, Generate } from '../../../../script.js';
 import { callGenericPopup, Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getCharaFilename, getStringHash, getSanitizedFilename } from '../../../utils.js';
 import { hideChatMessageRange } from '../../../chats.js';
@@ -13,16 +13,17 @@ import { power_user } from '../../../power-user.js';
 import { SlashCommandParser } from '../../../slash-commands/SlashCommandParser.js';
 import { SlashCommand } from '../../../slash-commands/SlashCommand.js';
 import * as Core from './core.js';
+import { archiveAnswer, uncoveredArchiveMessages } from './flow.js';
 import * as Memory from './memory-engine.js';
 import { Workbench } from './workbench.js';
 import { entryReasons } from './vector-diagnostics.js';
 import { createWorldInfoIO } from './world-info-io.js';
 import * as Journal from './entry-journal.js';
-import { validateSharedUnits } from './workflow-tools.js';
+import { validateSharedUnits, placeSharedUnits } from './workflow-tools.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.0.8';
+const VERSION = '1.1.0';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -295,11 +296,17 @@ async function fixOutlet() {
     await checkSetup();
 }
 
+function assignChatLorebook(name) {
+    const previous = chat_metadata[METADATA_KEY];
+    if (previous && previous !== name && !settings().storyBooks?.[previous]) meta().priorChatLorebook = previous;
+    chat_metadata[METADATA_KEY] = name;
+}
+
 async function attachToChat() {
     if (busy) return;
     const s = settings();
     if (!s.lorebook) { toastr.warning('Pick a lorebook first.'); return; }
-    chat_metadata[METADATA_KEY] = s.lorebook;
+    assignChatLorebook(s.lorebook);
     await saveMetadata();
     $('.chat_lorebook_button').addClass('world_set');
     toastr.success(`"${s.lorebook}" is now this chat's lorebook.`);
@@ -308,7 +315,7 @@ async function attachToChat() {
 
 // ---------------------------------------------------------------- keywords
 
-async function fillKeys(plan, data) {
+async function fillKeys(plan, data, supplied = null) {
     const s = settings();
     const avoid = avoidList();
     const items = [...plan.adds.filter(a => a.include).map(a => ({ ref: a, content: a.content })), ...plan.demotions.filter(d => d.needsKeys).map(d => ({ ref: d, content: d.content }))];
@@ -317,7 +324,9 @@ async function fillKeys(plan, data) {
     const corpus = [...existing, ...items.map(i => i.content)];
     const heur = items.map(i => Core.suggestKeys(i.content, corpus.filter(c => c !== i.content), { avoid }));
     let ai = null;
-    if (s.keyMode === 'ai') {
+    if (supplied) {
+        ai = plan.adds.map((item, index) => Array.isArray(supplied[index]) ? supplied[index] : []);
+    } else if (s.keyMode === 'ai') {
         try {
             const kp = Core.buildKeywordPrompt(items, avoid);
             ai = (await sideJson({ prompt: kp.prompt, system: kp.system, maxTokens: 1200 }, t => Core.parseKeywordResponse(t, items.length), 'keywords')).value;
@@ -500,7 +509,7 @@ async function commit(plan, parsed, name, expectedHash = '') {
     const rep = Core.applyPlan(data, plan, parsed, o, makeEntry);
     const changed = Memory.captureChanges(data, before, Core.classifyEntry, { storyId: workbench?.state().storyId || '', source: archiveSource || undefined, reason: 'Archive write' });
     for (const e of Object.values(data.entries)) if (Memory.record(e)?.storyId === (workbench?.state().storyId || '')) e.sceneArchivistArchive = name;
-    Memory.invalidate(Object.values(data.entries), changed.filter(id => Object.values(before.entries || {}).some(e => Memory.record(e)?.id === id)), 'An archive source was updated');
+
     if (archiveStep) data.sceneArchivistReceipts = Memory.unique([...(data.sceneArchivistReceipts || []), archiveStep]);
     await saveConfirmed(name, data);
     assertCurrentChat();
@@ -518,17 +527,18 @@ async function commit(plan, parsed, name, expectedHash = '') {
     toastr.success(parts.length ? `Archive updated: ${parts.join(', ')}.` : 'Nothing was changed.');
 }
 
-async function prepareArchive(text, data, source = archiveSource) {
-    const s = settings();
-    const parsed = Core.parseArchivistOutput(text);
-    validateSharedUnits(data, parsed.entries, source);
+async function prepareArchive(text, data, source = archiveSource, placement = null) {
+    const s = settings(), answer = archiveAnswer(text);
+    const parsed = Core.parseArchivistOutput(answer.raw);
+    if (placement) placeSharedUnits(data, parsed.entries, placement);
+    else validateSharedUnits(data, parsed.entries, source);
     if (!parsed.entries.length && !Object.keys(parsed.states).length) {
-        throw new Error(`I could not find any ${s.unit || 'story unit'} entries or states in that output. Nothing was marked complete.`);
+        throw new Error(`I could not find any ${s.unit || 'story unit'} entries or states in that output. The draft remains available.`);
     }
     const plan = Core.planChanges(data, parsed, { ...coreOpts(), source });
-    const stale = Object.values(data.entries ?? {}).filter(e => Core.classifyEntry(e) && !Core.matchesDelivery(e, coreOpts())).length;
-    if (stale) plan.warnings.push(`${stale} existing log entries use a different delivery setting. Writing will move them to ${deliveryLabel(coreOpts())}.`);
-    await fillKeys(plan, data);
+    const deliveryChanges = Object.values(data.entries ?? {}).filter(e => Core.classifyEntry(e) && !Core.matchesDelivery(e, coreOpts())).length;
+    if (deliveryChanges) plan.warnings.push(`${deliveryChanges} existing log entries use a different delivery setting. Writing will move them to ${deliveryLabel(coreOpts())}.`);
+    await fillKeys(plan, data, placement ? answer.keywords : null);
     return { parsed, plan };
 }
 
@@ -559,7 +569,7 @@ async function ensureLorebook() {
     if (!(await createBookConfirmed(name))) { toastr.error('Could not create a lorebook.'); return false; }
     await updateWorldInfoList();
     await refreshLorebookList(name);
-    if (!isLorebookActive(name)) { chat_metadata[METADATA_KEY] = name; try { await saveMetadata(); } catch { /* ignore */ } $('.chat_lorebook_button').addClass('world_set'); }
+    if (!isLorebookActive(name)) { assignChatLorebook(name); try { await saveMetadata(); } catch { /* ignore */ } $('.chat_lorebook_button').addClass('world_set'); }
     saveSettingsDebounced();
     toastr.info(`Created "${name}" and attached it to this chat.`);
     return true;
@@ -660,7 +670,7 @@ async function copyDiagnostics() {
         `Delivery: ${s.delivery} (depth ${s.depth}, role ${s.role}, outlet "${s.outlet}") | Archive mode: ${s.archiveMode} | Keywords: ${s.keyMode}`,
         `Side-call profile: ${s.sideProfile || '(current model)'} | Recall: ${s.recall ? 'on' : 'off'} | Memories auto: ${s.memoryAuto ? 'on' : 'off'} (${s.memoryTarget}${s.memoryTarget === 'separate' ? ', book "' + memoryBookName() + '", active: ' + (selected_world_info.includes(memoryBookName()) ? 'yes' : 'no') : ''})`,
         `Lorebook: ${s.lorebook || '(none)'} | entries: ${entries.length} | attached to chat: ${isLorebookActive(s.lorebook) ? 'yes' : 'no'}`,
-        `Prompt: ${s.promptId} (${String(s.prompt ?? '').length} chars) | pass size ${s.chunkTokens} | auto-hide ${s.hideArchived ? 'on, keep ' + s.keepVisible : 'off'}`,
+        `Prompt: ${s.promptId} (${String(s.prompt ?? '').length} chars) | model-aware range processing | auto-hide ${s.hideArchived ? 'on, keep ' + s.keepVisible : 'off'}`,
         `Chat: ${(ctx.chat ?? []).length} messages | archived through ${m.archivedThrough ?? 'none'} | ranges ${(m.ranges ?? []).length}`,
         `Recent issues:${issues.length ? '\n  ' + issues.join('\n  ') : ' none'}`,
     ];
@@ -691,12 +701,94 @@ async function sideCall({ prompt, system = '', maxTokens = 1200 }) {
 
 function refreshProfileList() {
     const s = settings();
-    const sel = $('#sa_side_profile'); if (!sel.length) return;
     const profiles = getContext().extensionSettings?.connectionManager?.profiles ?? [];
-    sel.empty().append('<option value="">(current model)</option>');
-    for (const p of profiles) sel.append($('<option>').val(p.id).text(p.name));
-    if (s.sideProfile && !profiles.some(p => p.id === s.sideProfile)) s.sideProfile = '';
-    sel.val(s.sideProfile);
+    for (const [selector, setting] of [['#sa_side_profile', 'sideProfile'], ['#sa_archive_profile', 'archiveProfile']]) {
+        const select = $(selector);
+        select.empty().append($('<option>').val('').text('Current SillyTavern model'));
+        for (const profile of profiles) select.append($('<option>').val(profile.id).text(profile.name));
+        if (s[setting] && !profiles.some(profile => profile.id === s[setting])) select.append($('<option>').val(s[setting]).text('Saved profile unavailable'));
+        select.val(s[setting] || '');
+    }
+}
+
+async function readReferences(refs) {
+    const grouped = new Map();
+    for (const item of refs) {
+        if (!grouped.has(item.book)) grouped.set(item.book, []);
+        grouped.get(item.book).push(item);
+    }
+    const chunks = [];
+    for (const [name, selections] of grouped) {
+        const book = await readFresh(name);
+        if (!book) throw new Error(`Reference lorebook "${name}" is unavailable. Update the selection before running.`);
+        for (const entry of Object.values(book.entries || {})) {
+            if (!entry.content || !selections.some(item => item.uid == null || String(item.uid) === String(entry.uid))) continue;
+            chunks.push(`[Reference: ${name} / ${entry.comment || entry.uid}]
+${entry.content}`);
+        }
+        if (selections.some(item => item.uid != null && !Object.values(book.entries || {}).some(entry => String(entry.uid) === String(item.uid)))) {
+            throw new Error(`A selected entry in "${name}" was removed. Update the reference selection.`);
+        }
+    }
+    return chunks.join('\n\n');
+}
+
+async function readDiaryLore(card) {
+    const ctx = getContext();
+    const name = ctx.name2;
+    const active = characters[this_chid];
+    const supplemental = world_info?.charLore?.find(item => item.name === getCharaFilename(this_chid))?.extraBooks || [];
+    const books = Memory.unique([chat_metadata[METADATA_KEY], meta().priorChatLorebook, (card || active)?.data?.extensions?.world,
+        ...(!card || card?.name === name ? supplemental : []), power_user.persona_description_lorebook]);
+    const chunks = [];
+    for (const book of books.filter(book => ctx.getWorldInfoNames().includes(book))) {
+        const data = await readFresh(book);
+        for (const e of Object.values(data?.entries || {})) {
+            if (e.disable || !e.content || Memory.record(e) || Core.classifyEntry(e)) continue;
+            chunks.push('[' + book + ' / ' + (e.comment || e.uid) + ']\n' + e.content);
+        }
+    }
+    return chunks.join('\n\n');
+}
+
+function flowModelInfo(profile) {
+    const current = getContext();
+    if (!profile) return { name: String(current.getCurrentModel?.() || (main_api === 'openai' ? oai_settings.openai_model : '') || 'Current SillyTavern model'), context: getMaxContextTokens(), output: getMaxResponseTokens() };
+    const selected = current.extensionSettings?.connectionManager?.profiles?.find(p => p.id === profile);
+    if (!selected) throw new Error('The selected connection profile is unavailable. Choose an available profile or retry on the current model.');
+    const preset = current.getPresetManager?.('openai')?.getCompletionPresetByName?.(selected.preset);
+    return { name: selected.name, context: Number(preset?.openai_max_context || selected.context_length) || 0,
+        output: Number(preset?.openai_max_tokens || selected.max_tokens) || 0 };
+}
+
+async function buildFlowContext(req) {
+    let prompt;
+    const capture = (data, dryRun) => { if (dryRun) prompt = data.prompt; };
+    eventSource.on(event_types.GENERATE_AFTER_DATA, capture);
+    try {
+        await Generate('quiet', { quiet_prompt: req.system + '\n\n' + req.prompt, force_name2: true }, true);
+        assertCurrentChat();
+        if ((!Array.isArray(prompt) && typeof prompt !== 'string') || !prompt.length) throw new Error('SillyTavern did not supply a chat-context preview for this connection.');
+        const material = Array.isArray(prompt) ? prompt.map(message => message?.content).flat(Infinity).filter(text => typeof text === 'string').join('\n') : prompt;
+        const boundary = req.prompt.trim().split('\n').filter(Boolean).at(-1);
+        if (boundary && !material.includes(boundary)) throw new Error('SillyTavern trimmed the selected evidence while building chat context. Raise its context limit or turn off Include SillyTavern chat context.');
+        return prompt;
+    } finally {
+        eventSource.removeListener(event_types.GENERATE_AFTER_DATA, capture);
+    }
+}
+
+async function sendFlowRequest(req, profile) {
+    const prompt = req.assembled ?? req.prompt;
+    const messages = Array.isArray(prompt) ? prompt : [
+        ...(!req.assembled && req.system ? [{ role: 'system', content: req.system }] : []),
+        { role: 'user', content: prompt },
+    ];
+    if (!profile) return generateRaw({ prompt, systemPrompt: req.assembled ? '' : req.system, responseLength: req.maxTokens });
+    const service = getContext().ConnectionManagerRequestService;
+    if (!service?.sendRequest) throw new Error('Connection Manager is unavailable. Re-enable it or retry on the current model.');
+    const result = await service.sendRequest(profile, messages, req.maxTokens);
+    return typeof result === 'string' ? result : result?.content;
 }
 
 async function testSide() {
@@ -881,13 +973,12 @@ async function renderLedger() {
     if (!sum.length) return;
     const chat = getContext().chat ?? [];
     const m = chat_metadata?.[KEY] ?? {};
-    const pend = Core.pendingMessages(chat, m);
+    const pend = uncoveredArchiveMessages(chat, m);
     const tok = pend.reduce((n, x) => n + Core.estimateTokens(x.text), 0);
     const through = m.archivedThrough ?? -1;
-    const passes = Core.splitPasses(pend, Number(settings().chunkTokens) || 12000).length;
     sum.text(through >= 0
-        ? `Continuous coverage: messages 0 to ${through}${m.lastDay ? ` (${settings().unit} ${m.lastDay})` : ''}. ${pend.length} messages remain unarchived${pend.length ? ` (about ${fmtTok(tok)} tokens, ${passes} passes)` : ''}.`
-        : `${Core.archivedRanges(m).length ? 'Some ranges are archived; earlier gaps remain.' : 'Nothing archived in this chat yet.'} ${pend.length} messages (about ${fmtTok(tok)} tokens, ${passes} ${passes === 1 ? 'pass' : 'passes'}).`);
+        ? `Continuous coverage: messages 0 to ${through}${m.lastDay ? ` (${settings().unit} ${m.lastDay})` : ''}. ${pend.length} messages remain unarchived${pend.length ? ` (about ${fmtTok(tok)} input tokens)` : ''}.`
+        : `${Core.archivedRanges(m).length ? 'Some ranges are archived; earlier gaps remain.' : 'Nothing archived in this chat yet.'} ${pend.length} messages (about ${fmtTok(tok)} input tokens).`);
     const rows = Core.ledgerRows(m);
     list.html(rows.map(r => { const row = m.ranges[r.i]; const visible = chat.slice(row.from, row.to + 1).filter(x => !x.is_system).length; return `<div class="sa-ledgerrow"><b>Messages ${esc(r.label)}</b> <span class="sa-badge">summarized</span> <span class="sa-hint">${visible} visible / ${row.to - row.from + 1} total · ${esc(r.note.replace(/Day/g, settings().unit))}</span> <a class="sa-ledgerlink" data-i="${r.i}">${visible ? 'hide exactly this range' : 'show exactly this range'}</a><button type="button" class="menu_button" data-sa-action="ledgerForget" data-row="${r.i}">🧽 Mark unprocessed</button><button type="button" class="menu_button" data-sa-action="ledgerRedo" data-row="${r.i}">🔄 Redo summaries</button></div>`; }).join('') || '<div class="sa-hint">No summarized ranges yet. Use Pick your messages for an exact interval.</div>');
     list.find('.sa-ledgerlink').on('click', async function () { await toggleLedgerRow(Number($(this).data('i'))); });
@@ -1125,6 +1216,29 @@ async function onEntriesLoaded(groups) {
     if (workbench) await workbench.filterEntries(groups);
 }
 
+function mountRangeMarkers(messageIndex) {
+    const messages = messageIndex == null ? $('#chat .mes[mesid]') : $('#chat .mes[mesid]').filter((_, el) => Number(el.getAttribute('mesid')) === Number(messageIndex));
+    for (const message of messages) {
+        const toolbar = message.querySelector('.extraMesButtons, .mes_buttons');
+        if (!toolbar || toolbar.querySelector('.sa-range-marker')) continue;
+        for (const [bound, label, glyph] of [['rangeFrom', 'Start archive range here', '►'], ['rangeTo', 'End archive range here', '◄']]) {
+            const marker = document.createElement('button');
+            marker.type = 'button'; marker.className = 'mes_button sa-range-marker'; marker.title = label;
+            marker.setAttribute('aria-label', label); marker.textContent = glyph;
+            marker.addEventListener('click', event => {
+                event.stopPropagation();
+                const index = Number(message.getAttribute('mesid'));
+                const input = workbench?.root?.querySelector('[data-sa-field="' + bound + '"]');
+                if (!input || !Number.isInteger(index)) return;
+                input.value = index;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                toastr.info(label + ' · message ' + index, 'Scene Archivist');
+            });
+            toolbar.append(marker);
+        }
+    }
+}
+
 async function refreshChatUi() {
     const s = settings();
     held.clear(); lastView = null; lastRemindAt = 0;
@@ -1140,6 +1254,7 @@ async function refreshChatUi() {
     await saveMetadata();
     await renderLedger(); await renderView();
     if (workbench) await workbench.onChatOpened();
+    mountRangeMarkers();
 }
 
 function migrateStoryBooks() {
@@ -1518,29 +1633,23 @@ function panelHtml() {
       <div class="sa-hint" id="sa_ledger_sum"></div>
       <div id="sa_ledger"></div>
       <div class="sa-row"><label for="sa_range_from">Only messages</label><input id="sa_range_from" class="text_pole" type="number" min="0" placeholder="from"><input id="sa_range_to" class="text_pole" type="number" min="0" placeholder="to"></div>
-      <div class="sa-row"><label for="sa_archmode">Archive using</label><select id="sa_archmode" class="text_pole" title="Transcript only works with any preset. The chat mode uses your preset and card."><option value="isolated">The transcript, in passes</option><option value="chat">The chat, as the model sees it</option></select></div>
-      <div class="sa-row"><label for="sa_chunk">Tokens per pass</label><input id="sa_chunk" class="text_pole" type="number" min="2000" max="200000"></div>
       <label class="checkbox_label"><input id="sa_hide" type="checkbox"><span>Hide messages once archived</span></label>
       <div class="sa-row"><label for="sa_keepvis">Keep visible</label><input id="sa_keepvis" class="text_pole" type="number" min="0" max="200" title="How many of the newest messages stay visible"></div>
       <div class="sa-row"><input id="sa_through" class="text_pole" type="number" min="0" placeholder="message #"><input id="sa_through_set" class="menu_button" type="button" value="Mark archived through"><input id="sa_ledger_import" class="menu_button" type="button" value="Import list"></div>
     </div></details>
 
     <details class="sa-card"><summary>🧠 Memory settings and prompt</summary><div class="sa-body">
-      <div class="sa-row"><input id="sa_mem_run" class="menu_button sa-mem-run" type="button" value="Next batch" title="Process the next few Days, oldest first"><input id="sa_mem_all" class="menu_button sa-mem-run" type="button" value="All remaining Days"></div>
-      <div class="sa-row"><label for="sa_mem_from">Only Days</label><input id="sa_mem_from" class="text_pole" type="number" min="0" placeholder="from"><input id="sa_mem_to" class="text_pole" type="number" min="0" placeholder="to" title="Fill both to redo a range, for example 1 to 17. Empty continues where the last run stopped."></div>
       <div class="sa-row"><label for="sa_mem_target">Save in</label><select id="sa_mem_target" class="text_pole"><option value="separate">A separate memories lorebook</option><option value="archive">The archive lorebook</option><option value="character">Each character's own lorebook</option></select></div>
       <div class="sa-row"><label for="sa_mem_book">Lorebook name</label><input id="sa_mem_book" class="text_pole" type="text" placeholder="(archive name) Memories"></div>
-      <div class="sa-row"><label for="sa_mem_days">Days per batch</label><input id="sa_mem_days" class="text_pole" type="number" min="1" max="20"></div>
-      <div class="sa-row"><label for="sa_mem_cap">Warn above</label><input id="sa_mem_cap" class="text_pole" type="number" min="5" max="200" title="Memories per character"></div>
-      <label class="checkbox_label"><input id="sa_mem_auto" type="checkbox"><span>Run after every archive write</span></label>
+      <label class="checkbox_label"><input id="sa_mem_auto" type="checkbox"><span>Also create memories when archiving new messages</span></label>
       <div class="sa-sub">Memory prompt</div>
       <textarea id="sa_mem_prompt" class="text_pole" rows="8"></textarea>
       <div class="sa-row"><input id="sa_mem_prompt_reset" class="menu_button" type="button" value="Reset prompt"></div>
     </div></details>
 
     <details class="sa-card"><summary>🧬 Condense character memories</summary><div class="sa-body">
-      <div class="sa-hint">For each character's memory list: merges repeated memories and keeps every date. Archive entries are condensed in the card above.</div>
-      <div class="sa-row"><label for="sa_cond_above">Lists longer than</label><input id="sa_cond_above" class="text_pole" type="number" min="2" max="200"></div>
+      <div class="sa-hint">Measure savings in tokens while keeping every distinct memory. Review and Undo remain available.</div>
+
       <div class="sa-row"><input id="sa_cond_run" class="menu_button sa-cond-run" type="button" value="Condense memories" title="Merges duplicates. You review every change and Undo brings the old lists back."></div>
       <div class="sa-sub">Condense prompt</div>
       <textarea id="sa_cond_prompt" class="text_pole" rows="6"></textarea>
@@ -1605,7 +1714,8 @@ function panelHtml() {
     </div></details>
 
     <details class="sa-card"><summary>⚙️ More</summary><div class="sa-body">
-      <div class="sa-row"><label for="sa_side_profile">Small requests on</label><select id="sa_side_profile" class="text_pole" title="Keywords, Recall, memories and Condense can use a cheaper Connection Manager profile"></select><input id="sa_side_test" class="menu_button" type="button" value="Test"></div>
+      <div class="sa-row"><label for="sa_archive_profile">Archive model</label><select id="sa_archive_profile" class="text_pole"></select></div>
+      <div class="sa-row"><label for="sa_side_profile">Memory and tracker model</label><select id="sa_side_profile" class="text_pole" title="Keywords, Recall, memories and Condense can use a cheaper Connection Manager profile"></select><input id="sa_side_test" class="menu_button" type="button" value="Test"></div>
       <div class="sa-row"><label for="sa_keymode">Keywords</label><select id="sa_keymode" class="text_pole"><option value="ai">Ask the model</option><option value="heuristic">Automatic only</option></select></div>
       <div class="sa-row"><label for="sa_maxtok">Max reply tokens</label><input id="sa_maxtok" class="text_pole" type="number" min="0" max="64000" title="0 uses your preset's response length"></div>
       <div class="sa-row"><label for="sa_remind">Remind me every</label><input id="sa_remind" class="text_pole" type="number" min="0" max="500" title="Messages, 0 = never"></div>
@@ -1710,7 +1820,7 @@ function bindUi() {
     bindVal('#sa_cond_above', 'condenseAbove', true); bindVal('#sa_cond_prompt', 'condensePrompt');
     $('#sa_cond_prompt_reset').on('click', () => { s.condensePrompt = DEFAULT_SETTINGS.condensePrompt; $('#sa_cond_prompt').val(s.condensePrompt); saveSettingsDebounced(); toastr.info('Condense prompt reset to the default.'); });
     refreshProfileList();
-    $('#sa_side_profile').on('change', function () { s.sideProfile = $(this).val(); saveSettingsDebounced(); });
+    $('#sa_side_profile, #sa_archive_profile').on('change', function () { s[this.id === 'sa_archive_profile' ? 'archiveProfile' : 'sideProfile'] = this.value; saveSettingsDebounced(); workbench?.renderFlow(); });
     $('#sa_side_test').on('click', testSide);
     $('#sa_drawer .inline-drawer-toggle').on('click', () => { refreshProfileList(); requestAnimationFrame(() => { workbench?.renderLibrary(); workbench?.layout?.help.refresh(document.querySelector('.sa-panel')); }); });
     $('#sa_mem_auto').prop('checked', s.memoryAuto).on('change', function () { s.memoryAuto = this.checked; saveSettingsDebounced(); });
@@ -1738,14 +1848,14 @@ jQuery(async () => {
             end: () => { pendingUndo = null; busy = false; operationChat = null; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', false); },
             confirmRecovered: async (name, actual) => { if (pendingUndo) { Journal.confirmWrite(pendingUndo.journal, name, actual); await persistMeta(); } },
             undoStart: beginUndoWrite, snapshot: saveUndoSnapshot, reload: name => { try { reloadEditor(name); } catch { /* editor closed */ } },
-            model: sideCall, tokenCount: getTokenCountAsync, hide: hideChatMessageRange, renderLedger, prepareArchive, refreshInfo: updateInfoLine,
+            model: sideCall, flowModelInfo, sendFlowRequest, buildFlowContext, readReferences, readDiaryLore, tokenCount: getTokenCountAsync, hide: hideChatMessageRange, renderLedger, prepareArchive, refreshInfo: updateInfoLine,
             archiveModel: async (req, range) => settings().archiveMode === 'chat' && !range.explicit
                 ? generateQuietPrompt({ quietPrompt: req.system + '\n\n' + req.prompt, responseLength: Number(settings().maxTokens) > 0 ? Number(settings().maxTokens) : null })
                 : generateRaw({ prompt: req.prompt, systemPrompt: req.system, responseLength: Number(settings().maxTokens) > 0 ? Number(settings().maxTokens) : 6000 }),
             acceptArchive: async (text, source, step) => { archiveSource = source; archiveStep = step; try { return await handleOutput(text); } finally { archiveSource = null; archiveStep = ''; } },
             afterArchive,
             ensureArchive: ensureLorebook,
-            attach: async name => { chat_metadata[METADATA_KEY] = name; await saveMetadata(); $('.chat_lorebook_button').addClass('world_set'); },
+            attach: async name => { assignChatLorebook(name); await saveMetadata(); $('.chat_lorebook_button').addClass('world_set'); },
             trackers: () => runTrackers(null, true),
             confirm: async (root, opts = {}) => { workbench?.layout?.help.observe(root); return (await new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true, ...opts }).show()) === POPUP_RESULT.AFFIRMATIVE; },
             confirmText: async (text, opts = {}) => { const result = await callGenericPopup(esc(text), POPUP_TYPE.CONFIRM, '', opts); return result === true || result === POPUP_RESULT.AFFIRMATIVE; },
@@ -1774,7 +1884,7 @@ jQuery(async () => {
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'archivist-memories',
             callback: async () => { await runMemories(true); return ''; },
-            helpString: 'Create character memories from the newest Days of the Scene Log.',
+            helpString: 'Create character memories using the source and range selected in Scene Archivist.',
         }));
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'archivist-recap',
@@ -1792,7 +1902,15 @@ jQuery(async () => {
         $('#extensionsMenu').append(`<div id="sa_wand_panel" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-folder-tree extensionsMenuExtensionButton"></div><span>Scene Archivist</span></div>`);
         $('#sa_wand_panel').on('click', openPanelPopup);
         eventSource.on(event_types.CHAT_CHANGED, () => { chatRevision++; return refreshChatUi(); });
-        for (const event of [event_types.MESSAGE_EDITED, event_types.MESSAGE_DELETED, event_types.MESSAGE_SWIPED].filter(Boolean)) eventSource.on(event, () => { if (!busy) void workbench.refresh().catch(e => console.warn(LOG, e)); });
+        for (const event of [event_types.USER_MESSAGE_RENDERED, event_types.CHARACTER_MESSAGE_RENDERED].filter(Boolean)) eventSource.on(event, mountRangeMarkers);
+        let updateTimer;
+        for (const event of [event_types.MESSAGE_EDITED, event_types.MESSAGE_DELETED, event_types.MESSAGE_SWIPED].filter(Boolean)) eventSource.on(event, () => {
+            clearTimeout(updateTimer);
+            updateTimer = setTimeout(() => {
+                mountRangeMarkers();
+                if (!busy) workbench.renderFlow();
+            }, 180);
+        });
         console.log(LOG, 'loaded');
     } catch (e) {
         console.error(LOG, 'failed to load', e);

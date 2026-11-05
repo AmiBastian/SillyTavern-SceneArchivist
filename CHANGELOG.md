@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0 · November 5, 2026
+
+- Archive, character memories, and enabled trackers can run as three requests with one review. Keywords travel with archive generation. Requests can be split explicitly when the configured context is too small.
+- Memory extraction can read original chat messages, archive units, or both. Added exact ranges, last-unit selections, message markers, and combined range summaries and memories.
+- Persona memories, selected lorebook references, and SillyTavern chat context are independently opt-in. Archive generation has its own connection profile, and retries on a different profile require an explicit choice.
+- Removed evidence status labels and automatic repair blocks. Review prepared work after a failed stage and keep completed work when retrying. Sources, revisions, and protected lists remain available.
+- Shared chats can contribute to an existing unit or file an earlier event. Native branches use readable names and verified earlier history.
+- Diaries use the original chat and attached background lore. Update a saved diary with later messages, or condense it using token-based review.
+- Condense measures token savings for memories, summaries, recaps, and diaries. Dates, times, and exact quotations are checked before review.
+- Added opt-in rolling chat memories, optional one-request generation for matching profiles, and a scripted regression suite.
+
 ## 1.0.8 · October 26, 2026
 
 - Shared archive updates preserve existing character lists by skipping automatic whole-list audits after full passes and all-memory extraction. Explicit reviewed organization and condensation remain available.

@@ -280,6 +280,7 @@ export const DEFAULT_SETTINGS = {
     promptLibrary: [],
     promptId: 'scenelog',
     sideProfile: '',
+    archiveProfile: '',
     condenseAbove: 12,
     condensePrompt: DEFAULT_CONDENSE_PROMPT,
     remindEvery: 0,
