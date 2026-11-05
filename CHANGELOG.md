@@ -10,6 +10,7 @@
 - Diaries use the original chat and attached background lore. Update a saved diary with later messages, or condense it using token-based review.
 - Condense measures token savings for memories, summaries, recaps, and diaries. Dates, times, and exact quotations are checked before review.
 - Added opt-in rolling chat memories, optional one-request generation for matching profiles, and a scripted regression suite.
+- Updated the illustrated guide and the range, diary, and evidence walkthroughs with 1.1.0 captures from SillyTavern 1.19.0.
 
 ## 1.0.8 · October 26, 2026
 
