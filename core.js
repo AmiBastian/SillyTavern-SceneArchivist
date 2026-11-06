@@ -654,17 +654,6 @@ export function selectMemorySource(data, progress = 0, maxDays = 3, { fromDay = 
     };
 }
 
-/** Rewrite a leading "[Day 4]" or "[Days 4-9]" tag so it carries the calendar date. Unknown Days are left alone. */
-export function datedTag(raw, dates = {}) {
-    raw = String(raw).replace(/^\s*[-*]\s+/, '');
-    const m = raw.match(TAG_RE);
-    if (!m) return raw;
-    const a = Number(m[1]), b = m[2] ? Number(m[2]) : null;
-    const rest = raw.slice(m[0].length);
-    if (b == null || b === a) return dates[a] ? `[Day ${a}, ${dates[a]}] ${rest}` : `[Day ${a}] ${rest}`;
-    return dates[a] && dates[b] ? `[Days ${a}-${b}, ${dates[a]} to ${dates[b]}] ${rest}` : `[Days ${a}-${b}] ${rest}`;
-}
-
 // A memory entry is stored grouped by date:
 //   ## ► Memories — Name
 //
@@ -760,13 +749,6 @@ function itemsFromFlat(lines, dates = {}) {
     });
 }
 
-export function buildMemoryRequest(promptText, source, userName = 'the user') {
-    return {
-        system: String(promptText).replaceAll('{{user}}', userName),
-        prompt: `SCENE LOG EXCERPT (the new Days to extract memories from)\n\n${source.text}\n\n---\nBACKGROUND, for who is who only (do not extract from this)\n\n${source.context || '(none)'}\n\n---\nReturn only the JSON.`,
-    };
-}
-
 /** Returns [{name, aliases, memories}] or null when the reply was unusable. */
 /** True for the format example a model sometimes echoes back instead of real content. */
 const isPlaceholderText = (x) => /^(\[[^\]]*\]\s*)?[.\u2026\s]*$/.test(String(x)) || /^(\[[^\]]*\]\s*)?<[^>]*>$/.test(String(x).trim());
@@ -832,36 +814,6 @@ export function planMemories(data, chars, { cap = 30, tag = '', unit = 'Day', da
     }
     return out;
 }
-
-/** Add to existing memory entries or create new ones, grouped by date, then put everything in reading order. */
-export function applyMemories(data, plan, opts, makeEntry, { constant = false, dates = {}, unit = 'Day' } = {}) {
-    data.entries ??= {};
-    const rep = { created: [], updated: [], converted: convertDelivery(data, opts) };
-    const fresh = [];
-    for (const p of plan) {
-        if (!p.include) continue;
-        const add = itemsFromFlat(p.bullets, dates);
-        const ex = p.uid != null ? data.entries[p.uid] : null;
-        if (ex) {
-            const name = (String(ex.content).match(/^## ► Memories — (.+)$/m) || [, p.name])[1].trim();
-            ex.content = memoryDocText(name, [...parseMemoryDoc(ex.content), ...add], dates, unit);
-            ex.key = withVariants([...(ex.key ?? []), ...p.keys]).slice(0, 16);
-            rep.updated.push(p.name);
-        } else {
-            const e = newEntry(data, makeEntry);
-            applyDefaults(e, opts, constant);
-            e.content = memoryDocText(p.name, add, dates, unit);
-            e.comment = `🧠| Memories · ${p.name}`;
-            e.key = p.keys.slice(0, 16);
-            e.keysecondary = [];
-            fresh.push(e.uid);
-            rep.created.push(p.name);
-        }
-    }
-    reorder(data, fresh, opts);
-    return rep;
-}
-
 
 // ---------------------------------------------------------------- Condense memories
 
@@ -943,18 +895,6 @@ export function applyTracker(data, name, text, opts, makeEntry) {
     reorder(data, [e.uid], opts);
     rep.action = 'created';
     return rep;
-}
-
-/** Everything the log says, newest first within a size budget, for a free-form question. */
-export function buildAskRequest(askPrompt, question, data, { maxChars = 60000 } = {}) {
-    const m = managed(data).filter(x => !['opening', 'closing'].includes(x.cl.type));
-    const keep = new Set(m.filter(x => x.e.constant).map(x => x.e.uid));
-    let used = m.filter(x => x.e.constant).reduce((n, x) => n + x.e.content.length, 0);
-    const rest = m.filter(x => !x.e.constant).sort((a, b) => (b.cl.dayNum ?? -1) - (a.cl.dayNum ?? -1));
-    let omitted = 0;
-    for (const x of rest) { const len = x.e.content.length; if (used + len > maxChars) { omitted++; continue; } used += len; keep.add(x.e.uid); }
-    const text = m.filter(x => keep.has(x.e.uid)).map(x => x.e.content.trim()).join('\n\n');
-    return { omitted, system: String(askPrompt), prompt: `ASK THE ARCHIVE: ${String(question).trim()}\n\nSCENE LOG\n${text}\n\n---\nAnswer the question now.` };
 }
 
 export function buildRecapRequest(recapPrompt, data, n = 3) {

@@ -430,9 +430,6 @@ export function tidyMemory(items, { removeExact = false } = {}) {
     }).sort((a, b) => (a.a ?? -1) - (b.a ?? -1) || (a.b ?? 0) - (b.b ?? 0));
 }
 
-/** Strictly equal bodies at the same event time can be deduplicated; semantic merging needs review. */
-export const memoryIdentity = (it, subject = '') => hash([subject.toLocaleLowerCase(), it.a, it.b, it.date, it.text.trim().toLocaleLowerCase()]);
-
 // Portable workflow settings deliberately exclude connection profiles, credentials and destination names.
 export const PRESET_KEYS = ['delivery', 'outlet', 'depth', 'role', 'unit', 'keepDays', 'archiveMode', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'condenseAbove', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt', 'workbench'];
 export const workflow = settings => Object.fromEntries(PRESET_KEYS.filter(k => k in settings).map(k => [k, copy(settings[k])]));

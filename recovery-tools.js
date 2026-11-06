@@ -84,8 +84,3 @@ export function dependencyProblems(r, byId, deferredIds = new Set()) {
         return reason ? [{ id, title: source ? M.title(source) : id, reason }] : [];
     });
 }
-
-export function approvalMessage(blocked) {
-    const reasons = { unchecked: 'was left unchecked in this review', missing: 'is missing from the story books', stale: 'needs correction or rebuilding', changed: 'changed after this result was generated', receipt: 'has an unapproved memory result' };
-    return blocked.slice(0, 8).map(b => `${b.title}: ${(b.problems || []).map(p => `${p.title} ${reasons[p.reason] || p.reason}`).join('; ')}`).join('\n') + '\nCheck unchecked source results, or correct/rebuild changed or missing sources in Library. Review later keeps the prepared results; independent approved results can be saved separately.';
-}
