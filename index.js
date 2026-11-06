@@ -18,6 +18,7 @@ import * as Memory from './memory-engine.js';
 import { Workbench } from './workbench.js';
 import { ChatControls } from './chat-controls.js';
 import { addReviewHandle } from './review-window.js';
+import { VERSION } from './version.js';
 import { entryReasons } from './vector-diagnostics.js';
 import { createWorldInfoIO } from './world-info-io.js';
 import * as Journal from './entry-journal.js';
@@ -25,7 +26,7 @@ import { validateSharedUnits, placeSharedUnits } from './workflow-tools.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.2.0';
+
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -1563,15 +1564,6 @@ function panelHtml() {
       <div class="sa-row"><input id="sa_mem_prompt_reset" class="menu_button" type="button" value="Reset prompt"></div>
     </div></details>
 
-    <details class="sa-card"><summary>🧬 Condense character memories</summary><div class="sa-body">
-      <div class="sa-hint">Measure savings in tokens while keeping every distinct memory. Review and Undo remain available.</div>
-
-      <div class="sa-row"><input id="sa_cond_run" class="menu_button sa-cond-run" type="button" value="Condense memories" title="Merges duplicates. You review every change and Undo brings the old lists back."></div>
-      <div class="sa-sub">Condense prompt</div>
-      <textarea id="sa_cond_prompt" class="text_pole" rows="6"></textarea>
-      <div class="sa-row"><input id="sa_cond_prompt_reset" class="menu_button" type="button" value="Reset prompt"></div>
-    </div></details>
-
     <details class="sa-card"><summary>📌 Trackers</summary><div class="sa-body">
       <div class="sa-hint">Extra always-on notes, rewritten after each archive.</div>
       <div class="sa-row"><select id="sa_tr_sel" class="text_pole"></select></div>
@@ -1747,7 +1739,7 @@ function bindUi() {
     $('#sa_through_set').on('click', setThrough); $('#sa_ledger_import').on('click', importLedger);
     renderLedger();
     $('#sa_cond_run').on('click', () => runCondense());
-    bindVal('#sa_cond_above', 'condenseAbove', true); bindVal('#sa_cond_prompt', 'condensePrompt');
+    bindVal('#sa_cond_prompt', 'condensePrompt');
     $('#sa_cond_prompt_reset').on('click', () => { s.condensePrompt = DEFAULT_SETTINGS.condensePrompt; $('#sa_cond_prompt').val(s.condensePrompt); saveSettingsDebounced(); toastr.info('Condense prompt reset to the default.'); });
     refreshProfileList();
     $('#sa_side_profile, #sa_archive_profile').on('change', function () { s[this.id === 'sa_archive_profile' ? 'archiveProfile' : 'sideProfile'] = this.value; saveSettingsDebounced(); workbench?.renderFlow(); });
@@ -1765,7 +1757,6 @@ jQuery(async () => {
         try { dock = localStorage.getItem('sa_dock') === '1'; } catch { /* ignore */ }
         if (dock) $('#extensions_settings2').append(settingsHtml());
         else $('body').append(`<div id="sa_holder" style="display:none">${panelHtml()}</div>`);
-        bindUi();
         workbench = new Workbench({
             settings, meta, groupSpeaker, currentAvatar, listChatFiles, checkSetup, profileState, bindProfile, memoryPeers, attachArchive: attachToChat,
             wasRenamed: (from, to) => Date.now() - (recentRenames.get(JSON.stringify([chatOwner(getContext()), chatName(from), chatName(to)])) || 0) < 60000,
@@ -1807,6 +1798,7 @@ jQuery(async () => {
             forceEntries: entries => eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, entries),
         });
         workbench.mount(document.querySelector('.sa-panel'));
+        bindUi();
         chatControls = new ChatControls(workbench);
         workbench.chatControls = chatControls;
         migrateStoryBooks();
@@ -1840,9 +1832,9 @@ jQuery(async () => {
         eventSource.on(event_types.WORLD_INFO_ACTIVATED, onWorldInfoActivated);
         eventSource.on(event_types.WORLDINFO_FORCE_ACTIVATE, entries => workbench.onVectorActivated(entries));
         if (event_types.WORLDINFO_SCAN_DONE) eventSource.on(event_types.WORLDINFO_SCAN_DONE, scan => workbench.onWorldInfoScan(scan));
-        $('#extensionsMenu').append(`<div id="sa_wand" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-book-journal-whills extensionsMenuExtensionButton"></div><span>✨ Summarize new messages</span></div>`);
+        $('#extensionsMenu').append(`<div id="sa_wand" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-book-journal-whills extensionsMenuExtensionButton"></div><span>Summarize new messages</span></div>`);
         $('#sa_wand').on('click', () => runSummarize());
-        $('#extensionsMenu').append(`<div id="sa_wand_panel" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-folder-tree extensionsMenuExtensionButton"></div><span>📚 Scene Archivist</span></div>`);
+        $('#extensionsMenu').append(`<div id="sa_wand_panel" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-folder-tree extensionsMenuExtensionButton"></div><span>Scene Archivist</span></div>`);
         $('#sa_wand_panel').on('click', openPanelPopup);
         eventSource.on(event_types.CHAT_CHANGED, () => {
             chatRevision++; chatControls?.close();

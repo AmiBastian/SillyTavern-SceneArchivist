@@ -11,6 +11,9 @@
 - Added experimental cache-friendly delivery and model-initiated memory lookups. Both start off.
 - Improved fallback token estimates for Arabic, CJK and emoji, and added a movable desktop review window.
 - Updated the guide, screenshots and range, diary and evidence walkthroughs. Added tests for copied chats, stable range picks, group memory isolation, request estimates and prompt traces.
+- Put archive, range and memory badges in the chat message header. Kept native menu labels plain and used more widely supported emoji in the workspace.
+- Built Sharing and Condense as single cards, clarified the Branches section, and corrected the version reported by story and selection exports.
+- Saved SillyTavern character filters for group memories with a known card, preserving hand-edited filters and the workspace's group opt-out.
 
 ## 1.1.0 · November 5, 2026
 
@@ -23,7 +26,7 @@
 - Condense measures token savings for memories, summaries, recaps, and diaries. Dates, times, and exact quotations are checked before review.
 - Added opt-in rolling chat memories, optional one-request generation for matching profiles, and a scripted regression suite.
 - Updated the illustrated guide and the range, diary, and evidence walkthroughs with 1.1.0 captures from SillyTavern 1.19.0.
-- Thanks to **Mimo433** for writing and sharing a 1.0.8 patch for the memory approval deadlock. Version 1.1.0 addresses the same issue with its own independently developed fix.
+- Thanks to **Mimo433** for sharing a patch for the memory approval deadlock ahead of 1.1.0. Scene Archivist’s fix was developed independently.
 
 ## 1.0.8 · October 26, 2026
 

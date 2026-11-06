@@ -1,5 +1,11 @@
-/* Scene Archivist 1.0.8: a quiet workspace around a busy story. */
+/* Scene Archivist workspace */
 .sa-panel, .sa-panel *, .sa-review, .sa-review * { box-sizing: border-box; }
+.sa-panel, .sa-review {
+  --sa-emoji-fonts: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji";
+  font-family: var(--mainFontFamily, system-ui), var(--sa-emoji-fonts), sans-serif;
+}
+.sa-panel :is(.sa-brand-mark, .sa-tabs [aria-hidden="true"]) { font-family: var(--sa-emoji-fonts), sans-serif; }
+.sa-panel .menu_button, .sa-review .menu_button { font-family: inherit; }
 .sa-panel {
   --sa-accent: #c9b4ef;
   --sa-accent-ink: #241632;
@@ -131,7 +137,7 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
 .sa-panel input[type=date] { width: 100%; min-width: 0; }
 /* Review dialogs keep the text central and the controls predictable. */
 .sa-review { text-align: left; line-height: 1.6; }
-.sa-review h3 { font: 500 25px/1.3 Georgia, 'Times New Roman', serif; margin: 6px 0 14px; }
+.sa-review h3 { font: 500 25px/1.3 Georgia, 'Times New Roman', var(--sa-emoji-fonts), serif; margin: 6px 0 14px; }
 .sa-review details:not(.sa-inline-tools) { border: 1px solid var(--SmartThemeBorderColor, #555); border-radius: 8px; margin: 11px 0; padding: 10px 12px; }
 .sa-review summary { cursor: pointer; line-height: 1.5; }
 .sa-review summary .sa-badge { margin-left: 7px; }
@@ -257,6 +263,7 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
   appearance:none; background:transparent; border:0; padding:0; margin:0; color:inherit;
   cursor:pointer; min-width:22px; min-height:22px; align-self:center; flex:none; opacity:.8;
 }
+#chat .mes_buttons:has(> .sa-message-action) { align-items:center; }
 #chat .sa-message-action:hover, #chat .sa-message-action[aria-expanded=true] { color:var(--SmartThemeQuoteColor, #d4b8ea); opacity:1; }
 #chat .sa-message-action:focus-visible { outline:2px solid currentColor; outline-offset:2px; border-radius:4px; }
 .sa-message-menu {
@@ -271,14 +278,30 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
   text-align:start; padding:9px; border-radius:5px; cursor:pointer;
 }
 .sa-message-menu > button:is(:hover,:focus-visible) { background:color-mix(in srgb, currentColor 12%, transparent); outline:0; }
-.sa-message-badges { display:flex; align-items:center; flex-wrap:wrap; gap:5px; margin:2px 0 5px; font-size:.7em; }
-.sa-message-badges > span { padding:2px 6px; border-radius:5px; background:color-mix(in srgb, currentColor 8%, transparent); }
+#chat .ch_name:has(.sa-message-badges),
+#chat .ch_name .flex-container:has(.sa-message-badges) { min-inline-size:0; }
+#chat .ch_name :has(> .sa-message-badges) { align-items:center; flex-wrap:nowrap; }
+#chat .ch_name :has(> .sa-message-badges) > :is(.name_text, .timestamp) {
+  min-inline-size:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.sa-message-badges {
+  display:inline-flex; align-self:center; align-items:center; flex:0 1 auto; min-inline-size:0;
+  gap:4px; margin-inline-start:4px; font-size:.65em; font-weight:400; line-height:1.25;
+}
+.sa-message-badges > span {
+  padding:1px 5px; border-radius:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  background:color-mix(in srgb, currentColor 8%, transparent);
+}
 .sa-message-badges > [data-kind=status] { opacity:.72; }
 .sa-message-badges > [data-kind=endpoint] { color:var(--SmartThemeQuoteColor, #d4b8ea); font-weight:600; }
 @media (max-width:720px), (pointer:coarse) {
-  .sa-message-badges[data-mobile=hide] > [data-kind=status] { display:none; }
+  .sa-message-badges[data-mobile=hide] > [data-kind=status],
+  .sa-message-badges[data-mobile=hide]:not(:has(> [data-kind=endpoint])) { display:none; }
+  #chat .ch_name :has(> .sa-message-badges[data-mobile=hide]:not(:has(> [data-kind=endpoint]))) { flex-wrap:wrap; }
+  #chat .ch_name :has(> .sa-message-badges) > .name_text { flex:0 0 auto; max-inline-size:50%; }
+  .sa-message-badges { flex:0 0 auto; max-inline-size:43%; }
   .sa-message-menu > button { min-height:44px; }
-  #chat .sa-message-action { min-width:38px; min-height:38px; }
+  #chat .sa-message-action { min-width:38px; min-height:28px; }
 }
 .sa-story-home { grid-column:1 / -1; padding:18px; border:1px solid var(--sa-line); border-radius:12px; background:var(--sa-wash); }
 .sa-story-home h3 { margin:6px 0 10px; }

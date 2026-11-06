@@ -173,7 +173,7 @@ export function registerMemoryTools(w) {
         description: 'Look up active Scene Archivist memories for the responding character and topic.',
         parameters: { type: 'object', properties: { character: { type: 'string' }, topic: { type: 'string' } }, required: ['topic'] },
         shouldRegister: available, action: ({ topic, character }) => lookup({ topic, character }),
-        formatMessage: () => '🧠 Look up a story memory',
+        formatMessage: () => 'Look up a story memory',
     });
     context.registerFunctionTool({
         name: 'scene_archivist_open_day', displayName: 'Open a saved story unit',
@@ -181,6 +181,6 @@ export function registerMemoryTools(w) {
         parameters: { type: 'object', properties: { number: { type: 'integer', minimum: 0 } }, required: ['number'] },
         shouldRegister: available,
         action: ({ number }) => Number.isInteger(number) && number >= 0 ? lookup({ day: number }) : 'Provide a non-negative story unit number.',
-        formatMessage: ({ number }) => `📚 Open story unit ${number}`,
+        formatMessage: ({ number }) => `Open story unit ${number}`,
     });
 }

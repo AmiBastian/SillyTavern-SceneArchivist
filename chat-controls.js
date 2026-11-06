@@ -95,16 +95,16 @@ export class ChatControls {
         menu.setAttribute('role', 'group');
         menu.setAttribute('aria-label', `Scene Archivist actions for message ${index}`);
         const actions = [
-            ['📍 Start range here', () => this.pick('from', index)],
-            ['🏁 End range here', () => this.pick('to', index)],
-            ['🧠 Remember this', () => this.w.extras.remember(index, selected)],
-            [isSkipped(this.state(), message) ? '↩️ Include in archive again' : '🙈 Skip when archiving', async () => {
+            ['Start range here', () => this.pick('from', index)],
+            ['End range here', () => this.pick('to', index)],
+            ['Remember this', () => this.w.extras.remember(index, selected)],
+            [isSkipped(this.state(), message) ? 'Include in archive again' : 'Skip when archiving', async () => {
                 toggleSkipped(rangeControl(this.w.h.meta()), message);
                 await this.save();
                 this.w.renderFlow();
             }],
         ];
-        if (!message.is_user) actions.push(['🔎 What went into this reply?', () => this.w.extras.prompt.show(index)]);
+        if (!message.is_user) actions.push(['What went into this reply?', () => this.w.extras.prompt.show(index)]);
         const heading = document.createElement('small');
         heading.textContent = `Scene Archivist · #${index}`;
         menu.append(heading);
@@ -163,28 +163,34 @@ export class ChatControls {
                 else toolbar.append(trigger);
             }
             const badges = [];
-            if (bounds.from.index === index) badges.push(['📍 Range start', 'endpoint']);
-            if (bounds.to.index === index) badges.push(['🏁 Range end', 'endpoint']);
-            if (isSkipped(this.state(), message)) badges.push(['🙈 Archive skip', 'endpoint']);
+            if (bounds.from.index === index) badges.push(['Range start', 'endpoint']);
+            if (bounds.to.index === index) badges.push(['Range end', 'endpoint']);
+            if (isSkipped(this.state(), message)) badges.push(['Archive skip', 'endpoint']);
             if (this.w.options().messageBadges !== 'off' && !message.is_system) {
                 const key = `${index}:${messageHash(message)}`;
                 const covered = archiveHits.get(key) || legacy.find(range => index >= range.from && index <= range.to);
                 const remembered = memoryHits.has(key);
-                if (covered) badges.push([covered.days?.length ? `📚 Archived · ${covered.days.join(', ')}` : '📚 Archived', 'status']);
-                else if (!isSkipped(this.state(), message)) badges.push(['🕓 To archive', 'status']);
-                if (remembered) badges.push(['🧠 Memories made', 'status']);
+                if (covered) badges.push([covered.days?.length ? `Archived · ${covered.days.join(', ')}` : 'Archived', 'status']);
+                else if (!isSkipped(this.state(), message)) badges.push(['To archive', 'status']);
+                if (remembered) badges.push(['Memories made', 'status']);
             }
+            const header = toolbar.closest('.ch_name');
+            const metadataLine = header?.querySelector('.timestamp, .name_text')?.parentElement;
             let strip = node.querySelector('.sa-message-badges');
-            if (!badges.length) { strip?.remove(); continue; }
+            if (!badges.length || !metadataLine) { strip?.remove(); continue; }
             if (!strip) {
-                strip = document.createElement('div');
+                strip = document.createElement('span');
                 strip.className = 'sa-message-badges';
-                node.querySelector('.mes_text')?.before(strip);
+            }
+            if (strip.parentElement !== metadataLine) {
+                if (metadataLine === header) toolbar.before(strip);
+                else metadataLine.append(strip);
             }
             strip.dataset.mobile = this.w.options().messageBadges === 'all' ? 'show' : 'hide';
             strip.replaceChildren(...badges.map(([text, kind]) => {
                 const badge = document.createElement('span');
                 badge.textContent = text;
+                badge.title = text;
                 badge.dataset.kind = kind;
                 return badge;
             }));

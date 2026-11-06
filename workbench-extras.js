@@ -80,7 +80,7 @@ export class WorkbenchExtras {
         this.chip.hidden = !job || ['done', 'canceled'].includes(job.status);
         if (!this.chip.hidden) {
             const status = job.phase === 'review' ? 'Ready for review' : job.status === 'failed' ? 'Retry available' : job.status === 'paused' ? 'Paused' : 'Working';
-            this.chip.textContent = `📚 ${jobLabel(job.kind)} · ${status} · ${job.cursor}/${job.steps.length}`;
+            this.chip.textContent = `${jobLabel(job.kind)} · ${status} · ${job.cursor}/${job.steps.length}`;
         }
     }
 
@@ -176,7 +176,7 @@ export class WorkbenchExtras {
     }
 
     async setup() {
-        const w = this.w, root = form('🩺 Check setup', 'A quick look at how this story is connected to SillyTavern.');
+        const w = this.w, root = form('🔧 Check setup', 'A quick look at how this story is connected to SillyTavern.');
         const checks = await w.h.checkSetup?.() || [];
         const s = w.h.settings(), ctx = w.h.context();
         for (const [label, profile] of [['Archive', s.archiveProfile], ['Memories and trackers', s.sideProfile]]) {
@@ -331,7 +331,7 @@ export class WorkbenchExtras {
     }
 
     async estimate(steps, flow, confirm = false) {
-        const w = this.w, root = form('🧮 Estimate this run', 'A preview of the planned requests using the sources available now. Model replies, newly generated summaries and optional SillyTavern context affect the final size.');
+        const w = this.w, root = form('📊 Estimate this run', 'A preview of the planned requests using the sources available now. Model replies, newly generated summaries and optional SillyTavern context affect the final size.');
         let input = 0, output = 0, count = 0;
         const lines = el('ul');
         for (const payload of steps) {

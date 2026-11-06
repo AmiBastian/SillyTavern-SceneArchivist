@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { Workbench } from '../workbench.js';
 import * as M from '../memory-engine.js';
 import * as Core from '../core.js';
 import * as Flow from '../flow.js';
-import { placeSharedUnits } from '../workflow-tools.js';
+import { placeSharedUnits, selectionExport } from '../workflow-tools.js';
 import { projectBranch } from '../recovery-tools.js';
 import { DEFAULT_MEMORY_PROMPT, DEFAULT_SETTINGS, LEGACY_MEMORY_PROMPTS } from '../defaults.js';
 
@@ -338,4 +339,22 @@ test('a three-stage estimate sends no request and leaves a prepared draft untouc
     assert.deepEqual(f.calls, []);
     assert.equal(f.metadata.workbench.job.id, 'existing-draft');
     assert.deepEqual(Object.keys(f.books), ['Story']);
+});
+
+test('story and selection exports report the manifest version', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url)));
+    const entry = { content: 'Some memory' };
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'memory' });
+    assert.equal(M.makeBundle({}, {}, {}).version, manifest.version);
+    assert.equal(selectionExport([entry], [entry.sceneArchivist.id]).version, manifest.version);
+});
+
+test('saving group memories writes a native lorebook filter for the assigned card', async () => {
+    const f = fixture();
+    const group = { speaker: 'zelga.png', members: [{ name: 'Zelga', avatar: 'zelga.png' }, { name: 'Bea', avatar: 'bea.png' }] };
+    f.w.h.groupSpeaker = () => group;
+    await f.w.startFlow('memories');
+    const memory = Object.values(f.books.Memories.entries).find(entry => M.record(entry)?.type === 'memory');
+    assert.deepEqual(memory.characterFilter, { names: ['zelga'], tags: [], isExclude: false });
+    assert.equal(M.record(memory).subjectAvatar, 'zelga.png');
 });

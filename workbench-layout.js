@@ -1,3 +1,4 @@
+import { VERSION } from './version.js';
 import { escape as h } from './workflow-tools.js';
 import { ACTION_HELP, ControlHelp, aiLabel, helpHtml } from './workbench-help.js';
 
@@ -6,8 +7,8 @@ export const TAB_GUIDE = {
     archive: { icon: '🗂️', label: 'Archive', title: 'Keep the scene. Keep the story.', note: 'Turn chat messages into dated summaries you can review and return to.' },
     characters: { icon: '🧠', label: 'Characters', title: 'What they remember matters.', note: 'Make, browse and update character memories and diaries.' },
     library: { icon: '📚', label: 'Library', title: 'Find the thread.', note: 'Search your saved records, inspect their evidence, or select them for another tool.' },
-    maintain: { icon: '🧰', label: 'Maintain', note: 'Condense, repair, share, branch or back up your story.' },
-    prompt: { icon: '🪞', label: 'Prompt', note: 'See what loaded, why it loaded and how much context it used.' },
+    maintain: { icon: '🔧', label: 'Maintain', note: 'Condense, repair, share, branch or back up your story.' },
+    prompt: { icon: '🔍', label: 'Prompt', note: 'See what loaded, why it loaded and how much context it used.' },
     settings: { icon: '⚙️', label: 'Settings', title: 'Make it work your way.', note: 'Choose prompts and connections, set delivery, and keep a story backup.' },
 };
 
@@ -17,8 +18,6 @@ const SECTIONS = [
     ['#sa-last-prompt', 'prompt-trace', 'Follow the memory trail for a reply.', false],
     ['#sa-profile-scope', 'settings-setup', 'Check this chat and save scoped workflow settings.', false],
     ['[data-sa-flow="persona"]', 'settings-flow-context', 'Optional persona memories and reference lore.', false],
-    ['[data-sa-flow="sharedMode"]', 'archive-shared-filing', 'Choose where to file summaries in a shared timeline.', false],
-    ['[data-sa-field="condenseTarget"]', 'condense-token-target', 'Choose a flexible token target for condensation.', false],
     ['[data-sa-flow="rolling"]', 'settings-flow-automation', 'Optional rolling memories and combined generation.', true],
     ['#sa_lorebook', 'archive-book', 'Choose the book and summarize new messages.', false],
     ['[data-sa-action="rangePreview"]', 'archive-range', 'Choose an exact scene before sending it to the model.', false],
@@ -36,8 +35,6 @@ const SECTIONS = [
     ['#sa-library-results', 'library-records', 'Search, filter, inspect and select saved records.', false],
     ['[data-sa-action="protectSelected"]', 'library-selected', 'Protect, export or repair the records you select.', false],
     ['[data-sa-action="condenseSelected"]', 'condense-archive', 'Turn selected story units into a smaller linked recap.', false],
-    ['#sa_cond_run', 'condense-memories', 'Merge repetition in character lists above the threshold.', false],
-    ['[data-sa-option="autoCondense"]', 'condense-automation', 'Optional suggestions or automatic archive recaps.', true],
     ['#sa-evidence-results', 'search-answer', 'Answers and continuity findings with source buttons.', false],
     ['#sa-budget-view', 'search-loading', 'See separate keyword, vector and other activation reasons.', false],
     ['#sa_view_sum', 'search-context', 'Inspect the archive entries recorded for the last reply.', false],
@@ -73,10 +70,10 @@ export class WorkspaceLayout {
         root.classList.add('sa-workspace');
         const labels = { sa_lorebook: 'Story archive lorebook', sa_newname: 'New archive name', sa_tr_sel: 'Tracker', sa_pl_sel: 'Archive prompt preset', sa_pl_name: 'Prompt name', sa_prompt: 'Archive prompt', sa_mem_prompt: 'Character memory prompt', sa_cond_prompt: 'Character memory condense prompt', sa_tr_prompt: 'Tracker prompt', sa_mem_from: 'First story unit', sa_mem_to: 'Last story unit, inclusive', sa_through: 'Mark archived through message' };
         for (const [id, label] of Object.entries(labels)) root.querySelector('#' + id)?.setAttribute('aria-label', label);
-        const title = root.querySelector('.sa-title'), version = title.querySelector('.sa-ver')?.textContent || 'v1.1.0';
+        const title = root.querySelector('.sa-title'), version = title.querySelector('.sa-ver')?.textContent || `v${VERSION}`;
         title.innerHTML = `<div class="sa-brand"><span class="sa-brand-mark" aria-hidden="true">🗂️</span><div><span class="sa-eyebrow">YOUR STORY, KEPT TOGETHER</span><div class="sa-wordmark">Scene Archivist <span class="sa-ver">${h(version)}</span></div></div></div><div class="sa-header-actions"><button type="button" class="sa-toolbar-button" data-sa-ui="guide">🌱 Start here</button><button type="button" class="sa-toolbar-button" data-sa-ui="help">❔ Help & examples</button></div>`;
         const toolbar = document.createElement('div'); toolbar.className = 'sa-workspace-toolbar';
-        toolbar.innerHTML = `<div class="sa-view-choice" role="group" aria-label="Interface detail"><button type="button" data-sa-ui="essentials" aria-pressed="true">🌱 Essentials</button><button type="button" data-sa-ui="all" aria-pressed="false">🧰 All tools</button></div><label class="sa-explain-switch"><input type="checkbox" data-sa-ui="explain"><span>Show help buttons</span></label><span class="sa-display-note">Choose how much you see.</span>`;
+        toolbar.innerHTML = `<div class="sa-view-choice" role="group" aria-label="Interface detail"><button type="button" data-sa-ui="essentials" aria-pressed="true">🌱 Essentials</button><button type="button" data-sa-ui="all" aria-pressed="false">🔧 All tools</button></div><label class="sa-explain-switch"><input type="checkbox" data-sa-ui="explain"><span>Show help buttons</span></label><span class="sa-display-note">Choose how much you see.</span>`;
         title.after(toolbar);
         for (const [tab, metadata] of Object.entries(TAB_GUIDE)) {
             const button = root.querySelector(`[data-sa-tab="${tab}"]`);
@@ -130,8 +127,8 @@ export class WorkspaceLayout {
         const root = this.root;
         const labels = {
             sa_run: '✨ Summarize new messages', sa_thorough: '📚 Archive thoroughly', sa_paste: '📋 Paste a summary',
-            sa_cond_run: '✂️ Condense character memories', sa_check: '🩺 Check archive', sa_attach: '🔗 Attach to this chat',
-            sa_fix: '🪞 Fix prompt delivery', sa_diag: '📋 Copy diagnostics', sa_undo: '↩️ Undo last save',
+            sa_cond_run: '✂️ Condense character memories', sa_check: '🔍 Check archive', sa_attach: '🔗 Attach to this chat',
+            sa_fix: '🔧 Fix prompt delivery', sa_diag: '📋 Copy diagnostics', sa_undo: '↩️ Undo last save',
         };
         for (const [id, text] of Object.entries(labels)) { const node = root.querySelector('#' + id); if (node) node.value = text; }
         const replacements = [
@@ -207,26 +204,7 @@ export class WorkspaceLayout {
             }
         };
         move('prompt', 'settings-delivery', 'settings-vectors');
-        move('maintain', 'settings-branches', 'archive-repair', 'settings-activity');
-        const archiveCondense = section('condense-archive'), body = archiveCondense?.querySelector('.sa-body');
-        if (body) {
-            archiveCondense.querySelector('summary').childNodes[0].textContent = '✂️ Condense story records';
-            for (const [id, title] of [['condense-token-target', '🎯 Token target'], ['condense-memories', '🧠 Character memories'], ['condense-automation', '⏰ Condense automatically']]) {
-                const old = section(id);
-                if (!old) continue;
-                const detail = document.createElement('details');
-                detail.className = 'sa-inline-tools';
-                detail.innerHTML = `<summary>${title}</summary>`;
-                detail.append(...old.querySelector('.sa-body').childNodes);
-                body.append(detail); old.remove();
-            }
-        }
-        const filing = section('archive-shared-filing'), sharing = section('settings-sharing');
-        if (filing && sharing) {
-            sharing.querySelector('.sa-body').append(filing);
-            filing.classList.replace('sa-card', 'sa-inline-tools');
-            filing.querySelector('summary').childNodes[0].textContent = '📂 Where to file new summaries';
-        }
+        move('maintain', 'archive-repair', 'settings-activity');
         const setup = section('settings-setup');
         const presetButtons = root.querySelector('[data-sa-action=exportWorkflow]')?.parentElement;
         if (setup && presetButtons) {

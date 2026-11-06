@@ -172,7 +172,7 @@ Optional recap automation can suggest or create a recap after newer units, ficti
 - **Previously on…** creates a short return recap for the reader. **Recall** can ask a helper model to pick relevant details before a normal reply.
 - In **Prompt**, **View last reply’s memory trail** and **Memory budget and loading reasons** show which Scene Archivist entries loaded at SillyTavern’s World Info stage, which were skipped, and why. The message menu opens the trail for that reply or swipe. The trace keeps counts, titles and source links for recent replies.
 
-In groups, Scene Archivist loads only the speaking card’s memories by default. Use **Remember this** to choose the exact card when two cards share a name. You can change group memory scope in Prompt. Native World Info from other extensions still follows SillyTavern’s settings.
+In groups, Scene Archivist loads only the speaking card’s memories by default. Use **Remember this** to choose the exact card when two cards share a name. You can change group memory scope in Prompt. Saving a group memory for a uniquely identified card also gives its lorebook entry a SillyTavern character filter. Existing entries get that filter when edited or regenerated in the group. Filters set by hand in World Info are preserved.
 
 **Cache-friendly delivery** is optional. It puts fixed lore earlier and changing matches near the reply. The memory trail reports an approximate shared prompt prefix between requests. Provider caching depends on the connection. **On-demand memory tools** are experimental and opt-in. They require a tool-capable Chat Completion connection with Function Calling enabled and may add another request.
 
@@ -226,7 +226,7 @@ Helper tools such as memory organization and archive search use the helper model
 
 Open **Maintain → Archive sharing** and enable **Share this archive across chats** in the original chat, then select that book in the other chat. This is for chats that intentionally share one timeline. **Where to file new summaries** can start a new unit, continue an existing unit, or file an earlier event. Each contribution keeps its own source range. Use one writer at a time when updating a shared archive.
 
-A native SillyTavern branch can use verified earlier history or start with empty private books. The branch view shows the parent and fork point when available. Later records stay in the parent when the extension cannot verify them as part of the branch.
+Open **All tools → Maintain → Branches** to choose verified earlier history or empty private books. To create the branch, open the original message’s three-dot menu in SillyTavern and choose **Create Branch**. The branch view shows the parent and fork point when available. Later records stay in the parent when the extension cannot verify them as part of the branch.
 
 Renaming a chat in SillyTavern keeps its archive and progress. A native branch or a separate copy of the original chat file gets private books, even when the copied file has the same internal identifier. Use SillyTavern’s **Branch** action to keep lineage easy to follow.
 
@@ -273,7 +273,7 @@ If a later stage fails, choose **Review ready results** to save completed work, 
 
 ## Credits
 
-Thanks to **Mimo433** for sharing a patch for the memory approval deadlock in 1.0.8. Scene Archivist’s fix was developed independently. Thanks to everyone who tested ranges, retries and actual long chats and reported where the interface got in the way.
+For [1.1.0](CHANGELOG.md#110--november-5-2026), thanks to **Mimo433** for sharing a patch for the memory approval deadlock. Scene Archivist’s fix was developed independently. Thanks to everyone who tested ranges, retries and actual long chats and reported where the interface got in the way.
 
 ## License
 

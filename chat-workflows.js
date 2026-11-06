@@ -1,5 +1,5 @@
 // Chat-local controls and prompt bookkeeping. These helpers also run without SillyTavern.
-import { uid } from './memory-engine.js';
+import { record, uid } from './memory-engine.js';
 
 const messageKey = 'sceneArchivistMessageId';
 
@@ -57,10 +57,15 @@ export async function isChatRename({ previous, current, parent, integrity, previ
 }
 
 const normalizeName = value => String(value ?? '').trim().normalize('NFKC').toLowerCase();
-const normalizeAvatar = value => String(value ?? '').replace(/\.png$/i, '');
+const normalizeAvatar = value => String(value ?? '').replace(/\.[^/.]+$/, '');
 
 export function memorySubject(record, members) {
-    if (record.subjectAvatar) return members.find(member => normalizeAvatar(member.avatar) === normalizeAvatar(record.subjectAvatar));
+    if (record.subjectAvatar) {
+        const exact = members.find(member => member.avatar === record.subjectAvatar);
+        if (exact) return exact;
+        const matches = members.filter(member => normalizeAvatar(member.avatar) === normalizeAvatar(record.subjectAvatar));
+        return matches.length === 1 ? matches[0] : null;
+    }
     const subject = normalizeName(record.subject || record.character);
     if (!subject) return null;
     const matches = members.filter(member => [member.name, ...(member.aliases || [])].some(name => [subject, ...(record.aliases || []).map(normalizeName)].includes(normalizeName(name))));
@@ -71,7 +76,39 @@ export function groupMemoryReason(record, group, enabled) {
     if (!enabled || !group || record?.type !== 'memory') return '';
     const subject = memorySubject(record, group.members);
     if (!subject || !group.speaker) return 'No unique character card for this memory';
-    return normalizeAvatar(subject.avatar) === normalizeAvatar(group.speaker) ? '' : 'Belongs to another group character';
+    return subject.avatar === group.speaker ? '' : 'Belongs to another group character';
+}
+
+function ownsNativeGroupFilter(entry) {
+    const card = record(entry)?.nativeGroupCard;
+    const filter = entry.characterFilter;
+    return !!card && filter?.isExclude === false && filter.names?.length === 1 && filter.names[0] === card && filter.tags?.length === 0;
+}
+
+/** Preserve native rules edited in World Info. Write our rule only for a uniquely identified group card. */
+export function saveNativeGroupFilter(entry, group, currentAvatar) {
+    const r = record(entry);
+    if (r?.type !== 'memory' || !group) return;
+    if ((r.nativeGroupCard || entry.characterFilter) && !ownsNativeGroupFilter(entry)) return;
+    const subjectAvatar = r.subjectAvatar && (currentAvatar?.(r.subjectAvatar) || r.subjectAvatar);
+    const subject = memorySubject({ ...r, subjectAvatar }, group.members);
+    const card = normalizeAvatar(subject?.avatar);
+    if (!card || group.members.filter(member => normalizeAvatar(member.avatar) === card).length !== 1) return;
+    r.subjectAvatar = subject.avatar;
+    r.nativeGroupCard = card;
+    entry.characterFilter = { names: [card], tags: [], isExclude: false };
+}
+
+/** Native rules are portable, but Scene Archivist's solo and opt-out behavior stays chat-local. */
+export function prepareNativeGroupFilter(entry, group, enabled, currentAvatar) {
+    if (!ownsNativeGroupFilter(entry)) return;
+    if (!enabled || !group) {
+        delete entry.characterFilter;
+        return;
+    }
+    const r = record(entry);
+    const card = normalizeAvatar(currentAvatar?.(r.subjectAvatar) || r.subjectAvatar);
+    if (card && card !== r.nativeGroupCard) entry.characterFilter = { ...entry.characterFilter, names: [card] };
 }
 
 export function sharedPrefix(previous = '', current = '') {

@@ -1,3 +1,5 @@
+import { VERSION } from './version.js';
+
 import * as Core from './core.js';
 import * as M from './memory-engine.js';
 import { same } from './entry-journal.js';
@@ -127,7 +129,7 @@ export function selectionExport(entries, selected, includeSources = false) {
     }
     const records = [...ids].map(id => byId.get(id)).filter(Boolean);
     if (!records.length) throw new Error('Select records in Library first.');
-    return { sceneArchivistSelection: 1, version: '1.1.0', created: M.now(), includesSources: includeSources, entries: M.copy(records),
+    return { sceneArchivistSelection: 1, version: VERSION, created: M.now(), includesSources: includeSources, entries: M.copy(records),
         markdown: records.map(e => `${e.content}\n\n<!-- Record ${M.record(e).id}; source: ${sourceLabel(e)} -->`).join('\n\n---\n\n') };
 }
 

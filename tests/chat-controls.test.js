@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isChatRename, resolveEndpoints, rangeControl, setEndpoint, isSkipped, toggleSkipped, groupMemoryReason } from '../chat-workflows.js';
+import { isChatRename, resolveEndpoints, rangeControl, setEndpoint, isSkipped, toggleSkipped, groupMemoryReason, saveNativeGroupFilter, prepareNativeGroupFilter } from '../chat-workflows.js';
 import { uncoveredArchiveMessages } from '../flow.js';
 import { tokens, makeRecord } from '../memory-engine.js';
 import { estimateTokens } from '../core.js';
@@ -50,6 +50,43 @@ test('group memory scope uses card identity and rejects ambiguous names or alias
     assert.equal(groupMemoryReason({ ...memory, subject: 'Ariel' }, group, true), '');
     assert.equal(groupMemoryReason(memory, group, false), '');
     assert.equal(groupMemoryReason(memory, null, true), '');
+});
+
+test('portable group filters follow the exact card and are removed only from solo or opted-out scans', () => {
+    const group = { speaker: 'Ari v2.png', members: [{ avatar: 'Ari v2.png', name: 'Ari' }, { avatar: 'Bea.png', name: 'Bea' }] };
+    const entry = { sceneArchivist: { type: 'memory', subject: 'Ari' } };
+    saveNativeGroupFilter(entry, group);
+    assert.deepEqual(entry.characterFilter, { names: ['Ari v2'], tags: [], isExclude: false });
+    assert.equal(entry.sceneArchivist.subjectAvatar, 'Ari v2.png');
+
+    const soloScan = { ...entry }, optOutScan = { ...entry }, renamedScan = { ...entry };
+    prepareNativeGroupFilter(soloScan, null, true);
+    prepareNativeGroupFilter(optOutScan, group, false);
+    prepareNativeGroupFilter(renamedScan, group, true, () => 'Ari final.png');
+    assert.equal(soloScan.characterFilter, undefined);
+    assert.equal(optOutScan.characterFilter, undefined);
+    assert.deepEqual(renamedScan.characterFilter.names, ['Ari final']);
+    assert.deepEqual(entry.characterFilter.names, ['Ari v2']);
+    saveNativeGroupFilter(entry, { members: [{ avatar: 'Ari final.png', name: 'Ari' }] }, () => 'Ari final.png');
+    assert.equal(entry.sceneArchivist.subjectAvatar, 'Ari final.png');
+    assert.deepEqual(entry.characterFilter.names, ['Ari final']);
+});
+
+test('hand-edited filters, deliberate removals and ambiguous group subjects are preserved', () => {
+    const members = [{ avatar: 'one.png', name: 'Ari' }, { avatar: 'two.png', name: 'Ari' }];
+    const group = { members };
+    const ambiguous = { sceneArchivist: { type: 'memory', subject: 'Ari' } };
+    saveNativeGroupFilter(ambiguous, group);
+    assert.equal(ambiguous.characterFilter, undefined);
+
+    const manualFilter = { names: ['two'], tags: [], isExclude: true };
+    const custom = { sceneArchivist: { type: 'memory', subjectAvatar: 'one.png', nativeGroupCard: 'one' }, characterFilter: manualFilter };
+    saveNativeGroupFilter(custom, group);
+    prepareNativeGroupFilter(custom, null, false);
+    assert.equal(custom.characterFilter, manualFilter);
+    delete custom.characterFilter;
+    saveNativeGroupFilter(custom, group);
+    assert.equal(custom.characterFilter, undefined);
 });
 
 test('token fallbacks agree and budget for Arabic and CJK', () => {

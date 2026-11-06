@@ -1,4 +1,6 @@
 // Scene Archivist's portable record model. No host imports or network calls.
+import { VERSION } from './version.js';
+
 export const SCHEMA = 1;
 export const copy = value => JSON.parse(JSON.stringify(value));
 export const now = () => new Date().toISOString();
@@ -463,7 +465,7 @@ export function validateWorkflow(input) {
 }
 export function makeBundle(books, metadata, settings) {
     const meta = copy(metadata); delete meta.undo;
-    return { sceneArchivistStory: SCHEMA, version: '1.1.0', created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
+    return { sceneArchivistStory: SCHEMA, version: VERSION, created: now(), books: copy(books), metadata: meta, workflow: workflow(settings) };
 }
 export function parseBundle(raw) {
     const obj = typeof raw === 'string' ? parseJSON(raw) : copy(raw);
