@@ -315,3 +315,27 @@ test('an upgrade keeps a paused job and its draft round-trippable', async () => 
     assert.equal(restored.metadata.workbench.job.cursor, 2);
     assert.ok(Object.values(restored.metadata.workbench.job.draft.books.Story.entries).some(e => M.record(e)?.type === 'unit'));
 });
+
+test('a copied chat with matching integrity gets separate lorebooks', async () => {
+    const f = fixture();
+    f.metadata.workbench.chatIntegrity = 'saved-chat';
+    f.identity.chatMetadata.integrity = 'saved-chat';
+    f.identity.chatId = 'Copied';
+    f.w.h.listChatFiles = async () => ['Main', 'Copied'];
+    await f.w.ensureBranch();
+    assert.equal(f.config.lorebook, 'Story · Copied');
+    assert.equal(f.metadata.workbench.branchLineage.parent, 'Main');
+    assert.deepEqual(Object.keys(f.books), ['Story', 'Story · Copied']);
+});
+
+test('a three-stage estimate sends no request and leaves a prepared draft untouched', async () => {
+    const f = fixture();
+    f.metadata.workbench.job = { status: 'paused', id: 'existing-draft', steps: [{ output: { saved: true } }] };
+    let planned;
+    f.w.extras = { estimate: (steps, flow) => { planned = { steps, flow }; } };
+    await f.w.startFlow('catch-up', null, null, true);
+    assert.deepEqual(planned.steps.map(step => step.kind), ['archive', 'memories', 'tracker-pass']);
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.metadata.workbench.job.id, 'existing-draft');
+    assert.deepEqual(Object.keys(f.books), ['Story']);
+});

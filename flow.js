@@ -1,5 +1,6 @@
 import * as Core from './core.js';
 import * as M from './memory-engine.js';
+import { isSkipped } from './chat-workflows.js';
 
 export function messageRuns(messages) {
     return Core.splitPasses(messages, Infinity);
@@ -31,7 +32,7 @@ export function uncoveredArchiveMessages(chat, metadata) {
     const ranges = Core.archivedRanges(metadata);
     const receipts = ranges.filter(range => range.source?.ranges?.length).map(range => ({ source: range.source }));
     const legacy = ranges.filter(range => !range.source?.ranges?.length);
-    return uncoveredMemoryMessages(chat, receipts).filter(message => !legacy.some(range => message.idx >= range.from && message.idx <= range.to));
+    return uncoveredMemoryMessages(chat, receipts).filter(message => !isSkipped(metadata.rangeControl, chat[message.idx]) && !legacy.some(range => message.idx >= range.from && message.idx <= range.to));
 }
 
 export function archiveAnswer(raw) {

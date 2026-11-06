@@ -2,11 +2,11 @@
 // The log lives in lorebook entries delivered through a World Info outlet ({{outlet::scene_log}} in your preset).
 
 import { extension_settings, getContext } from '../../../extensions.js';
-import { saveSettingsDebounced, generateQuietPrompt, generateRaw, chat_metadata, saveMetadata, main_api, characters, this_chid, eventSource, event_types, getCurrentChatId, getRequestHeaders, getMaxContextTokens, getMaxResponseTokens, Generate } from '../../../../script.js';
+import { saveSettingsDebounced, generateQuietPrompt, generateRaw, chat_metadata, saveMetadata, main_api, characters, this_chid, eventSource, event_types, getCurrentChatId, getRequestHeaders, getMaxContextTokens, getMaxResponseTokens, showMoreMessages, Generate } from '../../../../script.js';
 import { callGenericPopup, Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getCharaFilename, getStringHash, getSanitizedFilename } from '../../../utils.js';
 import { hideChatMessageRange } from '../../../chats.js';
-import { selected_world_info, METADATA_KEY, createWorldInfoEntry, worldInfoCache, updateWorldInfoList, reloadEditor, world_info, world_info_max_recursion_steps } from '../../../world-info.js';
+import { selected_world_info, METADATA_KEY, createWorldInfoEntry, worldInfoCache, updateWorldInfoList, reloadEditor, world_info, world_info_budget, world_info_budget_cap, world_info_recursive, world_info_max_recursion_steps } from '../../../world-info.js';
 import { oai_settings } from '../../../openai.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
 import { power_user } from '../../../power-user.js';
@@ -16,6 +16,8 @@ import * as Core from './core.js';
 import { archiveAnswer, uncoveredArchiveMessages } from './flow.js';
 import * as Memory from './memory-engine.js';
 import { Workbench } from './workbench.js';
+import { ChatControls } from './chat-controls.js';
+import { addReviewHandle } from './review-window.js';
 import { entryReasons } from './vector-diagnostics.js';
 import { createWorldInfoIO } from './world-info-io.js';
 import * as Journal from './entry-journal.js';
@@ -23,7 +25,7 @@ import { validateSharedUnits, placeSharedUnits } from './workflow-tools.js';
 import { DEFAULT_SETTINGS, DEFAULT_PROMPT, DEFAULT_PROMPT_KEY_EVENTS, BUILTIN_PROMPTS, LEGACY_MEMORY_PROMPTS, LEGACY_CONDENSE_PROMPTS, TRACKER_TEMPLATES } from './defaults.js';
 
 const KEY = 'sceneArchivist';
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const LOG = '[Scene Archivist]';
 const UNDO_SUFFIX = ' (Archivist undo)';
 let busy = false;
@@ -31,8 +33,10 @@ let operationChat = null;
 let chatRevision = 0;
 let operationRevision = 0;
 let scopedSettings = null;
+const presetKeys = new Set(Memory.PRESET_KEYS);
 let pendingUndo = null;
 let workbench = null;
+let chatControls = null;
 let archiveSource = null;
 let archiveStep = '';
 let registeredUnitSignature = '';
@@ -118,16 +122,87 @@ function settings() {
     cur.prompt = fixRule(cur.prompt);
     for (const prompt of cur.promptLibrary) prompt.text = fixRule(prompt.text);
     if (!scopedSettings) scopedSettings = new Proxy(cur, {
-        get(target, key) { return CHAT_SETTINGS.has(key) ? chatSettings(target)[key] : target[key]; },
+        get(target, key) {
+            if (CHAT_SETTINGS.has(key)) return chatSettings(target)[key];
+            if (presetKeys.has(key)) {
+                const overrides = activeWorkflow(target)?.settings;
+                if (overrides && Object.hasOwn(overrides, key)) return overrides[key];
+            }
+            return target[key];
+        },
         set(target, key, value) {
             if (CHAT_SETTINGS.has(key)) {
                 chatSettings(target)[key] = value;
                 void saveMetadata().catch(e => console.error(LOG, 'Could not save chat settings', e));
-            } else target[key] = value;
+            } else {
+                const overrides = presetKeys.has(key) ? activeWorkflow(target)?.settings : null;
+                if (overrides) overrides[key] = value;
+                else target[key] = value;
+            }
             return true;
         },
     });
     return scopedSettings;
+}
+
+function profileOwner() {
+    const ctx = getContext(), owner = chatOwner(ctx);
+    return owner === 'card:' ? '' : owner;
+}
+
+function activeWorkflow(global) {
+    const profiles = global.workflowProfiles || [];
+    const owner = profileOwner();
+    return profiles.find(profile => profile.id === meta().workflowProfile)
+        || profiles.find(profile => profile.id === global.workflowBindings?.[owner]);
+}
+
+function profileState() {
+    const global = extension_settings[KEY];
+    const profile = activeWorkflow(global), owner = profileOwner();
+    const chat = meta().workflowProfile, ownerBinding = global.workflowBindings?.[owner];
+    const group = !!getContext().groupId;
+    return { profiles: global.workflowProfiles || [], owner, chat, ownerBinding, group,
+        label: profile ? `🎛️ ${profile.name} · ${profile.id === chat ? 'This chat' : group ? 'This group' : 'This character'}` : '🌐 Global workflow' };
+}
+
+async function bindProfile(scope, id, name) {
+    const global = extension_settings[KEY], owner = profileOwner();
+    const profiles = (global.workflowProfiles ??= []), bindings = (global.workflowBindings ??= {});
+    if (name) {
+        if (profiles.length >= 100) throw new Error('The workflow library can hold up to 100 profiles.');
+        id = Memory.uid();
+        const values = Memory.validateWorkflow(Memory.workflow(settings()));
+        profiles.push({ id, name: name.slice(0, 80), settings: values });
+    } else if (id && !profiles.some(profile => profile.id === id)) throw new Error('That workflow profile is missing.');
+    if (scope === 'chat') {
+        if (id) meta().workflowProfile = id;
+        else delete meta().workflowProfile;
+        await persistMeta();
+    } else if (owner) {
+        if (id) bindings[owner] = id;
+        else delete bindings[owner];
+    }
+    saveSettingsDebounced();
+}
+
+function refreshScopedControls() {
+    const s = settings();
+    const fields = { sa_delivery: 'delivery', sa_outlet: 'outlet', sa_depth: 'depth', sa_role: 'role', sa_keepdays: 'keepDays',
+        sa_mem_days: 'memoryDays', sa_mem_cap: 'memoryCap', sa_mem_prompt: 'memoryPrompt', sa_cond_above: 'condenseAbove', sa_cond_prompt: 'condensePrompt',
+        sa_recall_msgs: 'recallMessages', sa_recall_max: 'recallMax', sa_keepvis: 'keepVisible', sa_tr_days: 'trackerDays' };
+    for (const [id, key] of Object.entries(fields)) $('#' + id).val(s[key]);
+    for (const [id, key] of Object.entries({ sa_mem_auto: 'memoryAuto', sa_tr_auto: 'trackerAuto', sa_recall: 'recall', sa_review: 'review', sa_hide: 'hideArchived' })) $('#' + id).prop('checked', s[key]);
+    $('.sa-d-outlet').toggle(s.delivery === 'outlet');
+    $('.sa-d-depth').toggle(s.delivery === 'depth');
+    Core.registerUnits([s.unit, ...s.promptLibrary.map(prompt => prompt.unit)]);
+    renderPromptLib(); renderTrackers(); void refreshLorebookList();
+}
+
+function memoryPeers() {
+    const activeBooks = [chat_metadata[METADATA_KEY], meta().priorChatLorebook, ...selected_world_info];
+    const candidates = [...Object.keys(extension_settings), ...activeBooks.filter(Boolean)];
+    return [...new Set(candidates.filter(name => /memory[ _-]?books|char[ _-]?memory|character[ _-]?memory|smart[ _-]?memory|qvink|messagesummarize|rememory/i.test(name)))];
 }
 
 function coreOpts() {
@@ -274,6 +349,14 @@ async function checkSetup() {
     } else out.push({ level: 'ok', text: 'No preset change is needed for this delivery mode.' });
     const budget = entries.filter(e => e.constant && !e.ignoreBudget).length;
     if (budget) out.push({ level: 'warn', text: `${budget} always-on entries do not ignore the World Info budget, so they could be dropped if the budget runs out.` });
+    const nativeTokens = Math.round((getMaxContextTokens() || 0) * world_info_budget / 100);
+    const nativeLimit = world_info_budget_cap > 0 ? Math.min(nativeTokens, world_info_budget_cap) : nativeTokens;
+    const vulnerable = entries.filter(entry => !entry.disable && !entry.ignoreBudget);
+    out.push({ level: vulnerable.length && nativeLimit < 1000 ? 'warn' : 'ok',
+        text: `SillyTavern World Info budget · ~${nativeLimit.toLocaleString()} tokens for entries that use it. ${vulnerable.length} archive entries count against it.` });
+    out.push({ level: 'ok', text: world_info_recursive
+        ? `World Info recursion is on${world_info_max_recursion_steps > 0 ? ` · up to ${world_info_max_recursion_steps} loops` : ''}. Scene Archivist entries keep their own recursion rules.`
+        : 'World Info recursion is off. Direct keyword and always-on entries can still load.' });
     if (!s.prompt.trim()) out.push({ level: 'bad', text: 'The archivist prompt is empty.' });
     setStatus(out);
     return out;
@@ -1144,36 +1227,53 @@ async function onEntriesLoaded(groups) {
 }
 
 function mountRangeMarkers(messageIndex) {
-    const messages = messageIndex == null ? $('#chat .mes[mesid]') : $('#chat .mes[mesid]').filter((_, el) => Number(el.getAttribute('mesid')) === Number(messageIndex));
-    for (const message of messages) {
-        const toolbar = message.querySelector('.extraMesButtons, .mes_buttons');
-        if (!toolbar || toolbar.querySelector('.sa-range-marker')) continue;
-        const markers = document.createElement('div');
-        markers.className = 'sa-range-markers';
-        markers.setAttribute('role', 'group');
-        markers.setAttribute('aria-label', 'Scene Archivist range');
-        const caption = document.createElement('span');
-        caption.textContent = 'Range';
-        caption.setAttribute('aria-hidden', 'true');
-        markers.append(caption);
-        for (const [bound, text] of [['rangeFrom', 'Start'], ['rangeTo', 'End']]) {
-            const label = `${text} archive range here`;
-            const marker = document.createElement('button');
-            marker.type = 'button'; marker.className = 'mes_button sa-range-marker'; marker.title = label;
-            marker.setAttribute('aria-label', label); marker.textContent = text;
-            marker.addEventListener('click', event => {
-                event.stopPropagation();
-                const index = Number(message.getAttribute('mesid'));
-                const input = workbench?.root?.querySelector('[data-sa-field="' + bound + '"]');
-                if (!input || !Number.isInteger(index)) return;
-                input.value = index;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-                toastr.info(`Range ${text.toLowerCase()} set to message ${index}. Preview it in Pick your messages.`, 'Scene Archivist');
-            });
-            markers.append(marker);
-        }
-        toolbar.append(markers);
+    chatControls?.mount(messageIndex);
+}
+
+const chatName = name => String(name ?? '').replace(/\.jsonl$/i, '');
+const groupFor = ctx => ctx.groupId == null ? null : ctx.groups?.find(group => String(group.id) === String(ctx.groupId));
+const chatOwner = ctx => ctx.groupId != null ? `group:${ctx.groupId}` : `card:${ctx.characters?.[ctx.characterId]?.avatar ?? ''}`;
+const recentRenames = new Map();
+async function listChatFiles() {
+    const ctx = getContext();
+    const group = groupFor(ctx);
+    if (ctx.groupId != null) return group?.chats?.map(chatName) ?? null;
+    const avatar = ctx.characters?.[ctx.characterId]?.avatar;
+    if (!avatar) return null;
+    try {
+        const response = await fetch('/api/characters/chats', { method: 'POST', headers: getRequestHeaders(),
+            body: JSON.stringify({ avatar_url: avatar, simple: true }) });
+        if (!response.ok) return null;
+        return Object.values(await response.json()).map(item => chatName(item.file_name));
+    } catch { return null; }
+}
+
+function onChatRenamed({ avatarId, groupId, oldFileName, newFileName }) {
+    const owner = groupId != null ? `group:${groupId}` : `card:${avatarId ?? ''}`;
+    const oldName = chatName(oldFileName), newName = chatName(newFileName);
+    if (!oldName || !newName) return;
+    recentRenames.set(JSON.stringify([owner, oldName, newName]), Date.now());
+    if (recentRenames.size > 64) recentRenames.delete(recentRenames.keys().next().value);
+    if (owner === chatOwner(getContext()) && newName === chatName(getCurrentChatId())) return workbench?.refresh();
+}
+
+function currentAvatar(avatar) {
+    const changes = settings().avatarRenames || {};
+    const seen = new Set();
+    while (Object.hasOwn(changes, avatar) && !seen.has(avatar)) {
+        seen.add(avatar);
+        avatar = changes[avatar];
     }
+    return avatar;
+}
+
+function groupSpeaker() {
+    const ctx = getContext(), group = groupFor(ctx);
+    if (!group) return null;
+    return { speaker: characters[this_chid]?.avatar || '', members: (group.members || []).map(avatar => {
+        const card = ctx.characters.find(character => character?.avatar === avatar);
+        return { avatar, name: card?.name || '', aliases: card?.data?.nickname ? [card.data.nickname] : [] };
+    }) };
 }
 
 async function refreshChatUi() {
@@ -1190,7 +1290,12 @@ async function refreshChatUi() {
     await refreshLorebookList();
     await saveMetadata();
     await renderLedger(); await renderView();
-    if (workbench) await workbench.onChatOpened();
+    if (workbench) {
+        refreshScopedControls();
+        workbench.syncOptions();
+        await workbench.onChatOpened();
+    }
+    chatControls?.syncRange();
     mountRangeMarkers();
 }
 
@@ -1409,7 +1514,8 @@ async function testRecall() {
 // ---------------------------------------------------------------- reminder
 
 let lastRemindAt = 0;
-async function onMessageReceived() {
+async function onMessageReceived(index, type) {
+    workbench?.extras?.prompt.receive(index, type);
     try {
         const s = settings();
         const every = Number(s.remindEvery) || 0;
@@ -1543,6 +1649,23 @@ function settingsHtml() {
 }
 
 /** The whole panel in a popup, opened from the wand menu. The same elements are moved in and back, so nothing is duplicated. */
+async function jumpToChatMessage(index, root) {
+    const ctx = getContext(), origin = ctx.chat, identity = getCurrentChatId(), message = ctx.chat[index];
+    if (!message) throw new Error('That message is no longer in this chat.');
+    const first = Number(document.querySelector('#chat .mes[mesid]')?.getAttribute('mesid'));
+    if (Number.isInteger(first) && index < first) await showMoreMessages(first - index);
+    if (origin !== getContext().chat || identity !== getCurrentChatId() || origin[index] !== message) return;
+    const target = document.querySelector(`#chat .mes[mesid="${index}"]`);
+    if (!target) throw new Error('Load the earlier messages in this chat to jump there.');
+    root.closest('dialog')?.querySelector('.popup-button-ok')?.click();
+    for (const panel of document.querySelectorAll('dialog[open] :is(.sa-timeline, .sa-popwrap)')) {
+        panel.closest('dialog')?.querySelector('.popup-button-ok')?.click();
+    }
+    target.scrollIntoView({ block: 'center', behavior: 'auto' });
+    target.classList.add('sa-chat-jump');
+    setTimeout(() => target.classList.remove('sa-chat-jump'), 2400);
+}
+
 async function openPanelPopup() {
     const panel = document.querySelector('.sa-panel');
     if (!panel || panel.dataset.popped) return;
@@ -1556,6 +1679,7 @@ async function openPanelPopup() {
         const popup = new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true });
         const shown = popup.show();
         workbench?.renderLibrary();
+        workbench?.extras?.render();
         workbench?.layout?.help.refresh(panel);
         await shown;
     } finally { home.append(panel); delete panel.dataset.popped; }
@@ -1643,7 +1767,10 @@ jQuery(async () => {
         else $('body').append(`<div id="sa_holder" style="display:none">${panelHtml()}</div>`);
         bindUi();
         workbench = new Workbench({
-            settings, meta, context: () => ({ ...getContext(), chatId: getCurrentChatId(), characterId: this_chid }),
+            settings, meta, groupSpeaker, currentAvatar, listChatFiles, checkSetup, profileState, bindProfile, memoryPeers, attachArchive: attachToChat,
+            wasRenamed: (from, to) => Date.now() - (recentRenames.get(JSON.stringify([chatOwner(getContext()), chatName(from), chatName(to)])) || 0) < 60000,
+            tokenizerKey: () => JSON.stringify([main_api, getContext().getCurrentModel?.(), power_user.tokenizer, oai_settings.chat_completion_source]),
+            openPanel: openPanelPopup, jumpToMessage: jumpToChatMessage, context: () => ({ ...getContext(), chatId: getCurrentChatId(), characterId: this_chid }),
             saveMeta: persistMeta, saveSettings: saveSettingsDebounced,
             worldNames: lorebookNames, load: readFresh, save: saveConfirmed,
             createBook: async name => { if (!getContext().getWorldInfoNames().includes(name) && !(await createBookConfirmed(name))) throw new Error('Could not create ' + name); await updateWorldInfoList(); },
@@ -1663,18 +1790,25 @@ jQuery(async () => {
             ensureArchive: ensureLorebook,
             attach: async name => { assignChatLorebook(name); await saveMetadata(); $('.chat_lorebook_button').addClass('world_set'); },
             trackers: () => runTrackers(null, true),
-            confirm: async (root, opts = {}) => { workbench?.layout?.help.observe(root); return (await new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true, ...opts }).show()) === POPUP_RESULT.AFFIRMATIVE; },
+            confirm: async (root, opts = {}) => {
+                workbench?.layout?.help.observe(root);
+                const popup = new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: '💾 Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true, ...opts });
+                addReviewHandle(root, popup.dlg);
+                return (await popup.show()) === POPUP_RESULT.AFFIRMATIVE;
+            },
             confirmText: async (text, opts = {}) => { const result = await callGenericPopup(esc(text), POPUP_TYPE.CONFIRM, '', opts); return result === true || result === POPUP_RESULT.AFFIRMATIVE; },
             show: (root, opts = {}) => { workbench?.layout?.help.observe(root); return new Popup(root, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true, ...opts }).show(); },
             notify: (message, kind = 'info') => toastr[kind](message, 'Scene Archivist'),
             offerRecap: callback => toastr.info('Welcome back. Click for a dated recap of this story.', 'Scene Archivist', { timeOut: 20000, onclick: callback }),
-            download: downloadFile, rebindSettings: () => { renderPromptLib(); renderTrackers(); void refreshLorebookList(); },
+            download: downloadFile, rebindSettings: refreshScopedControls,
             vectorSettings: () => extension_settings.vectors, vectorHash: getStringHash, requestHeaders: getRequestHeaders,
             scanSupported: !!event_types.WORLDINFO_SCAN_DONE,
             scanLimit: () => world_info_max_recursion_steps,
             forceEntries: entries => eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, entries),
         });
         workbench.mount(document.querySelector('.sa-panel'));
+        chatControls = new ChatControls(workbench);
+        workbench.chatControls = chatControls;
         migrateStoryBooks();
         await refreshChatUi();
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -1700,21 +1834,39 @@ jQuery(async () => {
         eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
         eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
         eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
+        for (const event of [event_types.CHAT_COMPLETION_PROMPT_READY, event_types.GENERATE_AFTER_COMBINE_PROMPTS].filter(Boolean)) {
+            eventSource.on(event, data => workbench.extras.prompt.promptReady(data));
+        }
         eventSource.on(event_types.WORLD_INFO_ACTIVATED, onWorldInfoActivated);
         eventSource.on(event_types.WORLDINFO_FORCE_ACTIVATE, entries => workbench.onVectorActivated(entries));
         if (event_types.WORLDINFO_SCAN_DONE) eventSource.on(event_types.WORLDINFO_SCAN_DONE, scan => workbench.onWorldInfoScan(scan));
-        $('#extensionsMenu').append(`<div id="sa_wand" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-book-journal-whills extensionsMenuExtensionButton"></div><span>Archive scene</span></div>`);
+        $('#extensionsMenu').append(`<div id="sa_wand" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-book-journal-whills extensionsMenuExtensionButton"></div><span>✨ Summarize new messages</span></div>`);
         $('#sa_wand').on('click', () => runSummarize());
-        $('#extensionsMenu').append(`<div id="sa_wand_panel" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-folder-tree extensionsMenuExtensionButton"></div><span>Scene Archivist</span></div>`);
+        $('#extensionsMenu').append(`<div id="sa_wand_panel" class="list-group-item flex-container flexGap5"><div class="fa-solid fa-folder-tree extensionsMenuExtensionButton"></div><span>📚 Scene Archivist</span></div>`);
         $('#sa_wand_panel').on('click', openPanelPopup);
-        eventSource.on(event_types.CHAT_CHANGED, () => { chatRevision++; return refreshChatUi(); });
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+            chatRevision++; chatControls?.close();
+            return refreshChatUi().catch(error => toastr.warning(error.message, 'Scene Archivist'));
+        });
+        if (event_types.CHAT_RENAMED) eventSource.on(event_types.CHAT_RENAMED, onChatRenamed);
+        if (event_types.CHARACTER_RENAMED) eventSource.on(event_types.CHARACTER_RENAMED, (previous, next) => {
+            const s = settings();
+            (s.avatarRenames ??= {})[previous] = next;
+            const bindings = s.workflowBindings;
+            if (bindings?.[`card:${previous}`]) {
+                bindings[`card:${next}`] = bindings[`card:${previous}`];
+                delete bindings[`card:${previous}`];
+            }
+            saveSettingsDebounced();
+        });
         for (const event of [event_types.USER_MESSAGE_RENDERED, event_types.CHARACTER_MESSAGE_RENDERED].filter(Boolean)) eventSource.on(event, mountRangeMarkers);
         let updateTimer;
         for (const event of [event_types.MESSAGE_EDITED, event_types.MESSAGE_DELETED, event_types.MESSAGE_SWIPED].filter(Boolean)) eventSource.on(event, () => {
             clearTimeout(updateTimer);
             updateTimer = setTimeout(() => {
+                chatControls?.syncRange();
                 mountRangeMarkers();
-                if (!busy) workbench.renderFlow();
+                if (!busy) { workbench.renderFlow(); workbench.extras.render(); }
             }, 180);
         });
         console.log(LOG, 'loaded');

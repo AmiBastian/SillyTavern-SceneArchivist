@@ -86,11 +86,19 @@ async function protect(w) {
 }
 
 async function repair(w, selectedOnly) {
+    const job = w.liveState().job;
+    if (job && !['done', 'canceled'].includes(job.status)) {
+        const note = 'Your existing job can keep its prepared results. Open its review or retry from the job panel before starting a separate repair.';
+        if (await w.h.confirmText(note, { okButton: 'Show my job', cancelButton: 'Close' })) {
+            w.root.querySelector('#sa-jobs')?.scrollIntoView({ block: 'nearest' });
+        }
+        return;
+    }
     await w.refresh();const roots=selectedOnly?[...w.selected]:w.entries.filter(e=>M.record(e)?.status==='stale').map(e=>M.record(e).id);
     if(!roots.length){
         const guide=document.createElement('div');guide.className='sa-review';
-        guide.innerHTML='<h3>Find records that need repair</h3><p>A record needs review when its original messages or a linked source changed. Repair rebuilds its derived memories and recaps after the source is corrected.</p><p>Open Library and choose Needs review to locate affected records. Use Inspect / edit to correct a source, or Rebuild and review to regenerate it from its evidence. Then select the corrected source and choose Repair selected records and dependents.</p><p>For a normal character update from recent chat events, use Characters → Character memory browser → AI update.</p>';
-        if(await w.h.confirm(guide,{okButton:'Open Library: Needs review',cancelButton:'Close',large:false})){w.showTab('library');w.renderLibrary();}
+        guide.innerHTML='<h3>Find records that need repair</h3><p>A record needs review when its original messages or a linked source changed. Repair rebuilds its derived memories and recaps after the source is corrected.</p><p>Open Library and select a record you want to rebuild. Inspect its source first, then use Repair selected records and dependents if the linked records also need a rewrite.</p><p>For a normal character update from recent chat events, use Characters → Character memory browser → AI update.</p>';
+        if(await w.h.confirm(guide,{okButton:'📚 Open Library',cancelButton:'Close',large:false})){w.showTab('library');w.renderLibrary();}
         return;
     }
     const ordered=T.repairOrder(w.entries,roots);if(!ordered.length)return w.h.notify('No dependent records need repair.','info');

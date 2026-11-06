@@ -1,0 +1,82 @@
+// Chat-local controls and prompt bookkeeping. These helpers also run without SillyTavern.
+import { uid } from './memory-engine.js';
+
+const messageKey = 'sceneArchivistMessageId';
+
+export function anchorMessage(message) {
+    if (!message) throw new Error('That message is no longer in this chat.');
+    // SillyTavern replaces extra when swiping. The message itself keeps its ID.
+    return (message[messageKey] ||= uid());
+}
+
+export function anchorIndex(chat, anchor) {
+    if (!anchor) return null;
+    const index = chat.findIndex(message => message[messageKey] === anchor);
+    return index === -1 ? null : index;
+}
+
+export function rangeControl(metadata) {
+    return (metadata.rangeControl ??= { endpoints: {}, skipped: [] });
+}
+
+export function setEndpoint(state, chat, endpoint, index) {
+    if (!['from', 'to'].includes(endpoint)) throw new Error('Choose Start or End.');
+    state.endpoints[endpoint] = anchorMessage(chat[index]);
+    return state.endpoints[endpoint];
+}
+
+export function resolveEndpoints(state, chat) {
+    return Object.fromEntries(['from', 'to'].map(endpoint => {
+        const anchor = state?.endpoints?.[endpoint];
+        const index = anchorIndex(chat, anchor);
+        return [endpoint, { index, missing: !!anchor && index === null }];
+    }));
+}
+
+export function toggleSkipped(state, message) {
+    const id = anchorMessage(message);
+    if (state.skipped.includes(id)) {
+        state.skipped = state.skipped.filter(item => item !== id);
+        return false;
+    }
+    state.skipped.push(id);
+    return true;
+}
+
+export function isSkipped(state, message) {
+    const anchor = message?.[messageKey];
+    return !!anchor && !!state?.skipped?.includes(anchor);
+}
+
+export async function isChatRename({ previous, current, parent, integrity, previousIntegrity, listFiles }) {
+    if (!previous || previous === current || parent === previous || !integrity || integrity !== previousIntegrity) return false;
+    if (!listFiles) return true;
+    const files = await listFiles();
+    if (!Array.isArray(files)) throw new Error('Could not check the previous chat name. Open Scene Archivist again to retry.');
+    return !files.includes(previous.replace(/\.jsonl$/i, ''));
+}
+
+const normalizeName = value => String(value ?? '').trim().normalize('NFKC').toLowerCase();
+const normalizeAvatar = value => String(value ?? '').replace(/\.png$/i, '');
+
+export function memorySubject(record, members) {
+    if (record.subjectAvatar) return members.find(member => normalizeAvatar(member.avatar) === normalizeAvatar(record.subjectAvatar));
+    const subject = normalizeName(record.subject || record.character);
+    if (!subject) return null;
+    const matches = members.filter(member => [member.name, ...(member.aliases || [])].some(name => [subject, ...(record.aliases || []).map(normalizeName)].includes(normalizeName(name))));
+    return matches.length === 1 ? matches[0] : null;
+}
+
+export function groupMemoryReason(record, group, enabled) {
+    if (!enabled || !group || record?.type !== 'memory') return '';
+    const subject = memorySubject(record, group.members);
+    if (!subject || !group.speaker) return 'No unique character card for this memory';
+    return normalizeAvatar(subject.avatar) === normalizeAvatar(group.speaker) ? '' : 'Belongs to another group character';
+}
+
+export function sharedPrefix(previous = '', current = '') {
+    let end = 0;
+    const limit = Math.min(previous.length, current.length);
+    while (end < limit && previous[end] === current[end]) end++;
+    return current.slice(0, end);
+}

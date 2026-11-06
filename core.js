@@ -1,5 +1,7 @@
 // Scene Archivist: pure logic (no SillyTavern imports), so it can be tested in Node.
 
+import { estimateTokens } from './token-estimate.js';
+
 // The log can count its units as Days, Episodes, Chapters and so on. Headings keep whatever word the log uses.
 export const UNITS = ['Day', 'Episode', 'Chapter', 'Session', 'Act', 'Part', 'Week', 'Scene'];
 let UNIT_ALT = UNITS.join('|');
@@ -963,7 +965,7 @@ export function buildRecapRequest(recapPrompt, data, n = 3) {
 
 // ---------------------------------------------------------------- Transcripts, passes and the archive ledger
 
-export const estimateTokens = (s) => Math.ceil(String(s ?? '').length / 3.6);
+export { estimateTokens };
 
 /** Messages: [{ idx, name, text }]. One line per message so the model can refer to message numbers. */
 export function buildTranscript(msgs) {

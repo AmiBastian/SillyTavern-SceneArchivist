@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0 · November 6, 2026
+
+- Added a Story overview with coverage, recent saves and a job status chip. **Archive thoroughly** prepares summaries, character memories and enabled trackers for one review.
+- Replaced the chat-header Range strip with a small book menu. Pick stable endpoints, skip a message while archiving, save a single memory or inspect a reply’s memory trail.
+- Added optional scene-break suggestions, request and token estimates, character timelines and Markdown memory exports.
+- Scoped group memories to the speaking character card. Native chat renames keep their books, and copied chat files get a separate archive.
+- Reorganized the workspace into Story, Archive, Characters, Library, Maintain, Prompt and Settings. Essentials keeps the first four visible. Ledger and Tidy sit together, and condensed text controls live in one place.
+- Added per-swipe World Info traces, setup and model checks, scoped workflow profiles, thread pinning and reviewed lorebook clips.
+- Added experimental cache-friendly delivery and model-initiated memory lookups. Both start off.
+- Improved fallback token estimates for Arabic, CJK and emoji, and added a movable desktop review window.
+- Updated the guide, screenshots and range, diary and evidence walkthroughs. Added tests for copied chats, stable range picks, group memory isolation, request estimates and prompt traces.
+
 ## 1.1.0 · November 5, 2026
 
 - Archive, character memories, and enabled trackers can run as three requests with one review. Keywords travel with archive generation. Requests can be split explicitly when the configured context is too small.

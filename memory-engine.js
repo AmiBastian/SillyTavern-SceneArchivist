@@ -4,7 +4,8 @@ export const copy = value => JSON.parse(JSON.stringify(value));
 export const now = () => new Date().toISOString();
 export const uid = () => globalThis.crypto?.randomUUID?.() ?? `sa-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 export const unique = list => [...new Set(list.filter(Boolean).map(String))];
-export const tokens = text => Math.ceil(String(text ?? '').length / 3.6);
+import { estimateTokens as tokens } from './token-estimate.js';
+export { tokens };
 export const KNOWLEDGE = ['knows', 'suspects', 'false-belief', 'unaware', 'hiding'];
 export const TYPES = ['unit', 'recap', 'knowledge', 'fact', 'thread', 'clip', 'diary', 'state', 'tracker', 'memory', 'opening', 'closing', 'epoch', 'legend'];
 export const STATUSES = ['current', 'resolved', 'superseded', 'stale'];
@@ -431,23 +432,27 @@ export function tidyMemory(items, { removeExact = false } = {}) {
 export const memoryIdentity = (it, subject = '') => hash([subject.toLocaleLowerCase(), it.a, it.b, it.date, it.text.trim().toLocaleLowerCase()]);
 
 // Portable workflow settings deliberately exclude connection profiles, credentials and destination names.
-export const PRESET_KEYS = ['unit', 'keepDays', 'archiveMode', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'condenseAbove', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt', 'workbench'];
+export const PRESET_KEYS = ['delivery', 'outlet', 'depth', 'role', 'unit', 'keepDays', 'archiveMode', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'condenseAbove', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt', 'workbench'];
 export const workflow = settings => Object.fromEntries(PRESET_KEYS.filter(k => k in settings).map(k => [k, copy(settings[k])]));
 export function validateWorkflow(input) {
     const w = workflow(input || {});
-    const numbers = ['keepDays', 'keepVisible', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'condenseAbove', 'trackerDays'];
+    const numbers = ['depth', 'role', 'keepDays', 'keepVisible', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'condenseAbove', 'trackerDays'];
     const booleans = ['hideArchived', 'review', 'recall', 'memoryAuto', 'trackerAuto'];
-    const strings = ['unit', 'archiveMode', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt'];
+    const strings = ['delivery', 'outlet', 'unit', 'archiveMode', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'askPrompt', 'recapPrompt'];
     for (const key of numbers) if (key in w && (!Number.isFinite(w[key]) || w[key] < 0 || w[key] > 1000000)) throw new Error(`Invalid workflow number: ${key}.`);
     for (const key of booleans) if (key in w && typeof w[key] !== 'boolean') throw new Error(`Invalid workflow toggle: ${key}.`);
     for (const key of strings) if (key in w && typeof w[key] !== 'string') throw new Error(`Invalid workflow text: ${key}.`);
+    if ('delivery' in w && !['outlet', 'depth', 'before', 'after'].includes(w.delivery)) throw new Error('Invalid story prompt delivery.');
+    if ('role' in w && ![0, 1, 2].includes(w.role)) throw new Error('Invalid prompt role.');
     if ('promptLibrary' in w && (!Array.isArray(w.promptLibrary) || w.promptLibrary.length > 500 || w.promptLibrary.some(p => !p || typeof p.id !== 'string' || typeof p.name !== 'string' || typeof p.text !== 'string' || (p.unit != null && typeof p.unit !== 'string')))) throw new Error('The workflow prompt library is invalid.');
     if ('trackers' in w && (!Array.isArray(w.trackers) || w.trackers.some(t => !t || typeof t.id !== 'string' || typeof t.name !== 'string' || typeof t.prompt !== 'string' || typeof t.enabled !== 'boolean'))) throw new Error('The workflow trackers are invalid.');
     if ('workbench' in w) {
         if (!w.workbench || Array.isArray(w.workbench) || typeof w.workbench !== 'object') throw new Error('Invalid memory workflow settings.');
-        const allowed = ['budget', 'requestBudget', 'modelAwareRequests', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview', 'branchMode', 'continuityRecent'];
+        const allowed = ['budget', 'requestBudget', 'modelAwareRequests', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview', 'branchMode', 'continuityRecent', 'groupMemoryScope', 'messageBadges', 'cacheLayers', 'memoryTools'];
         w.workbench = Object.fromEntries(Object.entries(w.workbench).filter(([k]) => allowed.includes(k)));
         for (const [k, v] of Object.entries(w.workbench)) if (!['number', 'string', 'boolean'].includes(typeof v) || (typeof v === 'number' && (!Number.isFinite(v) || v < 0 || v > 1000000))) throw new Error(`Invalid memory workflow value: ${k}.`);
+        for (const key of ['groupMemoryScope', 'cacheLayers', 'memoryTools']) if (key in w.workbench && typeof w.workbench[key] !== 'boolean') throw new Error(`Invalid workflow toggle: ${key}.`);
+        if ('messageBadges' in w.workbench && !['desktop', 'all', 'off'].includes(w.workbench.messageBadges)) throw new Error('Invalid status badge preference.');
         if ('modelAwareRequests' in w.workbench && typeof w.workbench.modelAwareRequests !== 'boolean') throw new Error('Invalid request budget migration flag.');
         if ('branchMode' in w.workbench && !['inherit','fresh','prune'].includes(w.workbench.branchMode)) throw new Error('Invalid branch history mode.');
         if ('continuityRecent' in w.workbench && (!Number.isInteger(w.workbench.continuityRecent) || w.workbench.continuityRecent < 1 || w.workbench.continuityRecent > 1000)) throw new Error('Recent continuity records must be a whole number from 1 to 1000.');
