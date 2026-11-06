@@ -619,41 +619,6 @@ export function parseRecallResponse(text, index, maxPicks) {
 
 // ---------------------------------------------------------------- Character memories
 
-/**
- * The next Days to process, OLDEST first: everything after `progress`, or an explicit fromDay..toDay range.
- * At most `maxDays` per call. Also returns each Day's calendar date so memories can be dated.
- */
-export function selectMemorySource(data, progress = 0, maxDays = 3, { fromDay = null, toDay = null } = {}) {
-    const m = managed(data);
-    const lo = fromDay != null && fromDay !== '' ? Number(fromDay) : Number(progress || 0) + 1;
-    const hi = toDay != null && toDay !== '' ? Number(toDay) : Infinity;
-    const days = m.filter(x => x.cl.type === 'day' && (x.cl.dayNum ?? 0) >= lo && (x.cl.dayNum ?? 0) <= hi)
-        .sort((a, b) => a.cl.dayNum - b.cl.dayNum);
-    const picked = days.slice(0, Math.max(1, Number(maxDays) || 3));
-    const ctx = m.filter(x => x.cl.type === 'state' && ['Relationship State', 'Character State'].includes(x.cl.name));
-    const dates = {};
-    for (const x of m.filter(y => y.cl.type === 'day' && y.cl.dayNum != null)) {
-        const h = String(x.e.content ?? '').match(new RegExp('^##[ \\t]*\\u25ba?[ \\t]*(?:' + UNIT_ALT + ')[ \\t]+\\d+[ \\t]*[\\u2014\\u2013-][ \\t]*(.+?)[ \\t]*$', 'm'));
-        if (h) dates[x.cl.dayNum] = h[1].replace(/\s*\S*\u{1F519}.*$/u, '').trim();
-    }
-    // Days without an entry of their own (the log skips quiet days) get their date from the Story Epoch line: "Day 1 = Tuesday, October 6, 2026".
-    const ep = m.find(x => x.cl.type === 'epoch');
-    const er = ep && String(ep.e.content).match(/Day\s*1\s*=\s*([^\n]*?\d{4})/);
-    const t0 = er ? Date.parse(er[1].replace(/[*_`]/g, '').trim() + ' UTC') : NaN;
-    if (!Number.isNaN(t0) && m.filter(x => x.cl.type === 'day').every(x => /^\s*## ► Day\s/i.test(x.e.content))) {
-        const top = Math.max(0, ...m.filter(y => y.cl.type === 'day').map(y => y.cl.dayNum ?? 0));
-        for (let n = 1; n <= top; n++) if (!dates[n]) dates[n] = new Date(t0 + (n - 1) * 86400000).toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
-    }
-    return {
-        dates,
-        remaining: days.length - picked.length,
-        days: picked.map(x => x.cl.dayNum),
-        lastDay: picked.length ? Math.max(...picked.map(x => x.cl.dayNum ?? 0)) : 0,
-        text: picked.map(x => x.e.content.trim()).join('\n\n'),
-        context: ctx.map(x => x.e.content.trim()).join('\n\n'),
-    };
-}
-
 // A memory entry is stored grouped by date:
 //   ## ► Memories — Name
 //
@@ -825,52 +790,20 @@ export function memoryEntries(data, unit = 'Day') {
     }));
 }
 
-export function buildCondenseRequest(promptText, name, bullets) {
-    return { system: String(promptText), prompt: `CHARACTER: ${name}\n\nMEMORIES (${bullets.length})\n${bullets.map(b => '- ' + b).join('\n')}\n\nReturn only the JSON.` };
-}
-
-/** Returns { bullets, suspicious } or null when the reply is unusable or would make the list longer. */
-export function parseCondenseResponse(text, before) {
+// Return the parsed bullets, or null for an unusable reply.
+export function parseCondenseResponse(text) {
     const m = String(text ?? '').match(/\{[\s\S]*\}/);
     if (!m) return null;
     let obj; try { obj = JSON.parse(m[0]); } catch { return null; }
     if (!Array.isArray(obj.memories)) return null;
     const bullets = obj.memories.map(x => String(x).replace(/\s+/g, ' ').replace(/^[-*]\s*/, '').trim()).filter(x => x.length >= 8 && !isPlaceholderText(x));
     if (!bullets.length) return null;
-    return { bullets, suspicious: bullets.length * 3 < before.length };
+    return { bullets };
 }
 
-/** Replace the memories of one entry with the condensed list, regrouped by date. */
-export function applyCondense(data, uid, bullets, { dates = {}, unit = 'Day' } = {}) {
-    const e = data.entries?.[uid];
-    if (!e) return false;
-    if (e.sceneArchivist?.protection?.locked || e.sceneArchivist?.protection?.exact || e.sceneArchivist?.protection?.detailed) return false;
-    const name = (String(e.content).match(/^## ► Memories — (.+)$/m) || [, ''])[1].trim();
-    e.content = memoryDocText(name, itemsFromFlat(bullets, dates), dates, unit);
-    return true;
-}
-
-
-// ---------------------------------------------------------------- Trackers, ask the archive, recap
-
-/** The newest `n` Day entries plus the state sections for background. */
-export function latestUnits(data, n = 3) {
-    const m = managed(data);
-    const days = m.filter(x => x.cl.type === 'day').sort((a, b) => (a.cl.dayNum ?? 0) - (b.cl.dayNum ?? 0)).slice(-Math.max(1, Number(n) || 3));
-    return {
-        days: days.map(x => x.cl.dayNum),
-        text: days.map(x => x.e.content.trim()).join('\n\n'),
-        context: m.filter(x => x.cl.type === 'state').map(x => x.e.content.trim()).join('\n\n'),
-    };
-}
+// ---------------------------------------------------------------- Trackers
 
 export const cleanTrackerText = (t) => String(t ?? '').replace(/^\s*```[a-z]*\s*\n?/i, '').replace(/\n?```\s*$/, '').replace(/^## ► Tracker.*\n+/i, '').trim();
-
-/** Body text of an existing tracker entry (without its heading). */
-export function trackerText(data, name) {
-    const x = managed(data).find(y => y.cl.type === 'tracker' && y.cl.name.toLowerCase() === String(name).toLowerCase());
-    return x ? x.e.content.replace(/^\s*## ► Tracker — .*\n+/, '').trim() : '';
-}
 
 export function buildTrackerRequest(tracker, src, previous, userName = 'the user') {
     return {
@@ -878,30 +811,6 @@ export function buildTrackerRequest(tracker, src, previous, userName = 'the user
         prompt: `TRACKER UPDATE: ${tracker.name}\n\nPREVIOUS VERSION\n${previous || '(none yet)'}\n\n---\nLATEST LOG\n${src.text}\n\n---\nBACKGROUND\n${src.context || '(none)'}\n\n---\nWrite the updated tracker now.`,
     };
 }
-
-/** Create or replace one tracker entry. Trackers are always on and sit between the memories and the states. */
-export function applyTracker(data, name, text, opts, makeEntry) {
-    data.entries ??= {};
-    const rep = { action: '', converted: convertDelivery(data, opts) };
-    const content = `\n## ► Tracker — ${name}\n\n${cleanTrackerText(text)}\n`;
-    const ex = managed(data).find(x => x.cl.type === 'tracker' && x.cl.name.toLowerCase() === String(name).toLowerCase());
-    if (ex?.e.sceneArchivist?.protection?.locked || ex?.e.sceneArchivist?.protection?.exact) return { action: 'protected', converted: 0 };
-    if (ex) { ex.e.content = content; rep.action = 'updated'; return rep; }
-    const e = newEntry(data, makeEntry);
-    applyDefaults(e, opts, true);
-    e.content = content;
-    e.comment = `📌| Tracker · ${name}`;
-    e.key = []; e.keysecondary = [];
-    reorder(data, [e.uid], opts);
-    rep.action = 'created';
-    return rep;
-}
-
-export function buildRecapRequest(recapPrompt, data, n = 3) {
-    const src = latestUnits(data, n);
-    return { days: src.days, system: String(recapPrompt), prompt: `PREVIOUSLY ON: recap\n\nSCENE LOG EXCERPT\n${src.text}\n\n---\nBACKGROUND\n${src.context || '(none)'}\n\n---\nWrite the recap now.` };
-}
-
 
 // ---------------------------------------------------------------- Transcripts, passes and the archive ledger
 

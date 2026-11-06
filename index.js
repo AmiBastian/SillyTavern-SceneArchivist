@@ -98,7 +98,6 @@ function chatSettings(global) {
 }
 
 let recallBusy = false;
-const held = new Map(); // uid -> messages left that Recall keeps this entry loaded (keeps the prompt steady between turns)
 
 function settings() {
     // Mutate in place: handlers keep a reference to this object, so it must never be replaced.
@@ -859,10 +858,7 @@ async function onWorldInfoActivated(entries) {
             const tokens = await getTokenCountAsync(String(e.content ?? ''));
             const id = Memory.record(workbench?.findRetrievedEntry(e) || e)?.id;
             const candidate = candidates.get(id), triggers = [...(candidate?.reasons || [])];
-            if (!candidate) {
-                if (e.constant) triggers.push('always on');
-                if (held.has(e.uid) && e.world === settings().lorebook) triggers.push('recall');
-            }
+            if (!candidate && e.constant) triggers.push('always on');
             const evidence = triggers.length ? entryReasons({ ...candidate, reasons: triggers }) : 'World Info activation';
             const reason = candidate && !selected.has(id) ? 'Outside managed selection: ' + evidence : evidence;
             items.push({ title: e.comment || cl.heading || cl.type, tokens, reason, triggers, type: cl.type });
@@ -885,87 +881,9 @@ async function renderView() {
 
 // ---------------------------------------------------------------- condense memories
 
-async function showCondenseReview(results) {
-    const root = document.createElement('div');
-    root.className = 'sa-review';
-    root.innerHTML = `<h3>Condense memories</h3><div class="sa-note">${results.length} ${results.length === 1 ? 'character' : 'characters'}. Edit the new list if you like, one memory per line. Untick a character to leave them as they are. The original is shown below each list.</div>`;
-    const refs = [];
-    for (const r of results) {
-        const d = document.createElement('details'); d.open = true;
-        d.innerHTML = `<summary><input type="checkbox" checked><b>${esc(r.name)}</b><span class="sa-badge">${r.before.length} to ${r.bullets.length} memories in ${esc(r.book)}</span></summary>`;
-        if (r.suspicious) d.insertAdjacentHTML('beforeend', '<div class="sa-warnline">▲ This cuts the list a lot. Check that nothing important was lost.</div>');
-        d.insertAdjacentHTML('beforeend', '<textarea class="text_pole" rows="8"></textarea><details><summary>Original</summary><textarea class="text_pole sa-orig" rows="8" readonly></textarea></details>');
-        d.querySelector('textarea').value = r.bullets.join('\n');
-        d.querySelector('.sa-orig').value = r.before.join('\n');
-        root.append(d); refs.push({ r, d });
-    }
-    const popup = new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true });
-    if ((await popup.show()) !== POPUP_RESULT.AFFIRMATIVE) return false;
-    for (const { r, d } of refs) { r.include = d.querySelector('input[type=checkbox]').checked; r.bullets = d.querySelector('textarea').value.split('\n').map(x => x.replace(/^[-*]\s*/, '').trim()).filter(Boolean); }
-    return true;
-}
-
-async function runCondense(quiet = false) {
-    if (workbench) { try { return await workbench.startMemoryCondense(quiet); } catch (e) { toastr.error(e?.message ?? e); return; } }
-    if (busy) { toastr.info('The archivist is already running.'); return; }
-    const s = settings();
-    if (!s.lorebook) { toastr.warning('Pick or create a lorebook first.'); return; }
-    busy = true; operationChat = getContext().chat; operationRevision = chatRevision;
-    $('.sa-cond-run').prop('disabled', true);
-    let note = null;
-    try {
-        const names = getContext().getWorldInfoNames();
-        const books = new Set([s.lorebook]);
-        if (names.includes(memoryBookName())) books.add(memoryBookName()); // the separate memories lorebook
-        for (const book of Object.keys(s.storyBooks?.[s.lorebook] ?? {})) if (names.includes(book)) books.add(book);
-        const above = Math.max(2, Number(s.condenseAbove) || 12);
-        const archiveData = await readFresh(s.lorebook);
-        const dates = archiveData ? Core.selectMemorySource(archiveData, 0, 1).dates : {}; // models tend to drop the dates, so they are put back from the log
-        const jobs = [];
-        for (const book of books) {
-            const data = await readFresh(book); if (!data) continue;
-            for (const m of Core.memoryEntries(storyMemoryData(data, book), s.unit || 'Day')) if (m.bullets.length > above) jobs.push({ book, data, ...m });
-        }
-        if (!jobs.length) { if (quiet === true) return; toastr.info(`No character has more than ${above} memories in ${[...books].map(b => '"' + b + '"').join(', ')}. Lower "Condense above" to try a shorter list.`); return; }
-        note = toastr.info(`Condensing ${jobs.length} ${jobs.length === 1 ? 'list' : 'lists'}.`, 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
-        const results = [];
-        for (const j of jobs) {
-            try {
-                const req = Core.buildCondenseRequest(Core.unitize(s.condensePrompt, s.unit), j.name, j.bullets);
-                const res = (await sideJson({ prompt: req.prompt, system: req.system, maxTokens: 2500 }, t => Core.parseCondenseResponse(t, j.bullets), 'condense')).value;
-                if (res) results.push({ ...j, before: j.bullets, bullets: res.bullets, suspicious: res.suspicious, include: true });
-                else console.warn(LOG, 'unusable condense reply for', j.name);
-            } catch (e) { console.warn(LOG, 'condense failed for', j.name, e); }
-        }
-        toastr.clear(note); note = null;
-        if (!results.length) { toastr.warning('The model did not return a usable shorter list for anyone.'); return; }
-        if (!(await showCondenseReview(results))) { toastr.info('Cancelled. Nothing was changed.'); return; }
-        const touched = [];
-        const byBook = new Map();
-        for (const r of results) { if (!r.include || !r.bullets.length) continue; if (!byBook.has(r.book)) byBook.set(r.book, []); byBook.get(r.book).push(r); }
-        let n = 0;
-        beginUndoWrite();
-        for (const [book, list] of byBook) {
-            assertCurrentChat();
-            const data = await readFresh(book);
-            if (!data) throw new Error(`Could not reload ${book}.`);
-            await saveUndoSnapshot(book, data);
-            for (const r of list) if (Core.applyCondense(data, r.uid, r.bullets, { dates, unit: s.unit || 'Day' })) n++;
-            await saveConfirmed(book, data);
-            try { reloadEditor(book); } catch { /* editor closed */ }
-            touched.push(book);
-        }
-        if (touched.length) { s.lastWriteBooks = touched; saveSettingsDebounced(); }
-        await updateInfoLine();
-        toastr.success(n ? `Condensed ${n} memory ${n === 1 ? 'list' : 'lists'}.` : 'Nothing was changed.');
-    } catch (e) {
-        console.error(LOG, e);
-        toastr.error('Condense failed: ' + (e?.message ?? e));
-    } finally {
-        if (note) try { toastr.clear(note); } catch { /* ignore */ }
-        busy = false; operationChat = null;
-        $('.sa-cond-run').prop('disabled', false);
-    }
+async function runCondense() {
+    try { return await workbench.startMemoryCondense(); }
+    catch (e) { toastr.error(e?.message ?? e); }
 }
 
 // ---------------------------------------------------------------- archive ledger and message visibility
@@ -1279,7 +1197,7 @@ function groupSpeaker() {
 
 async function refreshChatUi() {
     const s = settings();
-    held.clear(); lastView = null; lastRemindAt = 0;
+    lastView = null; lastRemindAt = 0;
     $('#sa_range_from, #sa_range_to').val('');
     $('#sa_mem_book').val(s.memoryBook); $('#sa_mem_target').val(s.memoryTarget);
     $('#sa_mem_from').val(s.memoryFrom); $('#sa_mem_to').val(s.memoryTo);
@@ -1317,7 +1235,7 @@ async function runMemories() {
     catch (e) { console.error(LOG, e); toastr.error(e?.message ?? e); }
 }
 
-// ---------------------------------------------------------------- trackers, ask the archive, recap
+// ---------------------------------------------------------------- trackers and recap
 
 let trId = null;
 const curTracker = () => settings().trackers.find(t => t.id === trId);
@@ -1333,170 +1251,52 @@ function renderTrackers() {
     $('#sa_tr_reset').prop('disabled', !builtin); $('#sa_tr_del').prop('disabled', builtin);
 }
 
-async function showTrackerReview(results) {
-    const root = document.createElement('div');
-    root.className = 'sa-review';
-    root.innerHTML = `<h3>Tracker updates</h3><div class="sa-note">Edit anything. Untick a tracker to leave it as it is.</div>`;
-    const refs = [];
-    for (const r of results) {
-        const d = document.createElement('details'); d.open = true;
-        d.innerHTML = `<summary><input type="checkbox" checked><b>${esc(r.name)}</b><span class="sa-badge">${r.previous ? 'replaces the old version' : 'new entry'}</span></summary><textarea class="text_pole" rows="8"></textarea>`;
-        d.querySelector('textarea').value = r.text;
-        root.append(d); refs.push({ r, d });
-    }
-    const popup = new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: 'Write trackers', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true });
-    if ((await popup.show()) !== POPUP_RESULT.AFFIRMATIVE) return false;
-    for (const { r, d } of refs) { r.include = d.querySelector('input[type=checkbox]').checked; r.text = d.querySelector('textarea').value; }
-    return true;
-}
-
-/** Rewrite the enabled trackers (or just one) from the newest log entries. */
 async function runTrackers(onlyId = null, quiet = false) {
-    if (workbench) { try { return await workbench.startTrackers(onlyId, quiet); } catch (e) { if (!quiet) toastr.error(e?.message ?? e); console.warn(LOG, e); return false; } }
-    const s = settings();
-    if (!s.lorebook) { if (!quiet) toastr.warning('Pick or create a lorebook first.'); return false; }
-    const list = s.trackers.filter(t => onlyId ? t.id === onlyId : t.enabled);
-    if (!list.length) { if (!quiet) toastr.info('Switch on at least one tracker first.'); return false; }
-    if (busy) { if (!quiet) toastr.info('The archivist is already running.'); return false; }
-    busy = true; operationChat = getContext().chat; operationRevision = chatRevision;
-    let note = null;
-    try {
-        const data = await readFresh(s.lorebook);
-        if (!data) { toastr.error('Could not load the lorebook.'); return false; }
-        const trackerBase = Memory.bookHash(data), trackerBefore = clone(data);
-        const src = Core.latestUnits(data, Number(s.trackerDays) || 3);
-        if (!src.days.length) { if (!quiet) toastr.info('The log has no entries to read yet.'); return false; }
-        note = toastr.info(`Updating ${list.length} ${list.length === 1 ? 'tracker' : 'trackers'}.`, 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
-        const userName = getContext().name1 || 'the user';
-        const results = [];
-        for (const t of list) {
-            const prev = Core.trackerText(data, t.name);
-            const req = Core.buildTrackerRequest({ ...t, prompt: Core.unitize(t.prompt, s.unit) }, src, prev, userName);
-            const text = Core.cleanTrackerText(await sideCall({ prompt: req.prompt, system: req.system, maxTokens: 1800 }));
-            if (text) results.push({ id: t.id, name: t.name, text, previous: prev, include: true });
-            else noteIssue(`tracker "${t.name}": empty reply`);
-        }
-        toastr.clear(note); note = null;
-        if (!results.length) { toastr.warning('The model returned nothing for the trackers.'); return false; }
-        if (s.review && !(await showTrackerReview(results))) { toastr.info('Cancelled. Nothing was written.'); return false; }
-        const picked = results.filter(r => r.include && r.text.trim());
-        if (!picked.length) return false;
-        if (Memory.bookHash(await readFresh(s.lorebook)) !== trackerBase) throw new Error('The archive changed while the tracker update was being reviewed. Run the tracker again with the current sources.');
-        beginUndoWrite();
-        await saveUndoSnapshot(s.lorebook, data);
-        for (const r of picked) Core.applyTracker(data, r.name, r.text, coreOpts(), (dd) => createWorldInfoEntry(s.lorebook, dd));
-        const dependencies = (workbench?.entries || []).filter(e => Memory.record(e)?.type === 'unit' && src.days.includes(Memory.record(e).unit?.number)).map(e => Memory.record(e).id);
-        Memory.captureChanges(data, trackerBefore, Core.classifyEntry, { storyId: workbench?.state().storyId || '', reason: 'Tracker update' }, dependencies);
-        for (const e of Object.values(data.entries)) if (Core.classifyEntry(e)?.type === 'tracker' && Memory.record(e)) {
-            e.sceneArchivistArchive = s.lorebook;
-            Memory.record(e).derivedHashes = Object.fromEntries(dependencies.map(id => [id, Memory.hash(workbench.find(id)?.content || '')]));
-        }
-        await saveConfirmed(s.lorebook, data);
-        try { reloadEditor(s.lorebook); } catch { /* editor closed */ }
-        s.lastWriteBooks = [s.lorebook]; saveSettingsDebounced();
-        await updateInfoLine();
-        toastr.success(`Updated ${picked.length} ${picked.length === 1 ? 'tracker' : 'trackers'}.`);
-        return true;
-    } catch (e) {
-        console.error(LOG, e); noteIssue('trackers failed: ' + (e?.message ?? e));
-        toastr.error('Trackers failed: ' + (e?.message ?? e));
+    try { return await workbench.startTrackers(onlyId, quiet); }
+    catch (e) {
+        if (!quiet) toastr.error(e?.message ?? e);
+        console.warn(LOG, e);
         return false;
-    } finally {
-        if (note) try { toastr.clear(note); } catch { /* ignore */ }
-        busy = false; operationChat = null;
     }
 }
-
-let asking = false;
-const answerPopup = (title, text) => callGenericPopup(`<div style="text-align:left"><h3>${esc(title)}</h3><div style="white-space:pre-wrap">${esc(text)}</div></div>`, POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
 
 async function recap() {
-    if (workbench) { try { return await workbench.recap(); } catch (e) { toastr.error(e?.message ?? e); return; } }
-    const s = settings();
-    if (!s.lorebook) { toastr.warning('Pick or create a lorebook first.'); return; }
-    if (asking) return;
-    asking = true;
-    const note = toastr.info('Writing the recap.', 'Scene Archivist', { timeOut: 0, extendedTimeOut: 0 });
-    try {
-        const data = await readFresh(s.lorebook);
-        const req = data ? Core.buildRecapRequest(s.recapPrompt, data, 3) : null;
-        if (!req || !req.days.length) { toastr.info('The log has no entries to recap yet.'); return; }
-        const text = await sideCall({ prompt: req.prompt, system: req.system, maxTokens: 600 });
-        toastr.clear(note);
-        await answerPopup('Previously on...', (text || '(no recap)').trim());
-    } catch (e) { console.error(LOG, e); toastr.error('Recap failed: ' + (e?.message ?? e)); }
-    finally { try { toastr.clear(note); } catch { /* ignore */ } asking = false; }
+    try { return await workbench.recap(); }
+    catch (e) { toastr.error(e?.message ?? e); }
 }
 
 // ---------------------------------------------------------------- Recall
 
-function recentMessages(n, dropTrailingAi, pending = '') {
-    let msgs = (getContext().chat ?? []).filter(m => !m.is_system && String(m.mes ?? '').trim());
-    if (dropTrailingAi && msgs.length && !msgs.at(-1).is_user) msgs = msgs.slice(0, -1);
-    const list = msgs.map(m => ({ name: m.name, mes: String(m.mes) }));
-    // SillyTavern adds the user's new message to the chat only AFTER generation starts, so it is still in the text box here.
-    if (String(pending).trim()) list.push({ name: getContext().name1 || 'User', mes: String(pending) });
-    return list.slice(-Math.max(1, n)).map(m => `${m.name}: ${m.mes.replace(/\s+/g, ' ').slice(0, 1200)}`).join('\n');
+function recentMessages(n) {
+    const list = (getContext().chat ?? []).filter(m => !m.is_system && String(m.mes ?? '').trim());
+    return list.slice(-Math.max(1, n)).map(m => `${m.name}: ${String(m.mes).replace(/\s+/g, ' ').slice(0, 1200)}`).join('\n');
 }
 
-async function runRecall(type, pending = '') {
+async function runRecall() {
     const s = settings();
     const data = await readFresh(s.lorebook);
     if (!data) return null;
-    const recent = recentMessages(Number(s.recallMessages) || 4, ['swipe', 'regenerate'].includes(type), pending);
+    const recent = recentMessages(Number(s.recallMessages) || 4);
     const index = Core.buildRecallIndex(data, { limit: 120, recentText: recent });
-    if (!index.length || !recent) return { picked: [], index };
+    if (!index.length || !recent) return { picked: [] };
     const max = Math.max(1, Number(s.recallMax) || 4);
     const rp = Core.buildRecallPrompt(index, recent, max);
     const { value: ids, text } = await sideJson({ prompt: rp.prompt, system: rp.system, maxTokens: 300 }, t => Core.parseRecallResponse(t, index, max), 'recall');
-    if (ids === null) { console.warn(LOG, 'recall reply was not usable', text); return { picked: [], index, bad: true }; }
-    return { picked: index.filter(x => ids.includes(x.id)), index };
+    if (ids === null) { console.warn(LOG, 'recall reply was not usable', text); return { picked: [], bad: true }; }
+    return { picked: index.filter(x => ids.includes(x.id)) };
 }
 
 const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timed out')), ms))]);
 
-function showRecallResult(r, prefix) {
+function showRecallResult(r) {
     const msg = r?.bad ? 'The model gave an unusable answer, so only keywords were used.'
-        : r?.picked?.length ? `${prefix}${r.picked.map(p => p.title).join(' | ')}` : `${prefix}nothing extra`;
+        : r?.picked?.length ? `Would load: ${r.picked.map(p => p.title).join(' | ')}` : `Would load: nothing extra`;
     $('#sa_recall_last').text(msg);
 }
 
-async function forceActivate(name, uids) {
-    if (!uids.length) return;
-    const data = await readFresh(name);
-    // ST adds the object it is given straight into the prompt, so it must be a full entry, not just { world, uid }.
-    const full = uids.map(u => data?.entries?.[u]).filter(Boolean).map(e => ({ ...e, world: name, decorators: e.decorators ?? [] }));
-    if (full.length) await eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, full);
-}
-
 async function onGenerationStarted(type, params, dryRun) {
-    if (workbench) { try { await workbench.beforeGeneration(type, params, dryRun); } catch (e) { console.warn(LOG, e); } return; }
-    const s = settings();
-    if (!s.recall || dryRun || busy || recallBusy || !s.lorebook) return;
-    if (params?.quiet_prompt || type === 'quiet') return;
-    if (!isLorebookActive(s.lorebook)) return;
-    const startingChat = getContext().chat, archive = s.lorebook, startingRevision = chatRevision;
-    recallBusy = true;
-    try {
-        const hold = 3; // recalled entries stay for a few messages so the prompt does not flip every turn
-        for (const [u, n] of [...held]) { if (n <= 1) held.delete(u); else held.set(u, n - 1); }
-        try {
-            const sendsText = !params?.automatic_trigger && !['swipe', 'regenerate', 'continue', 'impersonate', 'quiet'].includes(type);
-            const pending = sendsText ? String($('#send_textarea').val() ?? '') : '';
-            const r = await withTimeout(runRecall(type, pending), 30000);
-            if (getContext().chat !== startingChat || chatRevision !== startingRevision || s.lorebook !== archive) return;
-            showRecallResult(r, 'Last recall: ');
-            for (const p of r?.picked ?? []) held.set(p.uid, hold);
-        } catch (e) {
-            console.warn(LOG, 'recall failed, keywords only', e);
-            $('#sa_recall_last').text('Recall failed (' + (e?.message ?? e) + '), so only keywords were used.');
-        }
-        const cap = Math.max(1, Number(s.recallMax) || 4) + 2;
-        while (held.size > cap) held.delete(held.keys().next().value);
-        if (getContext().chat === startingChat && chatRevision === startingRevision && s.lorebook === archive) await forceActivate(archive, [...held.keys()]);
-    } catch (e) {
-        console.warn(LOG, 'recall step failed', e);
-    } finally { recallBusy = false; }
+    try { await workbench.beforeGeneration(type, params, dryRun); }
+    catch (e) { console.warn(LOG, e); }
 }
 
 async function testRecall() {
@@ -1506,8 +1306,8 @@ async function testRecall() {
     if (recallBusy) return;
     recallBusy = true;
     try {
-        const r = await withTimeout(runRecall('test'), 60000);
-        showRecallResult(r, 'Would load: ');
+        const r = await withTimeout(runRecall(), 60000);
+        showRecallResult(r);
         toastr.info(r?.picked?.length ? 'Would load: ' + r.picked.map(p => p.title).join(', ') : (r?.bad ? 'Unusable answer from the model.' : 'Nothing extra needed.'), 'Recall test');
     } catch (e) { toastr.error('Recall test failed: ' + (e?.message ?? e)); } finally { recallBusy = false; }
 }

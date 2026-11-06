@@ -963,8 +963,8 @@ export class Workbench {
         flush(); return rest;
     }
     organizedMemory(raw, bullets, name) {
-        const result = Core.parseCondenseResponse(raw, bullets);
-        if (!result) throw new Error(`The organized memory list for ${name} was empty, invalid or longer than the original.`);
+        const result = Core.parseCondenseResponse(raw);
+        if (!result) throw new Error(`The organized memory list for ${name} was empty or invalid.`);
         const items = Core.parseMemoryDoc('## ► Memories — X\n' + result.bullets.map(x => '- ' + x).join('\n'));
         const dates = M.unique(Core.parseMemoryDoc('## ► Memories — X\n' + bullets.map(x => '- ' + x).join('\n')).map(x => x.date));
         for (const date of dates) if (!result.bullets.some(x => x.includes(date)) && !items.some(x => x.date.includes(date))) throw new Error(`The organized list dropped a source date: ${date}.`);
