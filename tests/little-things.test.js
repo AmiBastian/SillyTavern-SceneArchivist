@@ -24,17 +24,30 @@ test('recall finds unspaced scripts, short names and Arabic attached prefixes', 
         ['青い鍵', '彼女は青い鍵をそっとしまった。'],
         ['กุญแจ', 'เธอเก็บกุญแจไว้ในกระเป๋า'],
         ['المفتاح', 'خبّأت مريم المصباح وَبِالْمِفْتَاحِ فتحت الباب.'],
+        ['مفتاح', 'هذا القفل يحتاج لِمِفْتَاح جديد.'],
+        ['المفتاح', 'كان لِلْمِفْتَاحِ مكان خاص.'],
+        ['المفتاح النحاسي', 'ولِلْمِفْتَاحِ النحاسي مكان خاص.'],
         ['Jo', 'Mara handed Jo the key.'],
         ['Jo', '彼女はJoに鍵を渡した。'],
         ['李', '李把它带回家。'],
     ];
     for (const [cue, mes] of samples) {
-        const detail = Little.makeLittleThing({ text: 'Remember the handover.', cues: [cue], knows: ['Rowan'] });
+        const detail = Little.makeLittleThing({ text: 'Remember the handover.', cues: [cue], knows: ['Rowan'], participants: ['Jo'] });
         const messages = [{ name: 'Mara', is_user: true, mes }];
         assert.equal(candidates(messages, {}, [detail]).length, 1, cue);
     }
-    const short = Little.makeLittleThing({ text: 'Jo has the key.', cues: ['Jo'] });
-    assert.equal(candidates([{ name: 'Mara', mes: 'Joanne found her journal.' }], {}, [short]).length, 0);
+    const negatives = [
+        ['Jo', 'Joanne found her journal.', ['Jo']],
+        ['Jo', 'Jo found her journal.', []],
+        ['in', 'She put it in the drawer.', []],
+        ['a', 'She left a letter.', ['A']],
+        ['المفتاح', 'احتفظت بالمفتاحين في الدرج.', []],
+        ['المفتاح', 'هذه جملة بللمفتاح.', []],
+    ];
+    for (const [cue, mes, participants] of negatives) {
+        const detail = Little.makeLittleThing({ text: 'Remember the handover.', cues: [cue], participants });
+        assert.equal(candidates([{ name: 'Mara', mes }], {}, [detail]).length, 0, cue);
+    }
 
     const entry = { key: ['青い鍵'], sceneArchivist: { type: 'unit' } };
     assert.equal(Little.recordRecall([entry], Little.recallFrame([{ mes: samples[1][1] }], 'normal'))[0].entry, entry);

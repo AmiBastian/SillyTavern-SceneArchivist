@@ -84,11 +84,11 @@ export class StoryLibrary {
     renderNotes() {
         const view = this.pane.querySelector('[data-sa-library-view="little"]'), notes = this.w.littleThings().slice().reverse();
         view.innerHTML = `<header class="sa-little-head"><div><h3>🧵 Little Things</h3>
-            <p class="sa-hint">The gifts, habits and loose threads worth remembering. A cue brings a few back when they fit the scene.</p></div>
+            <p class="sa-hint">Run <strong>Archive thoroughly</strong> to find gifts, habits and loose threads in your chat. Review the AI’s suggestions alongside the archive.</p></div>
             ${action('editNote', '➕ Add a detail')}</header>
             ${notes.length ? `<label class="sa-field"><span>Find a detail</span><input type="search" class="text_pole" data-sa-note-search placeholder="Try a cue, name, or bit of dialogue"></label>
                 <div class="sa-little-results">${notes.map(note => this.noteRow(note)).join('')}</div>` :
-                '<p class="sa-empty-state">Save one here, use Remember this on a message, or review suggestions after archiving.</p>'}`;
+                '<p class="sa-empty-state">Approved details appear here. To keep something the AI missed, add a detail or use Remember this on a chat message.</p>'}`;
         view.querySelector('[data-sa-note-search]')?.addEventListener('input', event => {
             const query = event.target.value.trim().toLowerCase();
             for (const row of view.querySelectorAll('.sa-little-row')) row.hidden = !row.textContent.toLowerCase().includes(query);

@@ -379,27 +379,53 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
 .sa-review .sa-proposal > summary b { flex: 1 1 175px; overflow-wrap: anywhere; }
 dialog:has(.sa-review) .popup-button-ok { font-family: var(--mainFontFamily, system-ui), "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif; }
 .sa-trail-dock {
-    position: fixed; z-index: 500; top: calc(var(--topBarBlockSize, 45px) + 8px); inset-inline-end: 8px;
-    height: calc(100dvh - var(--topBarBlockSize, 45px) - 16px);
-    width: 310px; max-width: calc(100vw - 16px); overflow: auto; overscroll-behavior: contain; padding: 12px;
-    border: 1px solid var(--SmartThemeBorderColor, #62586d); border-radius: 12px;
-    background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #211d26) 88%, #24212a);
-    color: var(--SmartThemeBodyColor, #eeeaf5); box-shadow: 0 6px 24px #0006;
-}
-.sa-trail-dock .sa-result { overflow-wrap: anywhere; }
-.sa-trail-dock .sa-trail-actions { margin: 8px 0 2px; gap: 5px; }
-.sa-trail-dock .menu_button {
-    display: inline-flex; align-items: center; justify-content: center; width: auto; min-height: 34px; padding: 5px 8px;
-    border: 1px solid var(--SmartThemeBorderColor, #62586d); border-radius: 6px; font: inherit; font-size: .8em; white-space: nowrap;
-}
-.sa-trail-close { float: inline-end; }
-.sa-trail-dock .sa-review h3 { font-size: 1.25em; margin: 6px 0 13px; }
-@media (min-width: 921px) {
-    body.sa-trail-open #sheld { right: 326px; max-width: calc(100vw - 344px); }
-}
-@media (max-width: 920px) {
     /* ST transforms the document root and fixes its body on mobile. */
-    .sa-trail-dock { top: 100dvh; transform: translateY(-100%); inset-inline: 0; width: auto; max-width: none; height: auto; max-height: 48dvh; padding-bottom: max(12px, env(safe-area-inset-bottom)); border-radius: 12px 12px 0 0; }
+    position: fixed; z-index: 500; top: 100dvh; left: 0; right: 0; transform: translateY(-100%);
+    display: flex; flex-direction: column; max-height: 48dvh; overflow: hidden; box-sizing: border-box;
+    padding-bottom: env(safe-area-inset-bottom); border: 1px solid var(--sa-trail-line); border-radius: 12px 12px 0 0;
+    --sa-trail-line: color-mix(in srgb, currentColor 20%, transparent);
+    --sa-trail-wash: color-mix(in srgb, currentColor 7%, transparent);
+    color: var(--SmartThemeBodyColor, #eeeaf5); box-shadow: 0 6px 24px #0006;
+    background: var(--SmartThemeBlurTintColor, #211d26);
+    background: rgb(from var(--SmartThemeBlurTintColor, #211d26) r g b / 1);
+    font-size: .9rem; text-shadow: none;
+}
+.sa-trail-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.sa-trail-stats { display: flex; flex-wrap: wrap; gap: 5px; list-style: none; padding: 0; margin: 8px 0 0; }
+.sa-trail-stats li { padding: 3px 8px; border-radius: 6px; font-size: .86em; line-height: 1.4; background: var(--sa-trail-wash, #8882); }
+.sa-trail-dock .sa-trail-head { flex: none; padding: 10px 12px; border-bottom: 1px solid var(--sa-trail-line); }
+.sa-trail-dock h3 { margin: 0; font: 650 1.15em/1.35 var(--mainFontFamily, system-ui), sans-serif; }
+.sa-trail-reply { margin: 2px 0 0; font-size: .86em; opacity: .8; }
+.sa-trail-body { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 9px 10px 10px 12px; }
+.sa-trail-dock .sa-review details { margin: 0 0 6px; padding: 0; border-color: var(--sa-trail-line); }
+.sa-trail-dock details > summary { padding: 7px 9px; font-size: .93em; font-weight: 600; }
+.sa-trail-dock details[open] > summary { background: var(--sa-trail-wash); border-radius: 7px 7px 0 0; }
+.sa-trail-dock details > p { margin: 8px 9px; }
+.sa-trail-dock .sa-result { padding: 8px 0; margin: 0 9px; border-color: var(--sa-trail-line); line-height: 1.4; }
+.sa-trail-dock .sa-result:first-of-type { border-top: 0; }
+.sa-trail-dock .sa-result p { margin: 3px 0; }
+.sa-trail-dock .sa-trail-actions { margin: 6px 0 0; gap: 5px; }
+.sa-trail-dock .menu_button {
+    display: inline-flex; align-items: center; justify-content: center; width: auto; min-height: 34px; margin: 0; padding: 4px 8px;
+    border: 1px solid var(--sa-trail-line); border-radius: 6px; font: inherit; font-size: .86em; white-space: nowrap;
+}
+@media (pointer: coarse) {
+    .sa-trail-dock .menu_button { min-height: 44px; }
+}
+@media (min-width: 1001px) and (pointer: fine) {
+    body.sa-trail-open:not(.movingUI) {
+        --sa-trail-width: clamp(312px, 24dvw, 380px);
+        --sa-trail-gap: 12px;
+        --sa-trail-chat-width: min(var(--sheldWidth, 100dvw), calc(100dvw - var(--sa-trail-width) - 3 * var(--sa-trail-gap)));
+    }
+    body.sa-trail-open:not(.movingUI) #sheld {
+        right: calc(var(--sa-trail-width) + var(--sa-trail-gap)); max-width: var(--sa-trail-chat-width);
+    }
+    body.sa-trail-open:not(.movingUI) .sa-trail-dock {
+        top: calc(var(--topBarBlockSize, 45px) + 8px); right: auto; transform: none; border-radius: 12px;
+        left: calc((100dvw + var(--sa-trail-chat-width) - var(--sa-trail-width) + var(--sa-trail-gap)) / 2);
+        width: var(--sa-trail-width); max-height: calc(100dvh - var(--topBarBlockSize, 45px) - 16px);
+    }
 }
 @media (max-width: 720px) {
     .sa-sidebar-workspace > .sa-tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; }

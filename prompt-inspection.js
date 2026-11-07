@@ -130,27 +130,38 @@ export class PromptInspection {
         const trace = index === null
             ? this.lastTrace || chat.findLast(item => item.extra?.[traceKey])?.extra?.[traceKey]
             : message?.extra?.[traceKey];
+        const replyIndex = index ?? (trace ? chat.findLastIndex(item => item.extra?.[traceKey] === trace) : -1);
+        const title = docked ? 'Memory Trail' : index === null ? 'Last reply’s memory trail' : `Memory Trail for #${index}`;
+        const header = document.createElement('header');
+        header.className = 'sa-trail-head';
+        header.innerHTML = `<div class="sa-trail-title"><h3><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> ${title}</h3></div>`;
+        if (docked && replyIndex >= 0) header.insertAdjacentHTML('beforeend', `<p class="sa-trail-reply">Reply #${replyIndex}</p>`);
         const root = document.createElement('div');
         root.className = 'sa-review sa-prompt-trace';
-        root.innerHTML = `<h3>🔎 ${index === null ? docked ? 'Memory Trail' : 'Last reply’s memory trail' : `Memory Trail for #${index}`}</h3>
-            <p class="sa-hint">What Scene Archivist selected for this reply, with the cues and sources behind it.</p>`;
+        if (!docked) root.append(header);
         if (!trace) {
-            root.insertAdjacentHTML('beforeend', '<p>No trace for this swipe. Generate a reply with an attached archive to start recording.</p>');
+            root.insertAdjacentHTML('beforeend', '<p class="sa-hint">No trace for this swipe. Generate a reply with an attached archive to start recording.</p>');
         } else {
-            const intro = document.createElement('p');
-            intro.textContent = trace.scanObserved ? `${trace.loaded} loaded · ~${trace.tokens.toLocaleString()} tokens · ${trace.skipped} skipped.` :
-                'No Scene Archivist activation was reported for this reply.';
-            root.append(intro);
-            if (trace.prefixTokens != null) {
-                const p = document.createElement('p');
-                p.className = 'sa-hint';
-                p.textContent = `~${trace.prefixTokens.toLocaleString()} tokens of shared prompt prefix vs. the previous request. ${trace.layered ? 'Cache-friendly delivery was on.' : 'Normal delivery was on.'}`;
-                root.append(p);
+            if (trace.scanObserved) {
+                const stats = document.createElement('ul');
+                stats.className = 'sa-trail-stats';
+                stats.setAttribute('aria-label', 'Reply totals');
+                for (const stat of [`${trace.loaded} loaded`, `~${trace.tokens.toLocaleString()} tokens`, `${trace.skipped} skipped`]) {
+                    const chip = document.createElement('li');
+                    chip.textContent = stat;
+                    stats.append(chip);
+                }
+                header.append(stats);
+            } else {
+                root.insertAdjacentHTML('beforeend', '<p class="sa-hint">No Scene Archivist activation was reported for this reply.</p>');
             }
-            for (const [title, items, total] of [['📥 Lorebook records', trace.active, trace.loaded - (trace.little?.length || 0)], ['🧹 Skipped', trace.omitted, trace.skipped]]) {
+            const littleCount = trace.little?.length || 0;
+            for (const [loaded, items, total] of [[true, trace.active, trace.loaded - littleCount], [false, trace.omitted, trace.skipped]]) {
                 const section = document.createElement('details');
-                section.open = title.startsWith('📥');
-                section.innerHTML = `<summary>${title} · ${total}</summary>`;
+                section.open = loaded && !littleCount;
+                const summary = document.createElement('summary');
+                summary.textContent = `${loaded ? '📥 Lorebook records' : '🧹 Skipped'} · ${total}`;
+                section.append(summary);
                 if (!items.length) section.insertAdjacentHTML('beforeend', '<p>None recorded.</p>');
                 for (const item of items) {
                     const row = document.createElement('div');
@@ -163,7 +174,7 @@ export class PromptInspection {
                         button.type = 'button'; button.className = 'menu_button'; button.textContent = '🔎 View sources';
                         button.addEventListener('click', () => void w.showSources(item.id));
                         actions.append(button);
-                        if (section.open) {
+                        if (loaded) {
                             const load = document.createElement('button');
                             load.type = 'button'; load.className = 'menu_button'; load.textContent = '📌 Load next reply';
                             load.addEventListener('click', () => void w.dispatch('loadDetail', { dataset: { id: item.id } }).catch(error => w.h.notify(error.message, 'error')));
@@ -178,7 +189,9 @@ export class PromptInspection {
             if (trace.little?.length) {
                 const section = document.createElement('details');
                 section.open = true;
-                section.innerHTML = `<summary>🧵 Little Things · ${trace.little.length} · ~${trace.littleTokens} tokens</summary>`;
+                const summary = document.createElement('summary');
+                summary.textContent = `🧵 Little Things · ${littleCount} · ~${trace.littleTokens} tokens`;
+                section.append(summary);
                 for (const item of trace.little) {
                     const row = document.createElement('div');
                     row.className = 'sa-result';
@@ -205,6 +218,15 @@ export class PromptInspection {
                 }
                 root.querySelector('details')?.before(section);
             }
+            if (trace.prefixTokens != null) {
+                const diagnostics = document.createElement('details');
+                diagnostics.innerHTML = '<summary>Prompt delivery</summary>';
+                const p = document.createElement('p');
+                p.className = 'sa-hint';
+                p.textContent = `~${trace.prefixTokens.toLocaleString()} tokens shared with the previous request. ${trace.layered ? 'Cache-friendly delivery was on.' : 'Normal delivery was on.'}`;
+                diagnostics.append(p);
+                root.append(diagnostics);
+            }
         }
         if (docked) {
             this.closeDock(false);
@@ -220,10 +242,13 @@ export class PromptInspection {
             dock.className = 'sa-trail-dock';
             dock.setAttribute('aria-label', 'Memory Trail');
             const close = document.createElement('button');
-            close.type = 'button'; close.className = 'menu_button sa-trail-close'; close.textContent = 'Close trail';
+            close.type = 'button'; close.className = 'menu_button sa-trail-close'; close.textContent = 'Close';
+            close.setAttribute('aria-label', 'Close trail');
             close.addEventListener('click', () => this.closeDock());
             dock.addEventListener('keydown', event => { if (event.key === 'Escape') this.closeDock(); });
-            dock.append(close, root); document.body.append(dock);
+            header.querySelector('.sa-trail-title').append(close);
+            root.classList.add('sa-trail-body');
+            dock.append(header, root); document.body.append(dock);
             document.body.classList.add('sa-trail-open');
             this.dock = dock;
             this.dockTrigger = trigger;

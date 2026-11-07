@@ -1,19 +1,15 @@
 # Changelog
 
-## Unreleased
-
-- Skipping a suggested Little Thing now closes the review when all selected story records have been saved.
-- Scene recall matches short cues, Chinese, Japanese and Thai text without spaces, and common attached Arabic prefixes.
-- The fallback token estimate uses separate allowances for Arabic and Cyrillic prose, with extra room for Arabic vowel marks.
-
-## 2.0.0
+## 2.0.0 · November 7, 2026
 
 - Put Story, Archive, Characters and Library in one compact workspace. Find Maintain, Prompt and Settings under Tools, with Branches in Maintain.
 - Added a Library timeline with scene summaries, linked character memories, Little Things and original message jumps.
-- Added Little Things for small callbacks and open threads. Keep them in the archive’s story metadata, save one from a chat message, or review suggestions during archive and condense runs.
+- Added Little Things for small callbacks and open threads. Review AI suggestions during archive and condense runs, or save a detail from a chat message. Skipping a suggestion during approval dismisses it.
 - Added local scene recall for cues, promises and short carryover. Little Things share the prompt token budget, respect who knows them, and can include a verified short quote when requested.
-- Added a reply-side Memory Trail on desktop and a bottom sheet on smaller screens. See what loaded, why it loaded, and where it came from.
+- Recall matches unspaced Chinese, Japanese and Thai cues and attached Arabic prefixes, including forms like للمفتاح. Short cues in spaced scripts require a two-character name listed on the detail.
+- Added a compact Memory Trail beside the chat on desktop and as a bottom sheet on smaller screens. The panel has a solid theme background, a fixed header, and separate sections for Little Things, lorebook matches, skipped records, and prompt delivery.
 - Grouped proposed summaries, memories, trackers and Little Things in one review with editable text, source labels, and before and after text.
+- The fallback token estimate uses separate allowances for Arabic and Cyrillic prose, with extra room for Arabic vowel marks.
 - Kept saved stories, source links, Undo and unfinished drafts compatible with 1.2.0.
 
 ## 1.2.0 · November 6, 2026

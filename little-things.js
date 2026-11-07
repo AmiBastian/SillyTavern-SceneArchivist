@@ -18,20 +18,26 @@ const unspaced = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script
 const arabic = /\p{Script_Extensions=Arabic}/u;
 const cueText = value => normalize(value).replace(/[\u0640\p{M}]/gu, mark => mark === '\u0640' || arabic.test(mark) ? '' : mark).replace(/ +/g, ' ').trim();
 const boundary = symbol => !symbol || symbol === ' ' || unspaced.test(symbol);
+const arabicPrefix = / (?:[وف][بكل]?|[بكل])$/;
+const arabicConjunction = / [وف]$/;
 
 function phrase(text, cue) {
     if (!cue) return false;
     const symbols = [...cue], first = symbols[0], last = symbols.at(-1);
     const padded = ` ${text} `;
     const looseStart = unspaced.test(first), looseEnd = unspaced.test(last);
-    const arabicPrefix = symbols.length > 1 && arabic.test(first);
-    for (let at = padded.indexOf(cue); at >= 0; at = padded.indexOf(cue, at + 1)) {
-        const end = at + cue.length;
-        const before = [...padded.slice(Math.max(0, at - 2), at)].at(-1);
-        const after = [...padded.slice(end, end + 2)][0];
-        // Match attached Arabic conjunctions and prepositions at the start of a word.
-        const prefixed = arabicPrefix && / (?:[وف][بك]?|[بك])$/.test(padded.slice(Math.max(0, at - 3), at));
-        if ((looseStart || boundary(before) || prefixed) && (looseEnd || boundary(after))) return true;
+    const arabicWord = symbols.length > 1 && arabic.test(first);
+    const forms = [[cue, arabicWord ? arabicPrefix : null]];
+    // Arabic drops the article's alif after ل, as in المفتاح → للمفتاح.
+    if (arabicWord && /^ال\p{L}/u.test(cue)) forms.push([`ل${cue.slice(1)}`, arabicConjunction]);
+    for (const [form, prefix] of forms) {
+        for (let at = padded.indexOf(form); at >= 0; at = padded.indexOf(form, at + 1)) {
+            const end = at + form.length;
+            const before = [...padded.slice(Math.max(0, at - 2), at)].at(-1);
+            const after = [...padded.slice(end, end + 2)][0];
+            const prefixed = prefix?.test(padded.slice(Math.max(0, at - 3), at));
+            if ((looseStart || boundary(before) || prefixed) && (looseEnd || boundary(after))) return true;
+        }
     }
     return false;
 }
@@ -172,8 +178,8 @@ export function recallFrame(chat, type, speakerNames = []) {
     return { focus, prior, participants, place, date, flashback: flashback ? date : '', boundary, end };
 }
 
-function cueMatch(cues, frame, allowSingle = true) {
-    const hits = [...new Set(cues.map(cueText).filter(cue => cue && (allowSingle || cue.includes(' ') || [...cue].length > 1 && unspaced.test(cue))))];
+function cueMatch(cues, frame, eligible) {
+    const hits = [...new Set(cues.map(cueText).filter(cue => cue && eligible(cue, [...cue].length)))];
     for (const [i, message] of [frame.focus, ...frame.prior].entries()) {
         if (!message) continue;
         const matched = hits.filter(cue => phrase(message.text, cue)).sort((a, b) => b.length - a.length)[0];
@@ -213,8 +219,10 @@ export function noteRecall(notes, { frame, speaker, chat, sourceId, carry, reque
     const reminder = /\b(?:you (?:still )?owe me|you promised|our promise|did you forget (?:our|your) promise|hold you to (?:it|that))\b/.test(frame.focus?.text || '');
     const exact = /\b(?:exact words|word for word|verbatim|quote|what did .{1,60} say)\b/.test(frame.focus?.text || '');
     return allowed.flatMap(note => {
+        const names = [...(note.participants || []), ...(note.knows || [])];
         const match = requested.has(note.id) ? { score: 100, reason: 'Requested for this reply' } :
-            cueMatch(note.cues || [], frame) ||
+            cueMatch(note.cues || [], frame, (cue, length) => length >= 3 || unspaced.test(cue) ||
+                length === 2 && names.some(name => cueText(name) === cue)) ||
             (reminder && openPromises.length === 1 && openPromises[0] === note ? { score: 28, reason: 'Open promise between scene participants', anchor: frame.focus } : null) ||
             carryMatch(carry.get(note.id), frame, chat);
         if (!match) return [];
@@ -239,7 +247,8 @@ export function recordRecall(entries, frame, chat = [], carry = new Map()) {
         if (!recalledTypes.has(r?.type) || r.knowledge === 'unaware' || entry.disable || entry.constant || entry.keysecondary?.length || entry.probability < 100 ||
             entry.group || entry.characterFilter?.names?.length || entry.characterFilter?.tags?.length || entry.decorators?.length ||
             entry.delay || entry.cooldown || entry.sticky || flashbackReason(entry, frame)) return [];
-        const match = cueMatch([...(entry.key || []), ...(r.locations || []), ...(r.aliases || [])], frame, false) ||
+        const match = cueMatch([...(entry.key || []), ...(r.locations || []), ...(r.aliases || [])], frame,
+            (cue, length) => cue.includes(' ') || length > 1 && unspaced.test(cue)) ||
             carryMatch(carry.get(r.id), frame, chat);
         return match ? [{ entry, ...match }] : [];
     }).sort((a, b) => b.score - a.score).slice(0, 4);

@@ -160,9 +160,9 @@ Use **Sources** on a Library result. Each source range lists the chat it came fr
 
 ### Little Things
 
-Keep the borrowed coat, the way someone takes their coffee, or the promise that never made it into the main plot. Use **Library → Little Things → Add a detail**, or choose **Little Thing** in **Remember this** on a chat message. Give it a cue someone might actually say. Fill in **Who knows** for private details.
+Run **Archive thoroughly** to have the AI find the borrowed coat, the way someone takes their coffee, or the promise that never made it into the main plot. Reviewed archive and condense runs suggest details in the same model response. Uncheck any suggestions you want to skip, then choose **Save selected**. **Review later** keeps the whole draft.
 
-Reviewed archive and condense runs can suggest details in the same model response. Uncheck any suggestions you want to skip, then choose **Save selected**. **Review later** keeps the whole draft. Little Things live in the selected archive’s story metadata and travel with full story backups. Each detail adds zero lorebook entries. A branch with verified history keeps only Little Things with matching source messages.
+Find approved details under **Library → Little Things**. To keep something the AI missed, choose **Add a detail** there or choose **Little Thing** in **Remember this** on a chat message. Give it a specific cue someone might actually say. Fill in **Who knows** for private details. Little Things live in the selected archive’s story metadata and travel with full story backups. Each detail adds zero lorebook entries. A branch with verified history keeps only Little Things with matching source messages.
 
 A normal reply can load up to four matching details inside the existing memory budget on SillyTavern versions with the World Info scan hook. Relevant cues and open promises can carry over for a few replies within a scene. **Load next reply** queues a detail for the next eligible speaker. To turn off automatic selection, open **Tools → Prompt** and switch off scene recall.
 
@@ -189,7 +189,7 @@ Optional recap automation can suggest or create a recap after newer units, ficti
 
 - Under **Library → All records → Search, evidence and continuity**, **Ask the archive** answers a question with source links. **Check this claim** checks one statement, and the recent or whole-archive checks look for conflicts across records.
 - **Previously on…** creates a short return recap for the reader. **Recall** can ask a helper model to pick relevant details before a normal reply.
-- In **Story**, open the last reply’s **Memory Trail** beside the chat. On a small screen it opens as a bottom sheet. The chat message menu opens the trail for that reply or swipe. **Tools → Prompt** has the memory budget and more loading details. The trail reports both the native World Info matches and the Little Things Scene Archivist prepared for the reply.
+- In **Story**, open the last reply’s **Memory Trail** beside the chat. On a small screen or with Moving UI enabled it opens as a bottom sheet. The chat message menu opens the trail for that reply or swipe. The header stays visible as you scroll through World Info matches and Little Things. Open **Prompt delivery** for cache details or **Tools → Prompt** for budget settings.
 
 For a past scene, put an explicit marker such as `Flashback: February 14, 2027` on its own line in the chat. Scene recall uses the date to leave out managed memories that contain later or undated evidence. A new scene marker or a changed place ends recent cue carryover.
 
