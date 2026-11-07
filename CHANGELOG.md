@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Oversized archive and memory requests show an approximate token breakdown, sorted by size, for references, messages, the scene log, instructions, and included SillyTavern chat context. The error points to reference settings when lorebooks are the largest part.
+- Memory Trail uses the available space beside the chat and switches to SillyTavern’s popup when the chat is too wide. Opening, moving, or closing the trail preserves the native chat layout and Moving UI positions.
+
 ## 2.0.0 · November 7, 2026
 
 - Put Story, Archive, Characters and Library in one compact workspace. Find Maintain, Prompt and Settings under Tools, with Branches in Maintain.
