@@ -7,9 +7,10 @@ import * as Core from '../core.js';
 import * as Flow from '../flow.js';
 import { placeSharedUnits, selectionExport } from '../workflow-tools.js';
 import { projectBranch } from '../recovery-tools.js';
+import { addLittleThings, littleThings, makeLittleThing } from '../little-things.js';
 import { DEFAULT_MEMORY_PROMPT, DEFAULT_SETTINGS, LEGACY_MEMORY_PROMPTS } from '../defaults.js';
 
-function fixture({ existing = {}, failTracker = false, limits = {}, prefs = {}, amendChat = false } = {}) {
+function fixture({ existing = {}, failTracker = false, limits = {}, prefs = {}, amendChat = false, noteProposals } = {}) {
     const config = { ...M.copy(DEFAULT_SETTINGS), lorebook: 'Story', memoryBook: 'Memories', sideProfile: 'notes', archiveProfile: 'summary',
         storyBooks: { Story: { Story: 'archive' } }, trackers: [{ id: 'threads', name: 'Threads', enabled: true, prompt: 'Track loose ends.' },
             { id: 'places', name: 'Places', enabled: true, prompt: 'Track places.' }] };
@@ -36,7 +37,7 @@ function fixture({ existing = {}, failTracker = false, limits = {}, prefs = {}, 
             if (placement) placeSharedUnits(data, parsed.entries, placement);
             const plan = Core.planChanges(data, parsed, { delivery: 'depth', source, keepDays: 3 });
             plan.adds.forEach((item, i) => { item.keys = output.keywords[i] || ['key']; });
-            return { parsed, plan };
+            return { parsed, plan, littleThings: output.littleThings };
         },
         afterArchive: async range => {
             for (const r of range.ranges || [range]) {
@@ -54,7 +55,7 @@ function fixture({ existing = {}, failTracker = false, limits = {}, prefs = {}, 
                 memories: { characters: [{ name: 'Zelga', aliases: [], memories: ['Mira gave Zelga a brass key.'] }] },
                 trackers: { trackers: [{ id: 'threads', content: '- Return to the gate.' }, { id: 'places', content: '- Front gate.' }] },
             } });
-            if (profile === 'summary') return JSON.stringify({ archive: '## Day 1 — February 14, 2027\n\n- Mira gave Zelga the brass key.', keywords: [['brass key']] });
+            if (profile === 'summary') return JSON.stringify({ archive: '## Day 1 — February 14, 2027\n\n- Mira gave Zelga the brass key.', keywords: [['brass key']], littleThings: noteProposals });
             if (req.prompt.startsWith('TRACKERS')) {
                 if (failTracker && !failed) { failed = true; throw new Error('Connection failed'); }
                 if (amendChat) chat[0].mes = 'I handed over the brass key.';
@@ -188,6 +189,61 @@ test('a failed tracker leaves ready results to save and retries only the tracker
     assert.equal(job.status, 'done', job.error);
     assert.deepEqual(f.calls.map(call => call.profile), ['summary', 'notes', 'notes', 'notes']);
     assert.equal(f.reviews.length, 2);
+});
+
+test('a Little Thing can wait through partial approval and a separate metadata save', async () => {
+    const f = fixture({ noteProposals: [
+        { text: 'Zelga was given a brass key.', cues: ['brass key'], knows: ['Zelga'], message: 0, evidence: 'the brass key' },
+        { text: 'An invented gift.', cues: ['gold key'], shared: true, message: 0, evidence: 'the gold key' },
+    ] });
+    let review = 0;
+    const fallback = f.w.review;
+    f.w.review = async (changes, title, note) => {
+        if (f.w.bulkRun) return fallback(changes, title, note);
+        review++;
+        const notes = changes.filter(change => change.note);
+        assert.equal(notes.length, 1);
+        notes[0].include = review > 1;
+        return true;
+    };
+    const job = await f.w.startFlow('catch-up');
+    assert.equal(job.status, 'paused', job.error);
+    assert.equal(littleThings(f.books.Story).length, 0);
+    assert.ok(Object.values(f.books.Story.entries).some(entry => M.record(entry)?.type === 'unit'));
+    addLittleThings(f.books.Story, [makeLittleThing({ text: 'The lantern smelled of pine.', cues: ['pine'] })], 'story');
+    await f.w.withLock(() => f.w.queue.resume());
+    assert.equal(job.status, 'done', job.error);
+    assert.deepEqual(f.calls.map(call => call.profile), ['summary', 'notes', 'notes']);
+    assert.equal(littleThings(f.books.Story).length, 2);
+    const note = littleThings(f.books.Story).find(item => item.text.includes('brass key'));
+    assert.equal(note.source.ranges[0].from, 0);
+    assert.equal(Object.values(f.books.Story.entries).some(entry => entry.content === note.text), false);
+});
+
+test('condensing a character list keeps its Little Things private to the source character', async () => {
+    const entry = { uid: 0, content: '## ► Memories — Zelga\n\n[February 14, 2027 - Day 1]\n- Mira handed Zelga the brass key and Zelga took the key into her own hand.' };
+    entry.sceneArchivist = M.makeRecord(entry, { storyId: 'story', type: 'memory' }, { subject: 'Zelga', subjectAvatar: 'zelga.png' });
+    const f = fixture({ existing: { Memories: { entries: { 0: entry } } } });
+    const id = M.record(entry).id;
+    let calls = 0;
+    f.w.h.sendFlowRequest = async request => {
+        calls++;
+        assert.match(request.system, /littleThings/);
+        return JSON.stringify({
+            entries: [{ id, content: '## ► Memories — Zelga\n\n[February 14, 2027 - Day 1]\n- Mira gave Zelga the brass key.' }],
+            littleThings: [{ recordId: id, text: 'Mira gave Zelga the brass key.', cues: ['brass key'], shared: true, evidence: 'Mira handed Zelga the brass key' }],
+        });
+    };
+    await f.w.loadBooks();
+    const job = await f.w.startCondense(f.w.entries, false, true);
+    assert.equal(job.status, 'done', job.error);
+    assert.equal(calls, 1);
+    const [saved] = littleThings(f.books.Story);
+    assert.deepEqual(saved.knows, ['Zelga']);
+    assert.equal(saved.knownAvatar, 'zelga.png');
+    assert.equal(saved.recordId, id);
+    assert.equal(f.reviews[0].changes.find(change => change.note).section, 'Little Things');
+    assert.deepEqual(littleThings(M.parseBundle(M.makeBundle(f.books, f.metadata, f.config)).books.Story), [saved]);
 });
 
 test('chat memory works without an archive and persona is independently opt-in', async () => {

@@ -104,7 +104,7 @@ export class ChatControls {
                 this.w.renderFlow();
             }],
         ];
-        if (!message.is_user) actions.push(['What went into this reply?', () => this.w.extras.prompt.show(index)]);
+        if (!message.is_user) actions.push(['What went into this reply?', () => this.w.extras.prompt.show(index, true)]);
         const heading = document.createElement('small');
         heading.textContent = `Scene Archivist · #${index}`;
         menu.append(heading);

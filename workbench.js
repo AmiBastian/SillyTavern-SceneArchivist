@@ -13,6 +13,9 @@ import { placePromptLayers } from './prompt-inspection.js';
 import { isSkipped, groupMemoryReason, memorySubject, saveNativeGroupFilter, prepareNativeGroupFilter } from './chat-workflows.js';
 import { mountWorkbench, button, field } from './workbench-view.js';
 import { escape as html } from './workflow-tools.js';
+import * as Little from './little-things.js';
+import { SceneRecall } from './scene-recall.js';
+import { reviewChanges } from './workbench-review.js';
 
 const listValue = value => M.unique(String(value || '').split(/\s*;\s*/));
 const flat = (it, unit) => it.a == null ? it.text : `[${it.b != null && it.b !== it.a ? unit + 's ' + it.a + '-' + it.b : unit + ' ' + it.a}${it.date ? ', ' + it.date : ''}] ${it.text}`;
@@ -21,7 +24,7 @@ const auditReplyTokens = (tokens, count = 1) => Math.max(3000, Math.min(16000, t
 export const WORKBENCH_DEFAULTS = {
     budget: 6000, requestBudget: 0, modelAwareRequests: true, autoCondense: 'off', trigger: 'units', afterUnits: 10,
     afterDays: 30, pressureTokens: 16000, batchSize: 0, charactersPerBatch: 0, reviewMode: 'end', recapLabel: 'Arc', recapMode: 'recap',
-    continuityRecent: 20, branchMode: 'prune', continuityAuto: false, recapOnReturn: false, recapAfterHours: 24, semantic: false, requestLimit: 0, jobPreview: false, groupMemoryScope: true, messageBadges: 'desktop', memoryTools: false, cacheLayers: false,
+    continuityRecent: 20, branchMode: 'prune', continuityAuto: false, recapOnReturn: false, recapAfterHours: 24, semantic: false, requestLimit: 0, jobPreview: false, groupMemoryScope: true, messageBadges: 'desktop', memoryTools: false, cacheLayers: false, sceneRecall: true,
 };
 
 export class Workbench {
@@ -31,7 +34,8 @@ export class Workbench {
         this.vectorRun = null; this.vectorQuiet = false; this.activatedIds = new Set(); this.activationKnown = false;
         this.scanSuppressed = true; this.generationEpoch = 0; this.scanEntries = []; this.scanReasons = new Map();
         this.externalActivations = new Map(); this.explicitReasons = new Map(); this.forcedEntries = new Set(); this.activeVectorRun = null;
-        this.currentTab = 'story'; this.loading = false; this.activeIdentity = ''; this.sourceContext = null;
+        this.currentTab = 'story'; this.loading = false;
+        this.sceneRecall = new SceneRecall(this);
         this.queue = new M.JobQueue({ state: () => this.liveState(), persist: () => this.persist(),
             perform: (j, s) => this.inBulk(j, () => this.perform(j, s)),
             commit: (j, s) => this.inBulk(j, () => this.commitStep(j, s)),
@@ -236,6 +240,17 @@ export class Workbench {
     find(id) { return this.entries.find(e => M.record(e)?.id === id); }
     selectedEntries() { return this.entries.filter(e => this.selected.has(M.record(e)?.id)); }
     sourceId() { return this.state().sourceId || this.state().storyId; }
+    littleThings() { return Little.littleThings(this.books[this.h.settings().lorebook]); }
+    archiveLittleThings(items, source) {
+        const chat = this.h.context().chat || [];
+        if (source?.chatId !== this.sourceId()) return [];
+        const messages = new Map((source.ranges || []).flatMap(range => range.messages || []).map(message => [message.index, message.hash]));
+        return Little.proposedLittleThings(items, item => {
+            const index = item?.message, message = chat[index];
+            if (!Number.isInteger(index) || !message || messages.get(index) !== M.messageHash(message)) return null;
+            return { text: message.mes, source: this.source([{ from: index, to: index }]) };
+        });
+    }
     source(entries) { return { ...M.sourceSnapshot(this.sourceId(), this.h.context().chat || [], entries), actualChatId: this.identity(), label: String(this.h.context().chatId || 'Current chat') }; }
     entryIn(books, id) {
         for (const [book, data] of Object.entries(books)) {
@@ -259,57 +274,7 @@ export class Workbench {
         return e;
     }
 
-    async review(changes, title = 'Review changes', note = '', options = {}) {
-        if (this.bulkRun) return true;
-        const root = document.createElement('div'); root.className = 'sa-review';
-        root.innerHTML = `<h3>${html(title)}</h3><p class="sa-note">${html(note || 'Review the result before it is saved. The old content remains in revision history.')}</p>`;
-        if (options.partial) {
-            const toolbar = document.createElement('div'); toolbar.className = 'sa-row';
-            for (const [label, checked] of [['Select all', true], ['Deselect all', false]]) { const b = document.createElement('button'); b.type = 'button'; b.className = 'menu_button'; b.textContent = label; b.addEventListener('click', () => root.querySelectorAll('[data-review-include]').forEach(c => { c.checked = checked; })); toolbar.append(b); }
-            root.append(toolbar);
-        }
-        const job = this.state().job?.status === 'running' ? this.state().job : null, edits = job ? (job.reviewEdits ??= {}) : {};
-        let section;
-        for (const c of changes) {
-            if (c.section && c.section !== section) {
-                section = c.section;
-                const heading = document.createElement('h4'); heading.textContent = section; root.append(heading);
-            }
-            const key = Tools.proposalKey(c), saved = edits[key];
-            if (saved) { c.content = saved.content; c.include = saved.include; }
-            const d = document.createElement('details'); d.open = changes.length <= 4;
-            d.innerHTML = `<summary>${options.partial ? '<input type="checkbox" data-review-include aria-label="Approve this result">' : ''}<b>${html(c.title || 'Proposed result')}</b><span class="sa-badge">${(c.beforeTokens ?? M.tokens(c.before || ''))} → ${(c.afterTokens ?? M.tokens(c.content || ''))} estimated tokens</span></summary><label>Proposed text<textarea class="text_pole" rows="9"></textarea></label><details><summary>Highlighted changes</summary><div class="sa-diff" aria-label="Added and removed lines"></div></details><details><summary>Original text</summary><pre></pre></details>`;
-            if (c.warning) {
-                const warning = document.createElement('p'); warning.className = 'sa-warnline'; warning.textContent = c.warning;
-                d.querySelector('summary').after(warning); d.open = true;
-            }
-            d.querySelector('textarea').value = c.content || ''; d.querySelector('pre').textContent = c.before || '(new record)';
-            const check = d.querySelector('[data-review-include]'); if (check) { check.checked = c.include !== false; check.addEventListener('click', e => e.stopPropagation()); }
-            const diff = d.querySelector('.sa-diff'); diff.innerHTML = Tools.diffHtml(c.before, c.content);
-            if (c.settingsAfter && JSON.stringify(c.settingsBefore) !== JSON.stringify(c.settingsAfter)) {
-                const settings = document.createElement('details'); settings.innerHTML = '<summary>Entry settings and processing receipts</summary><pre></pre>';
-                settings.querySelector('pre').textContent = JSON.stringify({ before: c.settingsBefore, after: c.settingsAfter }, null, 2); d.append(settings);
-            }
-            d.querySelector('textarea').addEventListener('input', e => { diff.innerHTML = Tools.diffHtml(c.before, e.target.value); });
-            root.append(d); c.node = d;
-        }
-        const accepted = await this.h.confirm(root, { okButton: options.partial ? '💾 Save approved results' : '💾 Save reviewed result', cancelButton: job?.status === 'running' ? 'Review later' : 'Cancel' });
-        for (const c of changes) {
-            const editedText = c.node.querySelector('textarea').value;
-            const originalText = String(c.content || '');
-            // Accepting an untouched review must preserve source hashes, including
-            // existing trailing whitespace and normalized textarea line endings.
-            c.content = editedText.trim() === originalText.replace(/\r\n?/g, '\n').trim() ? originalText : editedText.trim();
-            c.include = c.node.querySelector('[data-review-include]')?.checked ?? true;
-            if (job) edits[Tools.proposalKey(c)] = { content: c.content, include: c.include };
-            delete c.node;
-        }
-        if (job) await this.persist();
-        if (!accepted) return false;
-        if (changes.some(c => c.include && !c.content)) throw new Error('An approved entry cannot be empty.');
-        if (options.partial && !changes.some(c => c.include)) throw new Error('Choose at least one result, or use Review later to retain all results.');
-        return true;
-    }
+    review(changes, title, note, options) { return reviewChanges(this, changes, title, note, options); }
 
     mount(root) { mountWorkbench(this, root); }
 
@@ -324,11 +289,16 @@ export class Workbench {
     }
     showTab(tab) {
         if (!this.panes[tab]) return;
-        if (this.root.querySelector(`[data-sa-tab="${tab}"]`)?.hidden) this.layout?.setMode('all');
         this.currentTab = tab;
+        const inTools = ['maintain', 'prompt', 'settings'].includes(tab);
         for (const [id, pane] of Object.entries(this.panes)) {
             pane.hidden = id !== tab;
-            const b = this.root.querySelector(`[data-sa-tab="${id}"]`); b.setAttribute('aria-selected', String(id === tab)); b.tabIndex = id === tab ? 0 : -1;
+            const b = this.root.querySelector(`[data-sa-tab="${id}"]`);
+            if (b.closest('.sa-tools-menu')) b.setAttribute('aria-current', String(id === tab));
+            else {
+                b.setAttribute('aria-selected', String(id === tab));
+                b.tabIndex = id === tab || (inTools && id === 'story') ? 0 : -1;
+            }
         }
         if (tab === 'library') this.renderLibrary();
         if (tab === 'prompt') this.renderBudget();
@@ -401,7 +371,9 @@ export class Workbench {
     renderLibrary() {
         clearTimeout(this.librarySearchTimer); this.librarySearchTimer = null;
         if (this.currentTab !== 'library' || (this.root?.getClientRects && !this.root.getClientRects().length)) { this.libraryDirty = true; return; }
+        this.library?.render();
         const container = this.root?.querySelector('#sa-library-results'); if (!container) return;
+        if (this.library && this.panes.library.dataset.saLibraryMode !== 'all') return;
         this.libraryDirty = false;
         const rows = this.filtered();
         const markup = `<p class="sa-hint">${rows.length} results. Dates, source messages, revisions and protection flags are inside Inspect.</p>` + rows.slice(0, 200).map(({ entry: e }) => {
@@ -419,7 +391,7 @@ export class Workbench {
         if (!j) { el.innerHTML = ''; delete el.dataset.status; return; }
         const active = !['done', 'canceled'].includes(j.status);
         el.dataset.status = j.status;
-        if (!active) { el.innerHTML = `<p class="sa-hint">Last job · ${html(jobLabel(j.kind))} · ${j.status === 'done' ? 'Saved' : 'Discarded'} · ${j.cursor}/${j.steps.length} steps saved.</p>`; return; }
+        if (!active) { el.replaceChildren(); return; }
         const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared${j.approvedRecords?.length ? ` · ${j.approvedRecords.length} approved records saved` : ''} · ${j.phase === 'review' ? 'ready for one combined review' : j.phase === 'saving' ? 'saving approved changes' : j.approvedRecords?.length ? 'remaining results await approval' : 'story books unchanged until approval'}` : `${j.cursor}/${j.steps.length} steps saved`;
         const step = j.steps[j.cursor];
         const recovery = j.status === 'failed' || j.status === 'paused'
@@ -446,8 +418,9 @@ export class Workbench {
         const selected = new Set(b.accepted.map(c => c.id));
         const extra = [...this.activatedIds].filter(id => !selected.has(id));
         const confirmation = this.activationKnown ? `<p>World Info activation confirmed for ${b.accepted.filter(c => this.activatedIds.has(c.id)).length}/${b.accepted.length} selected memories.${extra.length ? ` ST also activated ${extra.length} other story entries outside this selection; check native World Info activation settings.` : ''}</p>` : '<p>These are selection decisions. World Info activation has not been confirmed yet.</p>';
-        const mode = b.enforced === false ? '<p class="sa-warnline">This SillyTavern version does not expose the scan hook needed for the archive cap. Native World Info limits apply; this report observes activations only.</p>' : '<p>SillyTavern selected these entries using its own activation rules. The archive budget only trims that selection.</p>';
-        el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens retained.</p>` + mode + confirmation + `<p class="sa-hint">Showing ${visible.length} of ${b.accepted.length} retained entries.</p>` + visible.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Activation source: ${html(entryReasons(c))}` : ''}</div>`).join('') + '</details>';
+        const mode = b.enforced === false ? '<p class="sa-warnline">This SillyTavern version exposes activation reporting only. Native World Info limits apply.</p>' : '<p>The shared budget covers native World Info matches, scene recall and Little Things.</p>';
+        const little = this.sceneRecall.selection();
+        el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens retained.${little.items.length ? ` Little Things used ${little.tokens} tokens.` : ''}</p>` + mode + confirmation + `<p class="sa-hint">Showing ${visible.length} of ${b.accepted.length} retained entries.</p>` + visible.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Activation source: ${html(entryReasons(c))}` : ''}</div>`).join('') + '</details>';
         this.layout?.help.refresh(el);
     }
 
@@ -1123,6 +1096,7 @@ Continue existing ${s.unit} ${payload.sharedUnit} as a separate contribution. Ke
 Start new ${s.unit} entries at ${highest + 1}. Preserve the actual story dates.`;
             }
             req.system += '\nWrap the complete requested archive Markdown as a JSON string in {"archive":"markdown","keywords":[["keywords for the first unit"],["keywords for the second unit"]]}. List keyword arrays in the same order as the unit entries.';
+            if (!job.options.automatic) req.system += Little.notePrompt('message');
             req.prompt = reference + '\n\n' + req.prompt;
             const decode = raw => ({ raw, at: M.now() });
             if (prepareOnly) return { req, decode };
@@ -1357,6 +1331,11 @@ ${Core.buildTranscript(payload.messages)}`;
         if (kind === 'condense') {
             if (!M.condensationPrecheck(inputs, job.options.mode, job.options.label).possible) throw new Error('These records cannot become smaller after preserving their headings and required chronology. No model request was made.');
             const req = M.condensationRequest(inputs, job.options.mode, job.options.label, job.options.target);
+            const records = new Map(inputs.filter(e => {
+                const r = M.record(e);
+                return ['unit', 'memory'].includes(r.type) || r.type === 'recap' && r.covers?.length && r.covers.every(id => M.record(this.find(id))?.type === 'unit');
+            }).map(e => [M.record(e).id, e]));
+            if (!job.options.automatic && records.size) req.system += Little.notePrompt('recordId') + '\nUse these source IDs for Little Things: ' + [...records.keys()].join(', ') + '.';
             const profile = this.h.settings().sideProfile || '';
             const model = this.h.flowModelInfo?.(profile);
             const capacity = this.helperCapacity(model?.output || 6000, model);
@@ -1373,7 +1352,16 @@ ${Core.buildTranscript(payload.messages)}`;
                 if (afterTokens < beforeTokens) result.push({ ...item, beforeTokens, afterTokens, before });
             }
             if (!result.length) this.h.notify('The proposed version did not save tokens. The original is kept.', 'info');
-            return result;
+            const notes = job.options.automatic ? [] : Little.proposedLittleThings(M.parseJSON(raw)?.littleThings, item => {
+                const e = records.get(item?.recordId), r = M.record(e);
+                if (!r) return null;
+                const subject = r.type === 'memory' && (r.subject || Core.classifyEntry(e)?.name);
+                if (r.type === 'memory' && !subject) return null;
+                const sources = recordSources(r).filter(source => source.ranges?.length);
+                return { text: e.content, recordId: r.id, source: sources.length === 1 ? sources[0] : null,
+                    knows: subject ? [subject] : null, knownAvatar: subject ? r.subjectAvatar : '' };
+            });
+            return { results: result, notes };
         }
         if (kind === 'extract') return this.json({ ...M.extractionRequest(inputs, this.h.context().name1), maxTokens: 6000 }, raw => M.extractionResult(raw, inputs), 'structured memories');
         if (kind === 'continuity') return this.json({ ...M.continuityRequest(step.payload.claim, inputs), maxTokens: 4000 }, raw => M.continuityResult(raw, inputs), 'continuity check');
@@ -1509,15 +1497,19 @@ ${update.content}`;
         }
         if (kind === 'condense') {
             if (!inputs.every(M.eligible)) throw new Error('A source is now protected or in History. Cancel this job and choose the current sources.');
-            if (!step.output.length) return true;
-            const changes = step.output.map((o, i) => ({ ...o, title: job.options.mode === 'shorten' ? M.title(inputs.find(e => M.record(e).id === o.id) || inputs[i]) : job.options.label,
+            const results = Array.isArray(step.output) ? step.output : step.output.results;
+            const notes = Array.isArray(step.output) ? [] : step.output.notes;
+            if (!results.length && !notes.length) return true;
+            const changes = results.map((o, i) => ({ ...o, title: job.options.mode === 'shorten' ? M.title(inputs.find(e => M.record(e).id === o.id) || inputs[i]) : job.options.label,
                 before: o.before ?? (job.options.mode === 'shorten' ? inputs[i].content : inputs.map(e => e.content).join('\n\n')) }));
-            if (!job.options.automatic && !(await this.review(changes, job.options.mode === 'shorten' ? 'Shorten entries' : 'Create a linked recap'))) return false;
+            const proposals = this.bulkRun ? [] : notes.map(note => Little.reviewLittleThing(note, archiveBook));
+            if (!job.options.automatic && !(await this.review([...changes, ...proposals], job.options.mode === 'shorten' ? 'Shorten entries' : 'Create a linked recap'))) return false;
+            Little.addLittleThings(books[archiveBook], this.bulkRun ? notes : proposals.filter(c => c.include).map(c => ({ ...c.note, text: c.content, quote: c.content === c.note.text ? c.note.quote : '' })), this.state().storyId);
             if (job.options.mode === 'shorten') for (const change of changes) {
                 const e = this.entryIn(books, change.id).entry;
                 M.revise(e, change.content, 'Shorten entry');
-                if (this.bulkRun) (this.bulkRun.data.metrics ??= {})[change.id] = { beforeTokens: change.beforeTokens, afterTokens: change.afterTokens };;
-            } else {
+                if (this.bulkRun) (this.bulkRun.data.metrics ??= {})[change.id] = { beforeTokens: change.beforeTokens, afterTokens: change.afterTokens };
+            } else if (changes.length) {
                 const levels = inputs.map(e => Number(M.record(e).level) || 0);
                 this.add(books, 'recap', changes[0].content, { covers: inputs.map(e => M.record(e).id), derivedFrom: inputs.map(e => M.record(e).id), level: Math.max(...levels) + 1,
                     dates: M.unique(inputs.flatMap(e => M.record(e).dates || [])), people: M.unique(inputs.flatMap(e => M.record(e).people || [])), locations: M.unique(inputs.flatMap(e => M.record(e).locations || [])),
@@ -1719,13 +1711,18 @@ ${update.content}`;
 
     async beforeGeneration(type, params, dryRun) {
         this.installVectorBridge();
-        if (dryRun || this.h.isBusy() || type === 'quiet' || params?.quiet_prompt || !this.h.isActive()) { this.scanSuppressed = true; return; }
+        if (dryRun || this.h.isBusy() || type === 'quiet' || params?.quiet_prompt || !this.h.isActive()) {
+            this.sceneRecall.finish();
+            this.scanSuppressed = true;
+            return;
+        }
         this.scanSuppressed = false;
         const epoch = ++this.generationEpoch;
         this.scanEntries = []; this.scanReasons.clear(); this.externalActivations.clear(); this.explicitReasons.clear(); this.forcedEntries.clear();
         this.semanticHits.clear(); this.vectorRun = null; this.lastBudget = null;
         this.activatedIds.clear(); this.activationKnown = false; this.renderBudget();
         this.held.clear();
+        this.sceneRecall.begin(type, type !== 'impersonate');
         this.extras?.prompt.begin(type);
         if (!this.h.settings().recall) return;
         await this.loadBooks();
@@ -1837,16 +1834,19 @@ ${update.content}`;
         // completed its own work before applying one archive-wide cap.
         const limit = Number(this.h.scanLimit?.()) || 0;
         if (scan.state.next !== 0 && !(limit > 0 && scan.state.loopCount >= limit)) return;
-        const native = [...scan.activated.entries.values()].filter(e => this.isManagedEntry(e) && !this.memoryScopeReason(e));
+        const native = [...scan.activated.entries.values()].filter(e => this.isManagedEntry(e) && !this.memoryScopeReason(e) && !this.sceneRecall.reason(e));
         const counts = await this.countEntries(native);
         if (origin !== this.identity() || epoch !== this.generationEpoch || this.scanSuppressed) return;
-        const decision = M.allocateActivated(native, { budget: this.options().budget, entries: all,
+        const little = this.sceneRecall.selection(), budget = Math.max(0, Number(this.options().budget) || 0);
+        const decision = M.allocateActivated(native, { budget: Math.max(0, budget - little.tokens), entries: all,
             counts, details: [...this.details], reasons: this.scanReasons });
+        decision.budget = budget;
+        decision.used += little.tokens;
         const kept = new Set(decision.accepted.map(c => c.id)), nativeIds = new Set(native.map(e => M.record(e).id));
         for (const e of all) if (!nativeIds.has(M.record(e).id)) {
             const r = M.record(e);
             decision.omitted.push({ id: r.id, title: M.title(e), tokens: M.tokens(e.content),
-                reason: this.memoryScopeReason(e) || (!M.active(e) ? 'History' : e.disable ? 'disabled' : 'not activated by SillyTavern'),
+                reason: this.memoryScopeReason(e) || this.sceneRecall.reason(e) || (!M.active(e) ? 'History' : e.disable ? 'disabled' : 'not activated by SillyTavern'),
                 reasons: this.externalActivations.get(this.entryRef(e)) || [] });
         }
         const retain = e => !this.isManagedEntry(e) || kept.has(M.record(e).id);
@@ -1862,7 +1862,6 @@ ${update.content}`;
         if (!this.h.isActive()) return;
         const keys = ['globalLore', 'characterLore', 'chatLore', 'personaLore'];
         const all = keys.flatMap(k => groups[k] || []), managed = all.filter(e => this.isManagedEntry(e));
-        if (!managed.length) return;
         const unique = [...new Map(managed.map(e => [M.record(e).id, e])).values()];
         const group = this.h.groupSpeaker?.();
         for (const e of managed) {
@@ -1871,14 +1870,21 @@ ${update.content}`;
             if (!this.scanSuppressed && !this.vectorScan && !this.h.isBusy() && this.options().cacheLayers && !e.disable) placePromptLayers(e);
         }
         if (this.vectorScan || this.scanSuppressed || this.h.isBusy()) return;
+        const epoch = this.generationEpoch;
+        try { await this.sceneRecall.prepare(unique, group); }
+        catch (error) { console.warn('[Scene Archivist] Could not prepare scene recall:', error); }
+        if (epoch !== this.generationEpoch || this.scanSuppressed) return;
+        for (const e of managed) if (this.sceneRecall.reason(e)) e.disable = true;
         this.scanEntries = unique;
+        const scene = this.sceneRecall.recordReasons();
         const requested = unique.filter(e => !e.disable && !this.forcedEntries.has(M.record(e).id) &&
-            (this.held.has(M.record(e).id) || this.details.has(M.record(e).id)));
+            (this.held.has(M.record(e).id) || this.details.has(M.record(e).id) || scene.has(M.record(e).id)));
         if (requested.length && this.h.forceEntries) {
             for (const e of requested) {
                 const id = M.record(e).id, reasons = [];
                 if (this.details.has(id)) reasons.push('detail requested');
                 if (this.held.has(id)) reasons.push('recall');
+                if (scene.has(id)) reasons.push(scene.get(id));
                 this.explicitReasons.set(id, reasons); this.forcedEntries.add(id);
             }
             await this.h.forceEntries(requested.map(e => ({ ...e, decorators: e.decorators ?? [] })));
@@ -1939,7 +1945,14 @@ ${update.content}`;
                     }
                     r.source = source;
                 }
-                if (data.sceneArchivistStory) data.sceneArchivistStory = { schema: 1, id: newId, shared: false, books: Object.fromEntries(Object.entries(mapping).map(([a, b]) => [b, a === oldArchive ? 'archive' : 'separate'])) };
+                if (data.sceneArchivistStory) {
+                    const notes = Little.littleThings(data);
+                    data.sceneArchivistStory = { schema: 1, id: newId, shared: false, books: Object.fromEntries(Object.entries(mapping).map(([a, b]) => [b, a === oldArchive ? 'archive' : 'separate'])) };
+                    for (const note of notes) if (Little.verifiedNoteSource(note.source, originalSource, this.h.context().chat || [])) {
+                        Object.assign(note.source, { chatId: newSource, actualChatId: this.identity() });
+                    }
+                    Little.setLittleThings(data, notes);
+                }
                 await this.h.createBook(mapping[old]); await this.h.save(mapping[old], data);
             }
             s.lorebook = mapping[oldArchive]; s.memoryBook = mapping[bundle.metadata?.config?.memoryBook || `${oldArchive} Memories`.slice(0, 80)] || '';
@@ -2005,6 +2018,8 @@ ${update.content}`;
         if (preview) preview.textContent = '';
         this.root?.querySelector('#sa-range-message-preview')?.replaceChildren();
         this.selected.clear(); this.held.clear(); this.details.clear(); this.lastBudget = null;
+        this.library?.reset();
+        this.sceneRecall.reset();
         this.extras?.prompt.clear();
         this.semanticHits.clear(); this.vectorRun = null; this.activatedIds.clear(); this.activationKnown = false;
         this.scanSuppressed = true; this.generationEpoch++; this.scanEntries = []; this.scanReasons.clear();
@@ -2049,7 +2064,7 @@ ${update.content}`;
         if (action === 'rangeHide' || action === 'rangeShow') return this.visibility(action === 'rangeShow');
         if (action === 'tidy') return this.withLock(() => this.tidy());
         if (action === 'condenseSelected') return this.startCondense(this.selectedEntries());
-        if (action === 'condenseSuggested') { this.selected = new Set(M.condensationCandidates(this.entries, this.options()).map(e => M.record(e).id)); this.showTab('library'); this.renderLibrary(); return this.renderDashboard(); }
+        if (action === 'condenseSuggested') { this.selected = new Set(M.condensationCandidates(this.entries, this.options()).map(e => M.record(e).id)); this.showTab('library'); this.library?.show('all'); return this.renderDashboard(); }
         if (action === 'extract') return this.startExtract();
         if (action === 'clip') return this.capture('clip');
         if (action === 'newKnowledge') return this.capture('knowledge');

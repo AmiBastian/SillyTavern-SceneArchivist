@@ -103,7 +103,8 @@ test('reply traces persist to the active swipe, including a reply with zero load
     const chat = [{ mes: 'first reply', extra: {}, swipe_id: 0, swipe_info: [{ extra: {} }, { extra: {} }] }];
     const w = { h: { context: () => ({ chat }), isBusy: () => false, tokenizerKey: () => 'model' },
         identity: () => 'chat', generationEpoch: 1, findRetrievedEntry: entry => entry,
-        options: () => ({ cacheLayers: false }), activationReasons: () => ['keyword'] };
+        options: () => ({ cacheLayers: false }), activationReasons: () => ['keyword'],
+        sceneRecall: { selection: () => ({ items: [], tokens: 0 }), receive() {} } };
     const trace = new PromptInspection(w);
     trace.begin('normal');
     trace.activated([entry]);

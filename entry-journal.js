@@ -1,4 +1,5 @@
 import { copy, now, uid, hash, record, title } from './memory-engine.js';
+import { littleThings, setLittleThings } from './little-things.js';
 
 // Compare the complete saved entry, including activation settings and protections.
 export const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(',')}]` : value && typeof value === 'object'
@@ -9,6 +10,30 @@ export const entryChanges = (before, after) => [...new Set([...Object.keys(befor
     .map(key => ({ key, id: record(after?.entries?.[key])?.id || record(before?.entries?.[key])?.id || key,
         title: title(after?.entries?.[key] || before?.entries?.[key] || {}), before: copy(before?.entries?.[key] ?? null), after: copy(after?.entries?.[key] ?? null) }));
 
+function noteChanges(before, after) {
+    const previous = new Map(littleThings(before).map(note => [note.id, note]));
+    const next = new Map(littleThings(after).map(note => [note.id, note]));
+    return [...new Set([...previous.keys(), ...next.keys()])]
+        .filter(id => !same(previous.get(id), next.get(id)))
+        .map(id => ({ kind: 'littleThing', key: id, id, title: (next.get(id) || previous.get(id)).text.slice(0, 100),
+            before: copy(previous.get(id) ?? null), after: copy(next.get(id) ?? null) }));
+}
+
+const changeValue = (book, change) => (change.kind === 'littleThing'
+    ? littleThings(book).find(note => note.id === change.key) : book?.entries?.[change.key]) ?? null;
+const sameChange = (a, b) => a.book === b.book && a.key === b.key && a.kind === b.kind;
+
+function restoreChange(book, change) {
+    if (change.kind === 'littleThing') {
+        const notes = littleThings(book);
+        const at = notes.findIndex(note => note.id === change.key);
+        if (at < 0 && change.before) notes.push(copy(change.before));
+        else if (at >= 0) notes.splice(at, 1, ...(change.before ? [copy(change.before)] : []));
+        setLittleThings(book, notes);
+    } else if (change.before) book.entries[change.key] = copy(change.before);
+    else delete book.entries[change.key];
+}
+
 export function makeJournal({ id = uid(), archive = '', chatId = '', label = 'Memory update', progress = {}, visibility = [] } = {}) {
     return { schema: 1, id, archive, chatId, label, at: now(), updated: now(), status: 'prepared', changes: [], receipts: {},
         progress: { before: copy(progress), after: copy(progress) }, visibility: copy(visibility) };
@@ -16,8 +41,8 @@ export function makeJournal({ id = uid(), archive = '', chatId = '', label = 'Me
 
 // Persist this intent before sending a save. A failed request can still have reached ST.
 export function stageWrite(journal, book, before, after) {
-    for (const change of entryChanges(before, after)) {
-        const existing = journal.changes.find(c => c.book === book && c.key === change.key);
+    for (const change of [...entryChanges(before, after), ...noteChanges(before, after)]) {
+        const existing = journal.changes.find(c => sameChange(c, { ...change, book }));
         if (existing) Object.assign(existing, { after: change.after, title: change.title, status: 'pending' });
         else journal.changes.push({ ...change, book, status: 'pending' });
     }
@@ -29,7 +54,7 @@ export function stageWrite(journal, book, before, after) {
 
 export function confirmWrite(journal, book, actual) {
     const changes = journal.changes.filter(c => c.book === book && c.status === 'pending');
-    if (changes.some(c => !same(actual?.entries?.[c.key], c.after))) throw new Error(`The journal could not confirm the saved entries in "${book}".`);
+    if (changes.some(c => !same(changeValue(actual, c), c.after))) throw new Error(`The journal could not confirm the saved changes in "${book}".`);
     for (const change of changes) { change.status = 'saved'; change.confirmedAt = now(); }
     journal.status = 'saved'; journal.updated = now();
 }
@@ -47,7 +72,7 @@ export function planUndo(journal, books) {
     const safe = [], conflicts = [], already = [];
     for (const change of journal.changes) {
         if (change.status === 'undone') continue;
-        const current = books[change.book]?.entries?.[change.key] ?? null;
+        const current = changeValue(books[change.book], change);
         if (same(current, change.before)) { already.push(change); continue; }
         if (!Object.hasOwn(books, change.book)) { conflicts.push({ ...change, reason: 'The lorebook is unavailable.' }); continue; }
         if (!same(current, change.after)) { conflicts.push({ ...change, reason: 'The entry was edited after this job wrote it, including its settings or metadata.' }); continue; }
@@ -57,11 +82,9 @@ export function planUndo(journal, books) {
     while (changed) {
         changed = false;
         const projected = copy(books);
-        for (const c of safe) {
-            if (c.before) projected[c.book].entries[c.key] = copy(c.before);
-            else delete projected[c.book].entries[c.key];
-        }
+        for (const c of safe) restoreChange(projected[c.book], c);
         for (const c of [...safe]) {
+            if (c.kind === 'littleThing') continue;
             if (conflicts.some(other => other.id === c.id)) {
                 safe.splice(safe.indexOf(c), 1); conflicts.push({ ...c, reason: 'Another change to this record identity cannot be undone, so its move or related change must be kept together.' }); changed = true; continue;
             }
@@ -87,9 +110,8 @@ export function planUndo(journal, books) {
 export function applyUndo(books, plan) {
     const result = copy(books);
     for (const c of plan.safe) {
-        if (!same(result[c.book]?.entries?.[c.key], c.after)) throw new Error(`"${c.title}" changed after the Undo preview. Reopen Undo.`);
-        if (c.before) result[c.book].entries[c.key] = copy(c.before);
-        else delete result[c.book].entries[c.key];
+        if (!same(changeValue(result[c.book], c), c.after)) throw new Error(`"${c.title}" changed after the Undo preview. Reopen Undo.`);
+        restoreChange(result[c.book], c);
     }
     if (plan.complete) for (const [book, receipt] of Object.entries(plan.journal.receipts || {})) {
         if (!result[book]) continue;
@@ -101,9 +123,9 @@ export function applyUndo(books, plan) {
 
 export function confirmUndo(journal, book, actual, plan) {
     for (const c of [...plan.safe, ...plan.already].filter(c => c.book === book)) {
-        if (!same(actual?.entries?.[c.key], c.before)) throw new Error(`Undo of "${c.title}" was not confirmed.`);
+        if (!same(changeValue(actual, c), c.before)) throw new Error(`Undo of "${c.title}" was not confirmed.`);
         c.status = 'undone'; c.undoneAt = now();
-        const stored = journal.changes.find(x => x.book === c.book && x.key === c.key);
+        const stored = journal.changes.find(x => sameChange(x, c));
         Object.assign(stored, { status: 'undone', undoneAt: c.undoneAt });
     }
     journal.status = journal.changes.every(c => c.status === 'undone') ? 'entries undone' : 'partially undone'; journal.updated = now();

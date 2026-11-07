@@ -1,4 +1,5 @@
 import * as M from './memory-engine.js';
+import { projectLittleThings, setLittleThings } from './little-things.js';
 
 export const recordSources = r => [r?.source, ...(r?.supplementalSources || [])].filter(Boolean);
 export const protectedRecord = e => ['locked', 'exact', 'detailed'].some(k => M.record(e)?.protection?.[k]);
@@ -70,7 +71,11 @@ export function projectBranch(books, { mode = 'inherit', oldSource, sourceId, st
             if (mode === 'fresh' || rejected.has(e)) { excluded.push({ book: name, title: M.title(e) }); delete book.entries[key]; }
 
         }
-        if (name === archive) book.sceneArchivistStory = { schema: 1, id: storyId, shared: false, books: Object.fromEntries(Object.values(mapping).map(n => [n, n === mapping[archive] ? 'archive' : 'separate'])) };
+        if (name === archive) {
+            const notes = projectLittleThings(book, { mode, oldSource, sourceId, chatId, chat });
+            book.sceneArchivistStory = { schema: 1, id: storyId, shared: false, books: Object.fromEntries(Object.values(mapping).map(n => [n, n === mapping[archive] ? 'archive' : 'separate'])) };
+            setLittleThings(book, notes);
+        }
     }
     return { books: result, excluded };
 }

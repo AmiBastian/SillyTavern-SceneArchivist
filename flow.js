@@ -41,7 +41,7 @@ export function archiveAnswer(raw) {
         if (/^\s*(?:\x60{3}(?:json)?\s*)?\{/.test(raw)) throw new Error('The archive response was incomplete. Edit it as Markdown or retry the stage.');
         return { raw, keywords: [] };
     }
-    return { raw: obj.archive, keywords: Array.isArray(obj.keywords) ? obj.keywords : [] };
+    return { raw: obj.archive, keywords: Array.isArray(obj.keywords) ? obj.keywords : [], littleThings: obj.littleThings };
 }
 
 export function trackerAnswer(raw, trackers) {

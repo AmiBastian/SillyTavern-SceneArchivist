@@ -3,6 +3,7 @@
 
 import { extension_settings, getContext } from '../../../extensions.js';
 import { saveSettingsDebounced, generateQuietPrompt, generateRaw, chat_metadata, saveMetadata, main_api, characters, this_chid, eventSource, event_types, getCurrentChatId, getRequestHeaders, getMaxContextTokens, getMaxResponseTokens, showMoreMessages, Generate } from '../../../../script.js';
+import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { callGenericPopup, Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getCharaFilename, getStringHash, getSanitizedFilename } from '../../../utils.js';
 import { hideChatMessageRange } from '../../../chats.js';
@@ -622,7 +623,7 @@ async function prepareArchive(text, data, source = archiveSource, placement = nu
     const deliveryChanges = Object.values(data.entries ?? {}).filter(e => Core.classifyEntry(e) && !Core.matchesDelivery(e, coreOpts())).length;
     if (deliveryChanges) plan.warnings.push(`${deliveryChanges} existing log entries use a different delivery setting. Writing will move them to ${deliveryLabel(coreOpts())}.`);
     await fillKeys(plan, data, placement ? answer.keywords : null);
-    return { parsed, plan };
+    return { parsed, plan, littleThings: answer.littleThings };
 }
 
 async function handleOutput(text) {
@@ -1596,6 +1597,8 @@ jQuery(async () => {
             scanSupported: !!event_types.WORLDINFO_SCAN_DONE,
             scanLimit: () => world_info_max_recursion_steps,
             forceEntries: entries => eventSource.emit(event_types.WORLDINFO_FORCE_ACTIVATE, entries),
+            recallBook: name => worldInfoCache.get(name) ?? readFresh(name),
+            setLittleThingsPrompt: text => setExtensionPrompt('sceneArchivistLittleThings', text, extension_prompt_types.IN_CHAT, 2, false, extension_prompt_roles.SYSTEM),
         });
         workbench.mount(document.querySelector('.sa-panel'));
         bindUi();
@@ -1625,6 +1628,9 @@ jQuery(async () => {
         }));
         eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, onEntriesLoaded);
         eventSource.on(event_types.GENERATION_STARTED, onGenerationStarted);
+        for (const event of [event_types.GENERATION_ENDED, event_types.GENERATION_STOPPED].filter(Boolean)) {
+            eventSource.on(event, () => workbench.sceneRecall.finish());
+        }
         eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
         for (const event of [event_types.CHAT_COMPLETION_PROMPT_READY, event_types.GENERATE_AFTER_COMBINE_PROMPTS].filter(Boolean)) {
             eventSource.on(event, data => workbench.extras.prompt.promptReady(data));
@@ -1638,6 +1644,7 @@ jQuery(async () => {
         $('#sa_wand_panel').on('click', openPanelPopup);
         eventSource.on(event_types.CHAT_CHANGED, () => {
             chatRevision++; chatControls?.close();
+            workbench.sceneRecall.reset();
             return refreshChatUi().catch(error => toastr.warning(error.message, 'Scene Archivist'));
         });
         if (event_types.CHAT_RENAMED) eventSource.on(event_types.CHAT_RENAMED, onChatRenamed);

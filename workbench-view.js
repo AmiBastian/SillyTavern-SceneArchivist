@@ -3,6 +3,7 @@ import { escape as html } from './workflow-tools.js';
 import { mountTools } from './workbench-tools.js';
 import { mountRecovery } from './workbench-recovery.js';
 import { WorkspaceLayout } from './workbench-layout.js';
+import { StoryLibrary } from './story-library.js';
 import { WorkbenchExtras } from './workbench-extras.js';
 
 export const button = (action, label, extra = '') => `<button type="button" class="menu_button" data-sa-action="${action}" ${extra}>${label}</button>`;
@@ -72,6 +73,7 @@ export function mountWorkbench(w, root) {
     w.extras = new WorkbenchExtras(w);
     mountStoryTools(w);
     w.layout = new WorkspaceLayout(w);
+    w.library = new StoryLibrary(w);
     root.addEventListener('click', event => {
         const tab = event.target.closest('[data-sa-tab]'); if (tab) { w.showTab(tab.dataset.saTab); return; }
         const b = event.target.closest('[data-sa-action]');
@@ -81,7 +83,7 @@ export function mountWorkbench(w, root) {
         if (e.key === 'Enter') { e.preventDefault(); w.dispatch('ask').catch(error => w.h.notify(error.message, 'error')); }
     });
     nav.addEventListener('keydown', e => {
-        const buttons = [...nav.querySelectorAll('[role=tab]:not([hidden])')], i = buttons.indexOf(document.activeElement);
+        const buttons = [...nav.querySelectorAll(':scope > [role=tab]:not([hidden])')], i = buttons.indexOf(document.activeElement);
         if (i < 0 || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(e.key)) return;
         e.preventDefault(); const n = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + buttons.length) % buttons.length;
         w.showTab(buttons[n].dataset.saTab); buttons[n].focus();
@@ -118,12 +120,13 @@ export function mountWorkbench(w, root) {
 
 function mountStoryTools(w) {
     w.panes.story.innerHTML = `<section class="sa-story-home">
-        <p class="sa-eyebrow">THE STORY SO FAR</p><h3>📚 Your story, kept together</h3>
+        <p class="sa-eyebrow">THE STORY SO FAR</p><h3 id="sa-story-name">📖 This story</h3>
         <div id="sa-story-stats"></div><p id="sa-story-job" class="sa-hint"></p><p id="sa-story-warnings" class="sa-warnline"></p>
-        <p>Archive thoroughly writes scene summaries, creates character memories and updates enabled trackers. You get one review. The lore can be dramatic. The buttons can behave.</p>
-        <div class="sa-row">${button('storyThorough', '📚 Archive thoroughly')}${button('storyRange', '🎯 Pick messages first')}${button('estimateThorough', '📊 Estimate this run')}${button('storyAttach', '🔗 Attach archive to this chat', 'hidden')}</div>
-        <div class="sa-story-history"><b>⏱️ Recent changes</b><ul id="sa-story-recent"></ul></div>
+        <div class="sa-row">${button('storyThorough', '📚 Archive thoroughly')}${button('storyRange', '🎯 Choose range')}${button('storyAttach', '🔗 Attach archive to this chat', 'hidden')}${button('estimateThorough', '📊 Estimate this run')}</div>
+        <p class="sa-hint">Summaries, character memories and enabled trackers, with one review. The lore can be dramatic. The buttons can behave.</p>
     </section>`;
+    w.panes.story.insertAdjacentHTML('beforeend', `<section class="sa-story-secondary"><h3>🗂️ Recently saved</h3><ul id="sa-story-recent"></ul></section>
+        <section class="sa-story-secondary"><h3>🔎 Last reply’s Memory Trail</h3><p id="sa-story-trace" class="sa-hint"></p>${button('dockPromptTrace', '🔎 Open trail beside chat')}</section>`);
     const range = w.root.querySelector('#sa-range-preview');
     range.insertAdjacentHTML('beforebegin', '<p id="sa-range-anchor-note" class="sa-hint" hidden></p>');
     range.insertAdjacentHTML('afterend', `<div class="sa-row">${button('rangeClear', '🧽 Clear picks')}${button('estimateRange', '📊 Estimate this range')}${button('sharedFiling', '📂 Shared filing options', 'hidden')}</div>
@@ -132,6 +135,8 @@ function mountStoryTools(w) {
     w.root.querySelector('[data-sa-action=memoriesAll]').after(document.createRange().createContextualFragment(button('estimateMemories', '📊 Estimate memories run')));
     w.root.querySelector('#sa-character-memories').insertAdjacentHTML('beforebegin', `<div class="sa-row">${button('characterTimeline', '🗓️ Character timeline')}${button('characterExport', '📄 Export character memories')}</div>`);
     w.panes.prompt.insertAdjacentHTML('afterbegin', card('🔍 What went into the reply?', `<p id="sa-last-prompt" class="sa-hint"></p>${button('showPromptTrace', '🔎 View last reply’s memory trail')}
+        <label class="checkbox_label"><input type="checkbox" data-sa-option="sceneRecall"><span>🧵 Match Little Things and story records to the scene</span></label>
+        <p class="sa-hint">Use recent cues and explicit scene markers to recall details inside the memory budget. This runs locally and uses no extra model request.</p>
         <label class="checkbox_label"><input type="checkbox" data-sa-option="groupMemoryScope"><span>🧠 Only load the speaking character’s memories in groups</span></label>
         <p class="sa-hint">When you save a group memory for a specific card, its lorebook can use that card filter in SillyTavern too.</p>
         <label class="checkbox_label"><input type="checkbox" data-sa-option="cacheLayers"><span>⚡ Cache-friendly delivery · experimental</span></label>

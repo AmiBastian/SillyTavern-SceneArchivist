@@ -49,15 +49,16 @@ export class WorkbenchExtras {
         const pending = Flow.uncoveredArchiveMessages(chat, w.h.meta()).length;
         const total = Core.pendingMessages(chat).filter(message => !isSkipped(w.h.meta().rangeControl, chat[message.idx])).length;
         const archive = w.h.settings().lorebook, job = w.state().job;
-        stats.replaceChildren(el('p', archive ? `📖 ${archive}` : '📖 Pick or create an archive to get started.'), el('p', `${total - pending} of ${total} messages archived · ${pending} waiting`, 'sa-hint'));
+        root.querySelector('#sa-story-name').textContent = archive || 'Start with one scene';
+        stats.replaceChildren(el('p', archive ? `${total - pending} of ${total} messages archived · ${pending} waiting` : 'Pick or create an archive to get started.', 'sa-hint'));
         const progress = el('progress');
         progress.setAttribute('aria-label', 'Archive coverage'); progress.max = Math.max(total, 1); progress.value = Math.max(total - pending, 0);
         stats.append(progress);
         const summary = root.querySelector('#sa-story-job');
         summary.textContent = job ? `🧾 ${jobLabel(job.kind)} · ${job.status === 'done' ? 'Saved' : job.status === 'canceled' ? 'Discarded' : job.status === 'failed' ? 'Needs attention' : job.status}` : '🧾 No jobs for this story yet.';
         const recent = root.querySelector('#sa-story-recent');
-        const rows = (w.h.meta().journals || []).slice(-3).reverse();
-        recent.replaceChildren(...rows.map(item => el('li', `${jobLabel(item.reason || item.label || 'Story changes')} · ${item.status === 'undone' ? 'Undone' : 'Saved'}`)));
+        const rows = (w.h.meta().journals || []).filter(item => item.archive === archive && ['saved', 'undone'].includes(item.status)).slice(-3).reverse();
+        recent.replaceChildren(...(rows.length ? rows.map(item => el('li', `${jobLabel(item.label || 'Story changes')} · ${item.status === 'undone' ? 'Undone' : 'Saved'}`)) : [el('li', 'Your next saved scene will appear here.')]));
         const warnings = root.querySelector('#sa-story-warnings');
         warnings.textContent = archive && !w.h.isActive() ? '⚠️ Attach your archive to use it in replies.' :
             job?.error ? `⚠️ ${job.error}` : w.state().branchLineage?.parent ? `🌿 Branched from ${w.state().branchLineage.parent}` : '';
@@ -88,13 +89,16 @@ export class WorkbenchExtras {
         const w = this.w, chat = w.h.context().chat, message = chat[index], origin = w.identity();
         if (!message) throw new Error('That message is no longer available.');
         const anchor = w.chatControls.anchor(index), hash = M.messageHash(message);
-        const root = form(`🧠 Remember this · #${index}`, 'Save one detail with this message as its source. Give it to the character who actually knows it.');
+        const root = form(`🧠 Remember this · #${index}`, 'Save a memory or keep a small detail with this message as its source.');
+        const type = field(root, 'Save as', el('select'));
+        type.add(new Option('Character memory', 'memory'));
+        type.add(new Option('Little Thing', 'little'));
         const group = w.h.groupSpeaker?.(), context = w.h.context();
         const cards = group?.members || (context.characters || []).filter(card => card.name).map(card => ({ name: card.name, avatar: card.avatar }));
         const select = field(root, 'Who remembers it?', el('select'));
         select.add(new Option('✏️ Enter a character or NPC name', ''));
         for (const card of cards) select.add(new Option(card.name + (cards.filter(c => c.name === card.name).length > 1 ? ` · ${card.avatar}` : ''), card.avatar));
-        const who = field(root, 'Name for an NPC or persona', el('input'));
+        const who = field(root, 'Name for an NPC or persona (blank for a shared Little Thing)', el('input'));
         const sameName = cards.filter(card => card.name === message.name && !message.is_user);
         const guess = message.original_avatar || (sameName.length === 1 ? sameName[0].avatar : '');
         if (guess && [...select.options].some(option => option.value === guess)) select.value = guess;
@@ -112,11 +116,10 @@ export class WorkbenchExtras {
             } catch (error) { w.h.notify(error.message, 'error'); } finally { tidy.disabled = false; }
         });
         root.append(tidy);
-        if (!(await w.h.confirm(root, { okButton: '💾 Save memory' }))) return;
+        if (!(await w.h.confirm(root, { okButton: '💾 Save detail' }))) return;
         const card = cards.find(item => item.avatar === select.value);
         const subject = card?.name || who.value.trim(), body = draft.value.trim();
-        if (!subject || !body) throw new Error('Give the memory a character and some text first.');
-        if (!w.flowSettings().persona && !card && subject.toLowerCase() === String(context.name1).toLowerCase()) throw new Error('Enable persona memories in Settings before saving a memory for your persona.');
+        if (!body || (type.value === 'memory' && !subject)) throw new Error('Give the detail some text and assign a character for a character memory.');
         const current = () => {
             const at = anchorIndex(w.h.context().chat, anchor);
             if (w.identity() !== origin || w.h.context().chat !== chat || at === null || M.messageHash(chat[at]) !== hash) {
@@ -125,6 +128,11 @@ export class WorkbenchExtras {
             return at;
         };
         current();
+        if (type.value === 'little') return w.library.save({
+            text: body, knows: subject ? [subject] : [], knownAvatar: card?.avatar, cues: keywords.value, date: M.chronology(message.mes).dates[0],
+            quote: selected && selected.length <= 180 && String(message.mes).includes(selected) ? selected : '',
+        }, { source: () => { const at = current(); return w.source([{ from: at, to: at }]); } });
+        if (!w.flowSettings().persona && !card && subject.toLowerCase() === String(context.name1).toLowerCase()) throw new Error('Enable persona memories in Settings before saving a memory for your persona.');
         if (!(await w.h.ensureArchive())) return;
         await w.withLock(async () => {
             await w.loadBooks();
@@ -377,6 +385,7 @@ export class WorkbenchExtras {
             case 'estimateRange': await w.startFlow('catch-up', w.previewRange(), null, true); break;
             case 'estimateMemories': await w.startFlow('memories', null, null, true); break;
             case 'showPromptTrace': await this.prompt.show(); break;
+            case 'dockPromptTrace': await this.prompt.show(null, true); break;
             case 'setupHealth': await this.setup(); break;
             case 'profiles': await this.profiles(); break;
             case 'characterTimeline': await this.timeline(); break;

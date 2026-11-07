@@ -34,6 +34,7 @@ export class PromptInspection {
     }
 
     clear() {
+        this.closeDock(false);
         this.current = null;
         this.lastTrace = null;
         this.previousPrompt = '';
@@ -87,9 +88,14 @@ export class PromptInspection {
             return { id, title: M.title(entry).slice(0, 160), tokens: choice?.cost ?? M.tokens(entry.content),
                 reasons: choice?.reasons || w.activationReasons(entry) };
         });
+        const picked = w.sceneRecall.selection();
+        const little = picked.items.map(item => ({ id: item.note.id, title: item.note.text.slice(0, 180),
+            reason: item.reason, quote: !!item.quote }));
+        w.sceneRecall.receive(active, index);
         const omitted = (w.lastBudget?.omitted || []).map(({ id, title, tokens, reason }) => ({ id, title: String(title).slice(0, 160), tokens, reason }));
-        const trace = { at: Date.now(), active: active.slice(0, maxItems), omitted: omitted.slice(0, maxItems), loaded: active.length, skipped: omitted.length,
-            tokens: active.reduce((sum, item) => sum + item.tokens, 0), prefixTokens: run.prefixTokens, scanObserved: !!(run.seenScan || w.lastBudget),
+        const trace = { at: Date.now(), active: active.slice(0, maxItems), omitted: omitted.slice(0, maxItems), little,
+            littleTokens: picked.tokens, loaded: active.length + little.length, skipped: omitted.length,
+            tokens: active.reduce((sum, item) => sum + item.tokens, picked.tokens), prefixTokens: run.prefixTokens, scanObserved: !!(run.seenScan || w.lastBudget || little.length),
             layered: w.options().cacheLayers };
         (message.extra ??= {})[traceKey] = trace;
         const swipe = message.swipe_info?.[message.swipe_id ?? 0];
@@ -103,13 +109,22 @@ export class PromptInspection {
     }
 
     render() {
-        const status = this.w.root?.querySelector('#sa-last-prompt');
-        if (status) status.textContent = this.lastTrace
-            ? `🧠 ${this.lastTrace.loaded} entries loaded · ~${this.lastTrace.tokens.toLocaleString()} tokens · ${this.lastTrace.skipped} skipped.`
-            : 'Send a reply with an attached archive to see its memory trail here.';
+        const trace = this.lastTrace || this.w.h.context().chat?.findLast(item => item.extra?.[traceKey])?.extra?.[traceKey];
+        const text = trace ? `${trace.loaded} loaded · ~${trace.tokens.toLocaleString()} tokens · ${trace.skipped} skipped.`
+            : 'Send a reply with an attached archive to see its memory trail.';
+        for (const status of this.w.root?.querySelectorAll('#sa-last-prompt, #sa-story-trace') || []) status.textContent = text;
     }
 
-    async show(index = null) {
+    closeDock(restoreFocus = true) {
+        if (!this.dock) return;
+        this.dock.remove();
+        this.dock = null;
+        document.body.classList.remove('sa-trail-open');
+        if (restoreFocus && this.dockTrigger?.isConnected) this.dockTrigger.focus();
+        this.dockTrigger = null;
+    }
+
+    async show(index = null, docked = false) {
         const w = this.w;
         const chat = w.h.context().chat || [], message = index === null ? null : chat[index];
         const trace = index === null
@@ -117,8 +132,8 @@ export class PromptInspection {
             : message?.extra?.[traceKey];
         const root = document.createElement('div');
         root.className = 'sa-review sa-prompt-trace';
-        root.innerHTML = `<h3>🔎 ${index === null ? 'Last reply’s memory trail' : `Memory trail for #${index}`}</h3>
-            <p class="sa-hint">Scene Archivist entries observed at SillyTavern’s World Info stage. Delivery and provider limits can affect the final request.</p>`;
+        root.innerHTML = `<h3>🔎 ${index === null ? docked ? 'Memory Trail' : 'Last reply’s memory trail' : `Memory Trail for #${index}`}</h3>
+            <p class="sa-hint">What Scene Archivist selected for this reply, with the cues and sources behind it.</p>`;
         if (!trace) {
             root.insertAdjacentHTML('beforeend', '<p>No trace for this swipe. Generate a reply with an attached archive to start recording.</p>');
         } else {
@@ -132,7 +147,7 @@ export class PromptInspection {
                 p.textContent = `~${trace.prefixTokens.toLocaleString()} tokens of shared prompt prefix vs. the previous request. ${trace.layered ? 'Cache-friendly delivery was on.' : 'Normal delivery was on.'}`;
                 root.append(p);
             }
-            for (const [title, items, total] of [['📥 Loaded', trace.active, trace.loaded], ['🧹 Skipped', trace.omitted, trace.skipped]]) {
+            for (const [title, items, total] of [['📥 Lorebook records', trace.active, trace.loaded - (trace.little?.length || 0)], ['🧹 Skipped', trace.omitted, trace.skipped]]) {
                 const section = document.createElement('details');
                 section.open = title.startsWith('📥');
                 section.innerHTML = `<summary>${title} · ${total}</summary>`;
@@ -142,15 +157,78 @@ export class PromptInspection {
                     row.className = 'sa-result';
                     row.innerHTML = `<b>${html(item.title)}</b><p class="sa-hint">~${Number(item.tokens) || 0} tokens · ${html(item.reason || item.reasons?.join(', ') || 'World Info')}</p>`;
                     if (w.find(item.id)) {
+                        const actions = document.createElement('div');
+                        actions.className = 'sa-row sa-trail-actions';
                         const button = document.createElement('button');
                         button.type = 'button'; button.className = 'menu_button'; button.textContent = '🔎 View sources';
                         button.addEventListener('click', () => void w.showSources(item.id));
-                        row.append(button);
+                        actions.append(button);
+                        if (section.open) {
+                            const load = document.createElement('button');
+                            load.type = 'button'; load.className = 'menu_button'; load.textContent = '📌 Load next reply';
+                            load.addEventListener('click', () => void w.dispatch('loadDetail', { dataset: { id: item.id } }).catch(error => w.h.notify(error.message, 'error')));
+                            actions.append(load);
+                        }
+                        row.append(actions);
                     }
                     section.append(row);
                 }
                 root.append(section);
             }
+            if (trace.little?.length) {
+                const section = document.createElement('details');
+                section.open = true;
+                section.innerHTML = `<summary>🧵 Little Things · ${trace.little.length} · ~${trace.littleTokens} tokens</summary>`;
+                for (const item of trace.little) {
+                    const row = document.createElement('div');
+                    row.className = 'sa-result';
+                    row.innerHTML = `<b>${html(item.title)}</b><p class="sa-hint">${html(item.reason)}${item.quote ? ' · Verified quotation' : ''}</p>`;
+                    const note = w.littleThings().find(note => note.id === item.id);
+                    if (note) {
+                        const actions = document.createElement('div');
+                        actions.className = 'sa-row sa-trail-actions';
+                        const controls = [
+                            ['✏️ Edit cues', () => w.library.edit(note.id)],
+                            ['📌 Load next reply', () => w.library.loadNext(note.id)],
+                        ];
+                        if (note.source?.ranges?.length) controls.unshift(['📍 Source message', () => w.library.jump(note.source, root)]);
+                        else if (note.recordId && w.find(note.recordId)) controls.unshift(['🔎 Source record', () => w.showSources(note.recordId)]);
+                        for (const [label, run] of controls) {
+                            const button = document.createElement('button');
+                            button.type = 'button'; button.className = 'menu_button'; button.textContent = label;
+                            button.addEventListener('click', () => void Promise.resolve().then(run).catch(error => w.h.notify(error.message, 'warning')));
+                            actions.append(button);
+                        }
+                        row.append(actions);
+                    }
+                    section.append(row);
+                }
+                root.querySelector('details')?.before(section);
+            }
+        }
+        if (docked) {
+            this.closeDock(false);
+            const trigger = document.activeElement, origin = w.identity();
+            const dialog = w.root?.closest('dialog[open]');
+            const dismiss = dialog?.querySelector('.popup-button-ok');
+            if (dismiss) await new Promise(resolve => {
+                dialog.addEventListener('close', resolve, { once: true });
+                dismiss.click();
+            });
+            if (origin !== w.identity()) return;
+            const dock = document.createElement('aside');
+            dock.className = 'sa-trail-dock';
+            dock.setAttribute('aria-label', 'Memory Trail');
+            const close = document.createElement('button');
+            close.type = 'button'; close.className = 'menu_button sa-trail-close'; close.textContent = 'Close trail';
+            close.addEventListener('click', () => this.closeDock());
+            dock.addEventListener('keydown', event => { if (event.key === 'Escape') this.closeDock(); });
+            dock.append(close, root); document.body.append(dock);
+            document.body.classList.add('sa-trail-open');
+            this.dock = dock;
+            this.dockTrigger = trigger;
+            close.focus({ preventScroll: true });
+            return;
         }
         await w.h.show(root, { okButton: '✨ Close' });
     }

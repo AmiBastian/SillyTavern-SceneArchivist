@@ -47,7 +47,7 @@ const SECTIONS = [
     ['[data-sa-action="firstArchive"]', 'settings-first', 'The same guided setup available from Start here.', true],
     ['[data-sa-option="requestBudget"]', 'settings-processing', 'Budgets, batch sizes, review behavior and request limits.', true],
     ['[data-sa-action="sharing"]', 'settings-sharing', 'Opt in to writing one archive from several chats.', true],
-    ['[data-sa-option="branchMode"]', 'settings-branches', 'Choose inherited, empty or verified earlier branch history.', true],
+    ['[data-sa-option="branchMode"]', 'settings-branches', 'Choose whether branches start empty or keep verified history.', false],
     ['#sa-activity-list', 'settings-activity', 'Recent jobs, writes and Undo history for this story.', true],
 ];
 
@@ -72,13 +72,22 @@ export class WorkspaceLayout {
         for (const [id, label] of Object.entries(labels)) root.querySelector('#' + id)?.setAttribute('aria-label', label);
         const title = root.querySelector('.sa-title'), version = title.querySelector('.sa-ver')?.textContent || `v${VERSION}`;
         title.innerHTML = `<div class="sa-brand"><span class="sa-brand-mark" aria-hidden="true">🗂️</span><div><span class="sa-eyebrow">YOUR STORY, KEPT TOGETHER</span><div class="sa-wordmark">Scene Archivist <span class="sa-ver">${h(version)}</span></div></div></div><div class="sa-header-actions"><button type="button" class="sa-toolbar-button" data-sa-ui="guide">🌱 Start here</button><button type="button" class="sa-toolbar-button" data-sa-ui="help">❔ Help & examples</button></div>`;
-        const toolbar = document.createElement('div'); toolbar.className = 'sa-workspace-toolbar';
-        toolbar.innerHTML = `<div class="sa-view-choice" role="group" aria-label="Interface detail"><button type="button" data-sa-ui="essentials" aria-pressed="true">🌱 Essentials</button><button type="button" data-sa-ui="all" aria-pressed="false">🔧 All tools</button></div><label class="sa-explain-switch"><input type="checkbox" data-sa-ui="explain"><span>Show help buttons</span></label><span class="sa-display-note">Choose how much you see.</span>`;
-        title.after(toolbar);
+        const nav = root.querySelector('.sa-tabs');
+        const tools = document.createElement('details');
+        tools.className = 'sa-tools-menu';
+        tools.innerHTML = `<summary>🔧 Tools</summary><div class="sa-tools-links"></div>
+            <label class="sa-explain-switch"><input type="checkbox" data-sa-ui="advanced"><span>Advanced controls</span></label>
+            <label class="sa-explain-switch"><input type="checkbox" data-sa-ui="explain"><span>Show help buttons</span></label>`;
+        nav.append(tools);
         for (const [tab, metadata] of Object.entries(TAB_GUIDE)) {
             const button = root.querySelector(`[data-sa-tab="${tab}"]`);
             button.innerHTML = `<span aria-hidden="true">${metadata.icon}</span><span>${metadata.label}</span>`;
             button.title = metadata.note;
+            if (['maintain', 'prompt', 'settings'].includes(tab)) {
+                button.removeAttribute('role');
+                button.tabIndex = 0;
+                tools.querySelector('.sa-tools-links').append(button);
+            }
         }
         const heading = document.createElement('header'); heading.className = 'sa-page-heading'; heading.id = 'sa-page-heading';
         root.querySelector('.sa-tabs').after(heading);
@@ -92,7 +101,7 @@ export class WorkspaceLayout {
                 card.dataset.saAdvanced = String(match ? match[3] : true);
                 if (match) { const sub = document.createElement('small'); sub.className = 'sa-card-description'; sub.textContent = match[2]; summary.append(sub); }
             }
-            const reveal = document.createElement('div'); reveal.className = 'sa-more-tools'; reveal.innerHTML = '<span></span><button type="button" class="sa-text-button" data-sa-ui="all">Show all tools →</button>';
+            const reveal = document.createElement('div'); reveal.className = 'sa-more-tools'; reveal.innerHTML = '<span></span><button type="button" class="sa-text-button" data-sa-ui="all">Show advanced controls →</button>';
             pane.append(reveal);
         }
         this.arrangeActions();
@@ -106,17 +115,17 @@ export class WorkspaceLayout {
         root.addEventListener('click', e => {
             const button = e.target.closest('[data-sa-ui]'); if (!button || button.matches('input')) return;
             const action = button.dataset.saUi;
-            if (action === 'all' || action === 'essentials') this.setMode(action);
+            if (action === 'all') this.setMode('all');
             else if (action === 'guide') void this.w.dispatch('firstArchive').catch(error => this.w.h.notify(error.message, 'error'));
             else if (action === 'help' || action === 'example') void this.showGuide(action === 'example' ? 'example' : 'start').catch(error => this.w.h.notify(error.message, 'error'));
             else if (action === 'condenseSelection') this.jump('condense-archive');
             else if (action === 'selectionTools') this.jump('library-selected');
         });
         root.querySelector('[data-sa-ui="explain"]').addEventListener('change', e => { this.preferences.explain = e.target.checked; this.help.setExplain(e.target.checked); this.savePreferences(); });
+        root.querySelector('[data-sa-ui="advanced"]').addEventListener('change', e => this.setMode(e.target.checked ? 'all' : 'essentials'));
         this.help.observe(root); this.help.setExplain(this.preferences.explain);
         root.querySelector('[data-sa-ui="explain"]').checked = this.preferences.explain;
         this.setMode(this.preferences.mode, false); this.select(this.w.currentTab);
-        const nav = root.querySelector('.sa-tabs');
         const main = document.createElement('div'); main.className = 'sa-workspace-main';
         for (const node of [...root.children]) if (node !== title && node !== nav) main.append(node);
         root.append(main); this.w.panes.archive.append(welcome);
@@ -204,7 +213,7 @@ export class WorkspaceLayout {
             }
         };
         move('prompt', 'settings-delivery', 'settings-vectors');
-        move('maintain', 'archive-repair', 'settings-activity');
+        move('maintain', 'settings-branches', 'archive-repair', 'settings-activity');
         const setup = section('settings-setup');
         const presetButtons = root.querySelector('[data-sa-action=exportWorkflow]')?.parentElement;
         if (setup && presetButtons) {
@@ -220,10 +229,7 @@ export class WorkspaceLayout {
     setMode(mode, persist = true) {
         this.preferences.mode = mode === 'all' ? 'all' : 'essentials';
         this.root.dataset.saView = this.preferences.mode;
-        const compact = this.preferences.mode === 'essentials';
-        for (const name of ['maintain', 'prompt', 'settings']) this.root.querySelector(`[data-sa-tab="${name}"]`).hidden = compact;
-        if (compact && ['maintain', 'prompt', 'settings'].includes(this.w.currentTab)) this.w.showTab('story');
-        for (const button of this.root.querySelectorAll('.sa-view-choice [data-sa-ui]')) button.setAttribute('aria-pressed', String(button.dataset.saUi === this.preferences.mode));
+        this.root.querySelector('[data-sa-ui="advanced"]').checked = this.preferences.mode === 'all';
         for (const card of this.root.querySelectorAll('[data-sa-advanced="true"]')) card.hidden = this.preferences.mode !== 'all';
         for (const pane of Object.values(this.w.panes)) {
             const hidden = pane.querySelectorAll(':scope > [data-sa-advanced="true"]').length, more = pane.querySelector('.sa-more-tools');
@@ -237,8 +243,10 @@ export class WorkspaceLayout {
     }
     select(tab) {
         const metadata = TAB_GUIDE[tab] || TAB_GUIDE.story;
-        this.root.querySelector('#sa-page-heading').innerHTML = `<div><span class="sa-eyebrow">${h(metadata.label.toUpperCase())}</span><h2>${h(metadata.label)}</h2><p>${h(metadata.note)}</p></div>`;
-        this.root.querySelector('.sa-header-actions [data-sa-ui="guide"]').hidden = tab === 'archive';
+        const heading = this.root.querySelector('#sa-page-heading');
+        heading.hidden = tab === 'story';
+        heading.innerHTML = `<h2>${h(metadata.label)}</h2><p>${h(metadata.note)}</p>`;
+        this.root.querySelector('#sa-dashboard').hidden = tab === 'story' || tab === 'library';
         this.help.hide();
         this.help.refresh(this.w.panes[tab]);
     }
@@ -266,6 +274,7 @@ export class WorkspaceLayout {
         if (card.dataset.saAdvanced === 'true') this.setMode('all');
         const tab = Object.entries(this.w.panes).find(([, pane]) => pane.contains(card))?.[0];
         if (tab) this.w.showTab(tab);
+        if (tab === 'library') this.w.library?.show('all');
         card.open = true; card.scrollIntoView({ block: 'start', behavior: 'auto' }); card.querySelector('summary')?.focus();
     }
     async showGuide(page = 'start') {
@@ -303,7 +312,7 @@ export class WorkspaceLayout {
         if (route) this.jump(route);
     }
     startPage() {
-        return `<div class="sa-guide-steps"><article><span>01</span><h4>Archive one scene</h4><p>Choose an inclusive message range in Archive, preview it and ask for a summary. Review the result before saving.</p></article><article><span>02</span><h4>Create character memories</h4><p>Open Characters and create memories from the saved summaries. Use chat, archive, or both. The lists keep dates and links to their evidence.</p></article><article><span>03</span><h4>Continue the story</h4><p>Native World Info loads eligible entries into replies. Prompt shows the recorded keyword, vector and other activation reasons.</p></article></div><div class="sa-row"><button type="button" class="menu_button sa-primary" data-help-go="setup">🌱 Open guided setup</button><button type="button" class="menu_button" data-help-go="archive-range">Take me to message ranges</button></div><h4>Where does everything live?</h4><div class="sa-guide-map">${Object.entries(TAB_GUIDE).map(([, data]) => `<p><b>${data.icon} ${h(data.label)}</b><span>${h(data.note)}</span></p>`).join('')}</div><p class="sa-note">Essentials keeps everyday sections visible. All tools reveals the advanced sections in place. This display choice does not turn automation on or off. Hover or keyboard-focus a control for help; enable Show help buttons to open explanations by tap.</p>`;
+        return `<div class="sa-guide-steps"><article><span>01</span><h4>Archive one scene</h4><p>Choose an inclusive message range in Archive, preview it and ask for a summary. Review the result before saving.</p></article><article><span>02</span><h4>Create character memories</h4><p>Open Characters and create memories from the saved summaries. Use chat, archive, or both. The lists keep dates and links to their evidence.</p></article><article><span>03</span><h4>Continue the story</h4><p>Native World Info loads eligible entries into replies. Prompt shows the recorded keyword, vector and other activation reasons.</p></article></div><div class="sa-row"><button type="button" class="menu_button sa-primary" data-help-go="setup">🌱 Open guided setup</button><button type="button" class="menu_button" data-help-go="archive-range">Take me to message ranges</button></div><h4>Where does everything live?</h4><div class="sa-guide-map">${Object.entries(TAB_GUIDE).map(([, data]) => `<p><b>${data.icon} ${h(data.label)}</b><span>${h(data.note)}</span></p>`).join('')}</div><p class="sa-note">Open Tools for Maintain, Prompt and Settings. Advanced controls reveals more sections without changing automation. Hover or focus a control for help, or enable Show help buttons for a tap target.</p>`;
     }
     examplePage() {
         return `<p class="sa-example-notice"><b>Read-only sample.</b> These invented examples make no AI requests and do not write to your chats or lorebooks.</p><div class="sa-example-steps" role="group" aria-label="Example stages">${[['chat', '1 · Chat'], ['archive', '2 · Summary'], ['memory', '3 · Memory'], ['loading', '4 · Loading']].map(([key, label]) => `<button type="button" data-example-step="${key}" aria-pressed="${key === 'chat'}">${label}</button>`).join('')}</div><div class="sa-example-stage" data-example-panel="chat"><span class="sa-eyebrow">TUESDAY, OCTOBER 6, 2026 · MESSAGES 12 TO 13</span><h4>A small scene, before it becomes history.</h4><div class="sa-example-message"><b>Mara · #12</b><p>Keep the blue key. Meet me at Ember Station at eight.</p></div><div class="sa-example-message"><b>Rowan · #13</b><p>I have it. Eight at the station, I’ll be there.</p></div><p>Choose 12 to 13 and Preview range. Both messages are included. Summarize this range sends them to your model.</p></div><div class="sa-example-stage" data-example-panel="archive" hidden><span class="sa-eyebrow">ARCHIVE · A REVIEWED SUMMARY</span><h4>Day 1 · Tuesday, October 6, 2026</h4><p class="sa-example-record">Mara gave Rowan the blue key. Rowan agreed to meet her at Ember Station at 8 PM.</p><p>The source link points back to messages 12 to 13. A ledger marker records that this range was archived.</p><p><b>What to check:</b> They agreed to meet. The messages do not prove the meeting already happened.</p></div><div class="sa-example-stage" data-example-panel="memory" hidden><span class="sa-eyebrow">CHARACTERS · ROWAN</span><h4>A memory belongs to someone.</h4><p class="sa-example-record">[Tuesday, October 6, 2026 · Day 1]<br>Received Mara’s blue key and agreed to meet her at Ember Station at 8 PM.</p><p>Create character memories can read chat, archive units, or both. Each memory keeps a link to its source.</p><p><b>What to check:</b> Rowan knows about the arrangement. Another character does not automatically learn it.</p></div><div class="sa-example-stage" data-example-panel="loading" hidden><span class="sa-eyebrow">ILLUSTRATED LOADING EXAMPLES, NOT A LIVE SCAN</span><h4>Two independent ways a record can be found.</h4><article class="sa-example-channel"><b>🔑 Native keyword</b><p>If this entry’s keyword is “blue key”, a matching message can activate it under your World Info rules.</p></article><article class="sa-example-channel"><b>🧭 Native vector</b><p>A configured semantic search might find the handover when the conversation refers to the station key, if its similarity settings accept that result.</p></article><p>Each mechanism follows its own settings. A word in an entry’s body does not make its vector result a keyword match. Prompt → Memory budget and loading reasons shows the evidence available for a real reply.</p></div>`;
