@@ -191,7 +191,7 @@ test('a failed tracker leaves ready results to save and retries only the tracker
     assert.equal(f.reviews.length, 2);
 });
 
-test('a Little Thing can wait through partial approval and a separate metadata save', async () => {
+test('declining a suggested Little Thing finishes the run and keeps concurrently saved notes', async () => {
     const f = fixture({ noteProposals: [
         { text: 'Zelga was given a brass key.', cues: ['brass key'], knows: ['Zelga'], message: 0, evidence: 'the brass key' },
         { text: 'An invented gift.', cues: ['gold key'], shared: true, message: 0, evidence: 'the gold key' },
@@ -203,21 +203,47 @@ test('a Little Thing can wait through partial approval and a separate metadata s
         review++;
         const notes = changes.filter(change => change.note);
         assert.equal(notes.length, 1);
-        notes[0].include = review > 1;
+        notes[0].include = false;
+        addLittleThings(f.books.Story, [makeLittleThing({ text: 'The lantern smelled of pine.', cues: ['pine'] })], 'story');
+        return true;
+    };
+    const job = await f.w.startFlow('catch-up');
+    assert.equal(job.status, 'done', job.error);
+    assert.equal(review, 1);
+    assert.deepEqual(littleThings(f.books.Story).map(note => note.text), ['The lantern smelled of pine.']);
+    assert.ok(Object.values(f.books.Story.entries).some(entry => M.record(entry)?.type === 'unit'));
+    assert.equal(Object.values(f.books.Story.entries).filter(entry => M.record(entry)?.type === 'tracker').length, 2);
+    assert.deepEqual(f.calls.map(call => call.profile), ['summary', 'notes', 'notes']);
+});
+
+test('Review later retains suggestions and a declined suggestion stays out of a partially saved draft', async () => {
+    const f = fixture({ noteProposals: [
+        { text: 'Zelga was given a brass key.', cues: ['brass key'], knows: ['Zelga'], message: 0, evidence: 'the brass key' },
+    ] });
+    const fallback = f.w.review;
+    let reviews = 0;
+    f.w.review = async (changes, title, note) => {
+        if (f.w.bulkRun) return fallback(changes, title, note);
+        const suggestion = changes.find(change => change.note);
+        assert.ok(suggestion);
+        suggestion.include = false;
+        if (++reviews === 1) return false;
+        changes.find(change => change.section === 'Trackers').include = false;
         return true;
     };
     const job = await f.w.startFlow('catch-up');
     assert.equal(job.status, 'paused', job.error);
-    assert.equal(littleThings(f.books.Story).length, 0);
-    assert.ok(Object.values(f.books.Story.entries).some(entry => M.record(entry)?.type === 'unit'));
-    addLittleThings(f.books.Story, [makeLittleThing({ text: 'The lantern smelled of pine.', cues: ['pine'] })], 'story');
+    assert.equal(littleThings(job.draft.books.Story).length, 1);
+    assert.deepEqual(littleThings(f.books.Story), []);
     await f.w.withLock(() => f.w.queue.resume());
+    assert.equal(job.status, 'paused', job.error);
+    assert.deepEqual(littleThings(job.draft.books.Story), []);
+    const reopened = f.create();
+    await reopened.withLock(() => reopened.queue.resume());
     assert.equal(job.status, 'done', job.error);
     assert.deepEqual(f.calls.map(call => call.profile), ['summary', 'notes', 'notes']);
-    assert.equal(littleThings(f.books.Story).length, 2);
-    const note = littleThings(f.books.Story).find(item => item.text.includes('brass key'));
-    assert.equal(note.source.ranges[0].from, 0);
-    assert.equal(Object.values(f.books.Story.entries).some(entry => entry.content === note.text), false);
+    assert.deepEqual(f.reviews.at(-1).changes.map(change => change.section), ['Trackers']);
+    assert.deepEqual(littleThings(f.books.Story), []);
 });
 
 test('condensing a character list keeps its Little Things private to the source character', async () => {

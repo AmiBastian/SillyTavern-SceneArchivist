@@ -89,12 +89,17 @@ test('hand-edited filters, deliberate removals and ambiguous group subjects are 
     assert.equal(custom.characterFilter, undefined);
 });
 
-test('token fallbacks agree and budget for Arabic and CJK', () => {
+test('token fallbacks agree and budget for Arabic, Cyrillic and CJK', () => {
     const latin = 'a plain memory about the railway station';
     for (const text of [latin, 'العربية لغة جميلة وأحب الكتابة بها', '雨が降った駅で鍵を受け取りました', '💡 📚 🧠']) {
         assert.equal(tokens(text), estimateTokens(text));
     }
-    assert.ok(tokens('المفتاح النحاسي عند البوابة الغربية') > Math.ceil('المفتاح النحاسي عند البوابة الغربية'.length / 3.6) * 2);
+    const arabic = 'المفتاح النحاسي عند البوابة الغربية', cyrillic = 'Мира спрятала медный ключ в левом кармане';
+    for (const prose of [arabic, cyrillic]) {
+        assert.ok(tokens(prose) < prose.replace(/ /g, '').length);
+        assert.ok(tokens(prose) > Math.ceil(prose.length / 3.6) * 2);
+    }
+    assert.ok(tokens('الْمِفْتَاحُ') > tokens('المفتاح'));
     assert.ok(tokens('她把钥匙放在左边的口袋里') >= 12);
 });
 

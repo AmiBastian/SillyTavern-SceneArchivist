@@ -162,7 +162,7 @@ Use **Sources** on a Library result. Each source range lists the chat it came fr
 
 Keep the borrowed coat, the way someone takes their coffee, or the promise that never made it into the main plot. Use **Library → Little Things → Add a detail**, or choose **Little Thing** in **Remember this** on a chat message. Give it a cue someone might actually say. Fill in **Who knows** for private details.
 
-Reviewed archive and condense runs can suggest details in the same model response. Read the source and check the ones you want in the combined review. Little Things live in the selected archive’s story metadata and travel with full story backups. Each detail adds zero lorebook entries. A branch with verified history keeps only Little Things with matching source messages.
+Reviewed archive and condense runs can suggest details in the same model response. Uncheck any suggestions you want to skip, then choose **Save selected**. **Review later** keeps the whole draft. Little Things live in the selected archive’s story metadata and travel with full story backups. Each detail adds zero lorebook entries. A branch with verified history keeps only Little Things with matching source messages.
 
 A normal reply can load up to four matching details inside the existing memory budget on SillyTavern versions with the World Info scan hook. Relevant cues and open promises can carry over for a few replies within a scene. **Load next reply** queues a detail for the next eligible speaker. To turn off automatic selection, open **Tools → Prompt** and switch off scene recall.
 

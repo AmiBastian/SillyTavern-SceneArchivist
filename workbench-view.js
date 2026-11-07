@@ -5,10 +5,53 @@ import { mountRecovery } from './workbench-recovery.js';
 import { WorkspaceLayout } from './workbench-layout.js';
 import { StoryLibrary } from './story-library.js';
 import { WorkbenchExtras } from './workbench-extras.js';
+import { entryReasons, vectorStatus } from './vector-diagnostics.js';
 
 export const button = (action, label, extra = '') => `<button type="button" class="menu_button" data-sa-action="${action}" ${extra}>${label}</button>`;
 export const field = (key, label, value = '', type = 'text', extra = '') => `<label class="sa-field"><span>${label}</span><input class="text_pole" data-sa-field="${key}" type="${type}" value="${html(value)}" ${extra}></label>`;
 const card = (title, body, open = true) => `<details class="sa-card" ${open ? 'open' : ''}><summary>${title}</summary><div class="sa-body">${body}</div></details>`;
+
+export function renderMemoryBudget(w) {
+    const container = w.root?.querySelector('#sa-budget-view');
+    if (!container) return;
+    const decision = w.lastBudget;
+    const status = vectorStatus(w.vectorRun, {
+        enabled: !!w.h.vectorSettings?.()?.enabled_world_info,
+        available: typeof globalThis.vectors_rearrangeChat === 'function',
+        selected: decision ? decision.accepted.filter(item => w.semanticHits.has(item.id)).length : null,
+    });
+    const heading = `<p class="sa-vector-status" role="status"><b>Vector search</b> · ${html(status)}</p>`;
+    if (!decision) {
+        container.innerHTML = heading + '<p>Send a normal chat reply to see which memories were selected.</p>';
+        return;
+    }
+    const { accepted, omitted, used, budget } = decision;
+    const filter = w.value('activationFilter');
+    const visible = accepted.filter(item => !filter || (item.reasons || [item.reason]).includes(filter));
+    const selected = new Set(accepted.map(item => item.id));
+    const extra = [...w.activatedIds].filter(id => !selected.has(id)).length;
+    const confirmed = accepted.filter(item => w.activatedIds.has(item.id)).length;
+    const confirmation = w.activationKnown
+        ? `<p>World Info activation confirmed for ${confirmed}/${accepted.length} selected memories.${extra ? ` SillyTavern also activated ${extra} other story entries.` : ''}</p>`
+        : '<p>Waiting for World Info to confirm these selections.</p>';
+    const mode = decision.enforced === false
+        ? '<p class="sa-warnline">This SillyTavern version exposes activation reporting only. Native World Info limits apply.</p>'
+        : '<p>The shared budget covers native World Info matches, scene recall and Little Things.</p>';
+    const little = w.sceneRecall.selection();
+    const rows = visible.map(item => `<div class="sa-retrieval-entry">
+        <div class="sa-viewrow"><b>${html(M.title(item.entry))}</b> · ${item.cost} tokens<br>${html(entryReasons(item))}
+        ${w.activationKnown ? `<br><span>${w.activatedIds.has(item.id) ? 'World Info activation confirmed' : 'Not activated by World Info'}</span>` : ''}</div>
+        <div class="sa-row">${button('inspect', 'Inspect', `data-id="${html(item.id)}"`)}</div>
+    </div>`).join('');
+    const skipped = omitted.map(item => `<div class="sa-retrieval-entry">${html(item.title)} · ${item.tokens} tokens · ${html(item.reason)}
+        ${item.reasons?.length ? `<br>Activation source · ${html(entryReasons(item))}` : ''}</div>`).join('');
+    container.innerHTML = heading
+        + `<p><b>${used}/${budget}</b> memory tokens retained.${little.items.length ? ` Little Things used ${little.tokens} tokens.` : ''}</p>`
+        + mode + confirmation
+        + `<p class="sa-hint">Showing ${visible.length} of ${accepted.length} retained entries.</p>${rows}
+        <details><summary>${omitted.length} omitted records and reasons</summary>${skipped}</details>`;
+    w.layout?.help.refresh(container);
+}
 
 export function mountWorkbench(w, root) {
     w.root = root;

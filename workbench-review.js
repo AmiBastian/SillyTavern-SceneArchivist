@@ -5,6 +5,8 @@ export async function reviewChanges(workbench, changes, title = 'Review changes'
     if (workbench.bulkRun) return true;
     const root = document.createElement('div'); root.className = 'sa-review';
     root.innerHTML = `<h3>${html(title)}</h3><p class="sa-note">${html(note || 'Review the result before it is saved. The old content remains in revision history.')}</p>`;
+    const hasLittleThings = changes.some(change => change.note);
+    if (hasLittleThings) root.insertAdjacentHTML('beforeend', '<p class="sa-hint">Uncheck any Little Thing you want to skip when you save. Review later keeps the whole draft.</p>');
     const groups = M.unique(changes.map(change => change.section));
     if (groups.length > 1) {
         root.classList.add('sa-combined-review');
@@ -77,6 +79,6 @@ export async function reviewChanges(workbench, changes, title = 'Review changes'
     if (job) await workbench.persist();
     if (!accepted) return false;
     if (changes.some(c => c.include && !c.content)) throw new Error('An approved entry cannot be empty.');
-    if (options.partial && !changes.some(c => c.include)) throw new Error('Choose at least one result, or use Review later to retain all results.');
+    if (options.partial && !hasLittleThings && !changes.some(c => c.include)) throw new Error('Choose at least one result, or use Review later to retain all results.');
     return true;
 }

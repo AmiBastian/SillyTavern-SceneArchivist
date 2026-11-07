@@ -2,7 +2,7 @@
 // reaches the host. Drafts and completed steps live in the durable job itself.
 import * as M from './memory-engine.js';
 import * as Core from './core.js';
-import { approvedChanges, entrySettings } from './workflow-tools.js';
+import { approvedChanges, entrySettings, proposalKey } from './workflow-tools.js';
 import { same } from './entry-journal.js';
 import { recordSources } from './recovery-tools.js';
 import { addLittleThings, littleThings, reviewLittleThing, setLittleThings } from './little-things.js';
@@ -259,6 +259,12 @@ export class BulkRun {
                 if (!approved) return false;
                 for (const c of changes) {
                     if (c.note) {
+                        if (c.include === false) {
+                            const book = d.books[c.book];
+                            setLittleThings(book, littleThings(book).filter(note => note.id !== c.note.id));
+                            delete job.reviewEdits?.[proposalKey(c)];
+                            continue;
+                        }
                         if (c.note.text !== c.content) c.note.quote = '';
                         c.note.text = c.content;
                         continue;
@@ -270,7 +276,7 @@ export class BulkRun {
                     }
                 }
                 const selection = approvedChanges(changes.filter(c => !c.note), d.before, d.books);
-                for (const c of changes.filter(c => c.note)) (c.include === false ? selection.deferred : selection.accepted).push(c);
+                selection.accepted.push(...changes.filter(c => c.note && c.include !== false));
                 if (selection.blocked.length) this.real.notify('Results with unselected or missing source entries are still in the draft.', 'info');
                 if (readyOnly || selection.deferred.length) {
                     if (!selection.accepted.length) return false;

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Skipping a suggested Little Thing now closes the review when all selected story records have been saved.
+- Scene recall matches short cues, Chinese, Japanese and Thai text without spaces, and common attached Arabic prefixes.
+- The fallback token estimate uses separate allowances for Arabic and Cyrillic prose, with extra room for Arabic vowel marks.
+
 ## 2.0.0
 
 - Put Story, Archive, Characters and Library in one compact workspace. Find Maintain, Prompt and Settings under Tools, with Branches in Maintain.

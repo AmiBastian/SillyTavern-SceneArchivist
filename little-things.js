@@ -14,7 +14,27 @@ export function setLittleThings(book, notes, storyId = '') {
 }
 
 const normalize = value => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ').trim();
-const phrase = (text, cue) => !!cue && ` ${text} `.includes(` ${cue} `);
+const unspaced = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
+const arabic = /\p{Script_Extensions=Arabic}/u;
+const cueText = value => normalize(value).replace(/[\u0640\p{M}]/gu, mark => mark === '\u0640' || arabic.test(mark) ? '' : mark).replace(/ +/g, ' ').trim();
+const boundary = symbol => !symbol || symbol === ' ' || unspaced.test(symbol);
+
+function phrase(text, cue) {
+    if (!cue) return false;
+    const symbols = [...cue], first = symbols[0], last = symbols.at(-1);
+    const padded = ` ${text} `;
+    const looseStart = unspaced.test(first), looseEnd = unspaced.test(last);
+    const arabicPrefix = symbols.length > 1 && arabic.test(first);
+    for (let at = padded.indexOf(cue); at >= 0; at = padded.indexOf(cue, at + 1)) {
+        const end = at + cue.length;
+        const before = [...padded.slice(Math.max(0, at - 2), at)].at(-1);
+        const after = [...padded.slice(end, end + 2)][0];
+        // Match attached Arabic conjunctions and prepositions at the start of a word.
+        const prefixed = arabicPrefix && / (?:[وف][بك]?|[بك])$/.test(padded.slice(Math.max(0, at - 3), at));
+        if ((looseStart || boundary(before) || prefixed) && (looseEnd || boundary(after))) return true;
+    }
+    return false;
+}
 const line = (value, max) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').slice(0, max) : '';
 const words = (value, max) => unique((Array.isArray(value) ? value : String(value ?? '').split(',')).map(word => line(word, 100))).slice(0, max);
 const boundedQuote = value => typeof value === 'string' && value.trim().length <= 180 ? value.trim() : '';
@@ -144,7 +164,7 @@ export function recallFrame(chat, type, speakerNames = []) {
                 if (nextDate) date = nextDate;
             }
         }
-        recent.push({ index, text: normalize(text), name: normalize(m.name), isUser: !!m.is_user, hash: messageHash(m) });
+        recent.push({ index, text: cueText(text), name: normalize(m.name), isUser: !!m.is_user, hash: messageHash(m) });
     }
     const focus = recent.at(-1);
     const prior = recent.slice(-4, -1).reverse();
@@ -153,7 +173,7 @@ export function recallFrame(chat, type, speakerNames = []) {
 }
 
 function cueMatch(cues, frame, allowSingle = true) {
-    const hits = [...new Set(cues.map(normalize).filter(cue => cue.length > 2 && (allowSingle || cue.includes(' '))))];
+    const hits = [...new Set(cues.map(cueText).filter(cue => cue && (allowSingle || cue.includes(' ') || [...cue].length > 1 && unspaced.test(cue))))];
     for (const [i, message] of [frame.focus, ...frame.prior].entries()) {
         if (!message) continue;
         const matched = hits.filter(cue => phrase(message.text, cue)).sort((a, b) => b.length - a.length)[0];
@@ -188,7 +208,7 @@ export function noteRecall(notes, { frame, speaker, chat, sourceId, carry, reque
     const openPromises = allowed.filter(note => {
         const involved = (note.participants || []).map(normalize);
         return note.thread === 'open' && involved.some(name => speaking.has(name)) &&
-            involved.some(name => name && !speaking.has(name) && (frame.participants.has(name) || phrase(frame.focus?.text || '', name)));
+            involved.some(name => name && !speaking.has(name) && (frame.participants.has(name) || phrase(frame.focus?.text || '', cueText(name))));
     });
     const reminder = /\b(?:you (?:still )?owe me|you promised|our promise|did you forget (?:our|your) promise|hold you to (?:it|that))\b/.test(frame.focus?.text || '');
     const exact = /\b(?:exact words|word for word|verbatim|quote|what did .{1,60} say)\b/.test(frame.focus?.text || '');

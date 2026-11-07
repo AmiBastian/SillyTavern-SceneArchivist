@@ -13,9 +13,31 @@ const evidence = index => ({ ...M.sourceSnapshot('source', chat, [{ from: index,
 const note = Little.makeLittleThing({ text: 'Mara promised Rowan a coffee.', cues: ['coffee', 'brass key'], knows: ['Rowan'],
     participants: ['Mara', 'Rowan'], thread: 'open', date: 'October 6, 2026', quote: 'I owe you a coffee' }, evidence(0));
 const speaker = { names: ['Rowan'] };
-const candidates = (messages, options = {}) => Little.noteRecall([note], {
+const candidates = (messages, options = {}, notes = [note]) => Little.noteRecall(notes, {
     frame: Little.recallFrame(messages, 'normal', speaker.names), speaker, chat: messages, sourceId: 'source',
     carry: new Map(), requested: new Set(), ...options,
+});
+
+test('recall finds unspaced scripts, short names and Arabic attached prefixes', () => {
+    const samples = [
+        ['铜钥匙', '她把铜钥匙放在左边的口袋里。'],
+        ['青い鍵', '彼女は青い鍵をそっとしまった。'],
+        ['กุญแจ', 'เธอเก็บกุญแจไว้ในกระเป๋า'],
+        ['المفتاح', 'خبّأت مريم المصباح وَبِالْمِفْتَاحِ فتحت الباب.'],
+        ['Jo', 'Mara handed Jo the key.'],
+        ['Jo', '彼女はJoに鍵を渡した。'],
+        ['李', '李把它带回家。'],
+    ];
+    for (const [cue, mes] of samples) {
+        const detail = Little.makeLittleThing({ text: 'Remember the handover.', cues: [cue], knows: ['Rowan'] });
+        const messages = [{ name: 'Mara', is_user: true, mes }];
+        assert.equal(candidates(messages, {}, [detail]).length, 1, cue);
+    }
+    const short = Little.makeLittleThing({ text: 'Jo has the key.', cues: ['Jo'] });
+    assert.equal(candidates([{ name: 'Mara', mes: 'Joanne found her journal.' }], {}, [short]).length, 0);
+
+    const entry = { key: ['青い鍵'], sceneArchivist: { type: 'unit' } };
+    assert.equal(Little.recordRecall([entry], Little.recallFrame([{ mes: samples[1][1] }], 'normal'))[0].entry, entry);
 });
 
 test('notes match an evidenced cue and verify exact quotes against the live source', async () => {

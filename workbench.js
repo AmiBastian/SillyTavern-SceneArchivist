@@ -1,7 +1,7 @@
 import * as M from './memory-engine.js';
 import * as Core from './core.js';
 import { BulkRun } from './bulk-jobs.js';
-import { newVectorRun, observeVectorRequests, vectorStatus, entryReasons } from './vector-diagnostics.js';
+import { newVectorRun, observeVectorRequests } from './vector-diagnostics.js';
 import * as Tools from './workflow-tools.js';
 import * as Flow from './flow.js';
 import { renderTools, previewJob, dispatchTool } from './workbench-tools.js';
@@ -11,7 +11,7 @@ import { ensureChatBranch } from './chat-branches.js';
 import { jobLabel } from './workbench-extras.js';
 import { placePromptLayers } from './prompt-inspection.js';
 import { isSkipped, groupMemoryReason, memorySubject, saveNativeGroupFilter, prepareNativeGroupFilter } from './chat-workflows.js';
-import { mountWorkbench, button, field } from './workbench-view.js';
+import { mountWorkbench, button, field, renderMemoryBudget } from './workbench-view.js';
 import { escape as html } from './workflow-tools.js';
 import * as Little from './little-things.js';
 import { SceneRecall } from './scene-recall.js';
@@ -405,24 +405,7 @@ export class Workbench {
         el.innerHTML = `<div class="sa-job"><b>📚 ${html(jobLabel(j.kind))}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}${active ? `<div class="sa-row">${button('jobResume', j.status === 'failed' ? '🔁 Retry failed stage' : '▶️ Resume or review', j.status === 'running' ? 'disabled' : '')}${recovery}${button('jobPause', '⏸️ Pause after this request', j.status !== 'running' || j.phase === 'saving' ? 'disabled' : '')}${button('jobCancel', '🗑️ Discard unfinished job', j.phase === 'saving' ? 'disabled' : '')}</div><p class="sa-hint">Discarding ends this job and makes its unapproved results unavailable. Records already written to your lorebooks are kept. Use Resume or review to keep working with prepared results.</p>` : ''}</div>`;
         this.layout?.help.refresh(el);
     }
-    renderBudget() {
-        const el = this.root?.querySelector('#sa-budget-view'); if (!el) return;
-        const b = this.lastBudget;
-        const selectedVectors = b ? b.accepted.filter(c => this.semanticHits.has(c.id)).length : null;
-        const status = vectorStatus(this.vectorRun, { enabled: !!this.h.vectorSettings?.()?.enabled_world_info,
-            available: typeof globalThis.vectors_rearrangeChat === 'function', selected: selectedVectors });
-        const heading = `<p class="sa-vector-status" role="status"><b>Vector search:</b> ${html(status)}</p>`;
-        if (!b) { el.innerHTML = heading + '<p>Send a normal chat reply to see which memories were selected.</p>'; return; }
-        const filter = this.value('activationFilter'), visible = b.accepted.filter(c => !filter || (c.reasons || [c.reason]).includes(filter));
-        const row = c => `<div class="sa-retrieval-entry"><div class="sa-viewrow"><b>${html(M.title(c.entry))}</b> · ${c.cost} tokens<br>${html(entryReasons(c))}${this.activationKnown ? `<br><span>${this.activatedIds.has(c.id) ? 'World Info activation confirmed' : 'Not activated by World Info'}</span>` : ''}</div><div class="sa-row">${button('inspect', 'Inspect', `data-id="${html(c.id)}"`)}</div></div>`;
-        const selected = new Set(b.accepted.map(c => c.id));
-        const extra = [...this.activatedIds].filter(id => !selected.has(id));
-        const confirmation = this.activationKnown ? `<p>World Info activation confirmed for ${b.accepted.filter(c => this.activatedIds.has(c.id)).length}/${b.accepted.length} selected memories.${extra.length ? ` ST also activated ${extra.length} other story entries outside this selection; check native World Info activation settings.` : ''}</p>` : '<p>These are selection decisions. World Info activation has not been confirmed yet.</p>';
-        const mode = b.enforced === false ? '<p class="sa-warnline">This SillyTavern version exposes activation reporting only. Native World Info limits apply.</p>' : '<p>The shared budget covers native World Info matches, scene recall and Little Things.</p>';
-        const little = this.sceneRecall.selection();
-        el.innerHTML = heading + `<p><b>${b.used}/${b.budget}</b> memory tokens retained.${little.items.length ? ` Little Things used ${little.tokens} tokens.` : ''}</p>` + mode + confirmation + `<p class="sa-hint">Showing ${visible.length} of ${b.accepted.length} retained entries.</p>` + visible.map(row).join('') + `<details><summary>${b.omitted.length} omitted records and reasons</summary>` + b.omitted.map(c => `<div class="sa-retrieval-entry">${html(c.title)} · ${c.tokens} tokens · ${html(c.reason)}${c.reasons?.length ? `<br>Activation source: ${html(entryReasons(c))}` : ''}</div>`).join('') + '</details>';
-        this.layout?.help.refresh(el);
-    }
+    renderBudget() { renderMemoryBudget(this); }
 
     findRetrievedEntry(entry) {
         const r = M.record(entry);
