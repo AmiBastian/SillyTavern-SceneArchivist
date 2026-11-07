@@ -314,6 +314,62 @@ test('configured capacity is checked before any model request', async () => {
     assert.equal(f.calls.length, 0);
 });
 
+test('reference-heavy context errors name the largest input parts for archive and memories', async () => {
+    for (const stage of ['archive', 'memories']) {
+        const f = fixture({ limits: { summary: 5000, notes: 5000 },
+            prefs: { readReferences: true, references: [{ book: 'World details' }] } });
+        f.w.h.readReferences = async () => 'Reference lore about the world. '.repeat(12000);
+        const job = await f.w.startFlow(stage);
+        assert.equal(job.status, 'failed');
+        assert.equal(job.steps[0].oversized, true);
+        assert.equal(f.calls.length, 0);
+        assert.match(job.error, new RegExp(`${stage} needs about [\\d,]+ input tokens plus 2,000 output tokens \\(model limit 5,000\\)`));
+        assert.match(job.error, /Largest parts: reference lorebooks [\d,]+, system instructions [\d,]+, messages [\d,]+\./);
+        assert.match(job.error, /Reference lorebooks are the largest part\. Turn off or trim reference lorebooks in Settings/);
+        assert.match(job.error, /Choose Split this stage/);
+        assert.doesNotMatch(job.error, /scene log 0|SillyTavern chat context/);
+    }
+});
+
+test('context diagnostics account for chat context and fall back when a part cannot be tokenized', async () => {
+    const f = fixture({ limits: { summary: 5000 } });
+    f.w.h.buildFlowContext = async () => [{ role: 'system', content: 'A large chat context.' }];
+    f.w.h.tokenCount = async text => {
+        if (text === 'Reference lore.') throw new Error('Tokenizer unavailable for this part.');
+        if (text === 'Instructions.') return 10;
+        if (text === 'Selected messages.') return 20;
+        return 6000;
+    };
+    const step = {};
+    const job = { options: { flow: { profiles: { archive: 'summary' }, includeChatContext: true } } };
+    const req = { system: 'Instructions.', prompt: 'Selected messages.', parts: {
+        references: 'Reference lore.', log: '', transcript: 'Selected messages.', system: 'Instructions.',
+    } };
+    await assert.rejects(f.w.requestFlow(job, step, req, 'archive'), error => {
+        const remainder = (6000 - 30 - M.tokens('Reference lore.')).toLocaleString('en-US');
+        assert.ok(error.message.includes(`Largest parts: SillyTavern chat context ${remainder}`));
+        assert.match(error.message, /SillyTavern chat context is the largest part/);
+        assert.match(error.message, /Turn off Include SillyTavern chat context in Settings/);
+        assert.doesNotMatch(error.message, /scene log/);
+        return true;
+    });
+    assert.equal(step.oversized, true);
+    assert.equal(f.calls.length, 0);
+});
+
+test('requests that fit tokenize only the complete input', async () => {
+    const f = fixture({ prefs: { readReferences: true, references: [{ book: 'Lore' }] } });
+    const counted = [];
+    f.w.h.tokenCount = async text => { counted.push(text); return M.tokens(text); };
+    const job = await f.w.startFlow('catch-up');
+    assert.equal(job.status, 'done', job.error);
+    assert.equal(counted.length, f.calls.length);
+    assert.equal(f.calls[0].req.parts.references, 'Zelga is a locksmith.');
+    assert.equal(f.calls[1].req.parts.references, 'Zelga is a locksmith.');
+    assert.ok(f.calls[0].req.prompt.includes(f.calls[0].req.parts.transcript));
+    assert.ok(f.calls[1].req.prompt.includes(f.calls[1].req.parts.transcript));
+});
+
 test('shared continuation preserves the date and verified branches exclude later records', () => {
     const e = { uid: 0, content: '## ► Day 2 — February 14, 2027\n\n- A private reveal.' };
     const chat = [{ name: 'A', mes: 'Earlier' }, { name: 'B', mes: 'Reveal' }];

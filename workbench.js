@@ -1028,7 +1028,24 @@ export class Workbench {
         const input = Number(await this.h.tokenCount(inputText)) || M.tokens(inputText);
         if (model.context > 0 && input + output > model.context) {
             step.oversized = true;
-            throw new Error(`${stage} needs about ${input} input tokens plus ${output} output tokens. ${model.name} is configured for ${model.context}. Choose a larger context or split this stage.`);
+            const labels = { references: 'reference lorebooks', log: 'scene log', transcript: 'messages', system: 'system instructions', request: 'request text' };
+            const parts = await Promise.all(Object.entries(req.parts || { system: req.system, request: req.prompt })
+                .filter(([, text]) => text).map(async ([key, text]) => {
+                    let cost;
+                    try { cost = Number(await this.h.tokenCount?.(text)); }
+                    catch { /* Use the local estimate when a part cannot be tokenized. */ }
+                    return { key, label: labels[key] || key, cost: cost > 0 && Number.isFinite(cost) ? cost : M.tokens(text) };
+                }));
+            if (flow.includeChatContext) parts.push({ key: 'chat', label: 'SillyTavern chat context',
+                cost: Math.max(0, input - parts.reduce((total, part) => total + part.cost, 0)) });
+            const largest = parts.filter(part => part.cost > 0).sort((a, b) => b.cost - a.cost);
+            const format = count => Number(count).toLocaleString('en-US');
+            const breakdown = largest.length ? ` Largest parts: ${largest.map(part => `${part.label} ${format(part.cost)}`).join(', ')}.` : '';
+            const hints = [];
+            if (largest[0]?.key === 'references') hints.push('Reference lorebooks are the largest part. Turn off or trim reference lorebooks in Settings to fit.');
+            if (flow.includeChatContext) hints.push(`${largest[0]?.key === 'chat' ? 'SillyTavern chat context is the largest part.' : 'SillyTavern chat context is included.'} Turn off Include SillyTavern chat context in Settings to reduce the input.`);
+            hints.push('Choose Split this stage or a larger model context.');
+            throw new Error(`${stage} needs about ${format(input)} input tokens plus ${format(output)} output tokens (model limit ${format(model.context)}).${breakdown} ${hints.join(' ')}`);
         }
         delete step.oversized;
         const state = this.liveState(), meter = (state.telemetry ??= { requests: 0, input: 0, output: 0 });
@@ -1067,7 +1084,8 @@ BACKGROUND REFERENCES. These describe the world and characters, rather than new 
 ${flow.referenceText}` : '';
         const archive = this.books[s.lorebook];
         if (payload.kind === 'archive') {
-            const req = Core.buildArchivistRequest(s.prompt, Core.currentLogText(archive), Core.buildTranscript(payload.messages), payload, s.unit);
+            const log = Core.currentLogText(archive), transcript = Core.buildTranscript(payload.messages);
+            const req = Core.buildArchivistRequest(s.prompt, log, transcript, payload, s.unit);
             req.system += '\nUse compact wording and retain distinct story facts, dates, places, order, decisions, consequences, knowledge boundaries and unresolved threads.';
             if (archive?.sceneArchivistStory?.shared) {
                 const highest = Core.managedSummary(archive).lastDay;
@@ -1081,6 +1099,7 @@ Start new ${s.unit} entries at ${highest + 1}. Preserve the actual story dates.`
             req.system += '\nWrap the complete requested archive Markdown as a JSON string in {"archive":"markdown","keywords":[["keywords for the first unit"],["keywords for the second unit"]]}. List keyword arrays in the same order as the unit entries.';
             if (!job.options.automatic) req.system += Little.notePrompt('message');
             req.prompt = reference + '\n\n' + req.prompt;
+            req.parts = { references: flow.referenceText, log, transcript, system: req.system };
             const decode = raw => ({ raw, at: M.now() });
             if (prepareOnly) return { req, decode };
             return decode(step.combinedRaw || await this.requestFlow(job, step, req, 'archive'));
@@ -1126,7 +1145,7 @@ ${chatText || '(none selected)'}`;
                 if (!chars || (!chars.length && typeof parsed?.reason !== 'string')) throw new Error('The memory response was incomplete. Retry this stage to generate a complete result.');
                 return { chars, reason: parsed.reason || '', dateMap };
             };
-            const req = { system, prompt };
+            const req = { system, prompt, parts: { references: flow.referenceText, log: archiveText, transcript: chatText, system } };
             if (prepareOnly) return { req, decode };
             return decode(step.combinedRaw || await this.requestFlow(job, step, req, 'memories'));
         }
@@ -1145,16 +1164,17 @@ ${chatText || '(none selected)'}`;
             ...(!payload.messages.length ? inputs.filter(e => M.record(e).type === 'unit').slice(-Math.max(1, Number(s.trackerDays) || 3)) : [])])];
         if (!prepareOnly) Object.assign(payload, this.inputStep(context));
         const system = 'Update each tracker independently from the supplied evidence and its previous state. Preserve established details and explicit author corrections. Output JSON only: {"trackers":[{"id":"the supplied tracker id","content":"complete updated tracker Markdown"}]}. Return every supplied tracker exactly once.';
+        const log = context.map(e => e.content).join('\n\n'), transcript = Core.buildTranscript(payload.messages);
         const prompt = `TRACKERS
 ${JSON.stringify(trackers.map(t => ({ id: t.id, name: t.name, instruction: Core.unitize(t.prompt, s.unit), previous: t.previous })))}
 
 ARCHIVE AND STATE
-${context.map(e => e.content).join('\n\n')}
+${log}
 
 SELECTED CHAT
-${Core.buildTranscript(payload.messages)}`;
+${transcript}`;
         const decode = raw => ({ trackers: Flow.trackerAnswer(raw, trackers), targets: trackers.map(t => ({ id: t.id, name: t.name, target: t.target })) });
-        const req = { system, prompt };
+        const req = { system, prompt, parts: { log, transcript, system } };
         if (prepareOnly) return { req, decode };
         return decode(step.combinedRaw || await this.requestFlow(job, step, req, 'trackers'));
     }
@@ -1181,7 +1201,13 @@ ${Core.buildTranscript(payload.messages)}`;
         const prompt = 'SHARED MATERIAL\n' + [...shared].map(([text, label]) => label + '\n' + text).join('\n\n') +
             '\n\nSTAGES\n' + JSON.stringify(requests);
         const stage = stageName(first);
-        const raw = await this.requestFlow(job, first, { system, prompt }, stage);
+        const parts = {
+            references: job.options.flow.referenceText,
+            transcript: [...shared].filter(([, label]) => label.startsWith('Transcript ')).map(([text]) => text).join('\n\n'),
+            log: plans.map(({ req }) => req.parts?.log || '').filter(Boolean).join('\n\n'),
+            system: [system, ...requests.map(request => request.instructions)].join('\n\n'),
+        };
+        const raw = await this.requestFlow(job, first, { system, prompt, parts }, stage);
         const results = M.parseJSON(raw)?.stages;
         if (!results || plans.some(plan => !results[stageName(plan.step)])) throw new Error('The combined response did not contain every stage. Retry or run separate passes.');
         for (const plan of plans) plan.decode(JSON.stringify(results[stageName(plan.step)]));

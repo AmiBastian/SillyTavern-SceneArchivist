@@ -189,7 +189,7 @@ Optional recap automation can suggest or create a recap after newer units, ficti
 
 - Under **Library → All records → Search, evidence and continuity**, **Ask the archive** answers a question with source links. **Check this claim** checks one statement, and the recent or whole-archive checks look for conflicts across records.
 - **Previously on…** creates a short return recap for the reader. **Recall** can ask a helper model to pick relevant details before a normal reply.
-- In **Story**, open the last reply’s **Memory Trail** beside the chat. On a small screen or with Moving UI enabled it opens as a bottom sheet. The chat message menu opens the trail for that reply or swipe. The header stays visible as you scroll through World Info matches and Little Things. Open **Prompt delivery** for cache details or **Tools → Prompt** for budget settings.
+- In **Story**, open the last reply’s **Memory Trail**. It fits beside the desktop chat when there is enough space, uses SillyTavern’s popup for wider chats, and opens as a bottom sheet on small screens. It follows Moving UI’s chat position. The chat message menu opens the trail for that reply or swipe. The header stays visible as you scroll through World Info matches and Little Things. Open **Prompt delivery** for cache details or **Tools → Prompt** for budget settings.
 
 For a past scene, put an explicit marker such as `Flashback: February 14, 2027` on its own line in the chat. Scene recall uses the date to leave out managed memories that contain later or undated evidence. A new scene marker or a changed place ends recent cue carryover.
 
@@ -227,6 +227,8 @@ In groups, Scene Archivist loads only the speaking card’s memories by default.
 **Current SillyTavern model** uses your live connection. A failed profile can be retried directly, or you can explicitly select **Use current model**. Context checks use the capacity exposed by the configured connection. Custom proxies can apply additional limits.
 
 Helper tools such as memory organization and archive search use the helper model’s context with room reserved for the reply. In **Story memory settings**, leave the helper input and count limits at **0** to fit the connection automatically. Set a positive limit to cap a request. If a connection exposes no context size, the automatic helper input estimate is 18,000 tokens.
+
+If an archive or memory stage exceeds its model context, the error lists its largest input parts. Check the figures for reference lorebooks, selected messages, the scene log, instructions, and included SillyTavern chat context. Use the suggested setting to reduce extra context or choose **Split this stage**.
 
 ![Optional persona, reference lore, and prompt-preview settings](docs/media/17-reference-context.png)
 

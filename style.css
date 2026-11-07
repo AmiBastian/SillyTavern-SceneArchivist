@@ -378,6 +378,12 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
 .sa-review .sa-proposal[open] > summary::before { content: '▾'; }
 .sa-review .sa-proposal > summary b { flex: 1 1 175px; overflow-wrap: anywhere; }
 dialog:has(.sa-review) .popup-button-ok { font-family: var(--mainFontFamily, system-ui), "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif; }
+dialog:has(.sa-prompt-trace) {
+    width: min(680px, 96vw);
+    background: var(--SmartThemeBlurTintColor, #211d26);
+    background: rgb(from var(--SmartThemeBlurTintColor, #211d26) r g b / 1);
+}
+.sa-prompt-trace .sa-trail-title h3 { font: 650 1.15em/1.35 var(--mainFontFamily, system-ui), sans-serif; }
 .sa-trail-dock {
     /* ST transforms the document root and fixes its body on mobile. */
     position: fixed; z-index: 500; top: 100dvh; left: 0; right: 0; transform: translateY(-100%);
@@ -413,18 +419,9 @@ dialog:has(.sa-review) .popup-button-ok { font-family: var(--mainFontFamily, sys
     .sa-trail-dock .menu_button { min-height: 44px; }
 }
 @media (min-width: 1001px) and (pointer: fine) {
-    body.sa-trail-open:not(.movingUI) {
-        --sa-trail-width: clamp(312px, 24dvw, 380px);
-        --sa-trail-gap: 12px;
-        --sa-trail-chat-width: min(var(--sheldWidth, 100dvw), calc(100dvw - var(--sa-trail-width) - 3 * var(--sa-trail-gap)));
-    }
-    body.sa-trail-open:not(.movingUI) #sheld {
-        right: calc(var(--sa-trail-width) + var(--sa-trail-gap)); max-width: var(--sa-trail-chat-width);
-    }
-    body.sa-trail-open:not(.movingUI) .sa-trail-dock {
+    .sa-trail-dock {
         top: calc(var(--topBarBlockSize, 45px) + 8px); right: auto; transform: none; border-radius: 12px;
-        left: calc((100dvw + var(--sa-trail-chat-width) - var(--sa-trail-width) + var(--sa-trail-gap)) / 2);
-        width: var(--sa-trail-width); max-height: calc(100dvh - var(--topBarBlockSize, 45px) - 16px);
+        max-height: calc(100dvh - var(--topBarBlockSize, 45px) - 16px);
     }
 }
 @media (max-width: 720px) {
