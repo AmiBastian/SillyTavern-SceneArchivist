@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.0.0
+
+- Put Story, Archive, Characters and Library in one compact workspace. Find Maintain, Prompt and Settings under Tools, with Branches in Maintain.
+- Added a Library timeline with scene summaries, linked character memories, Little Things and original message jumps.
+- Added Little Things for small callbacks and open threads. Keep them in the archive’s story metadata, save one from a chat message, or review suggestions during archive and condense runs.
+- Added local scene recall for cues, promises and short carryover. Little Things share the prompt token budget, respect who knows them, and can include a verified short quote when requested.
+- Added a reply-side Memory Trail on desktop and a bottom sheet on smaller screens. See what loaded, why it loaded, and where it came from.
+- Grouped proposed summaries, memories, trackers and Little Things in one review with editable text, source labels, and before and after text.
+- Kept saved stories, source links, Undo and unfinished drafts compatible with 1.2.0.
+
 ## 1.2.0 · November 6, 2026
 
 - Added a Story overview with coverage, recent saves and a job status chip. **Archive thoroughly** prepares summaries, character memories and enabled trackers for one review.

@@ -1,4 +1,4 @@
-# Scene Archivist 1.2.0
+# Scene Archivist 2.0.0
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -12,6 +12,13 @@ If your characters can hide a body but cannot remember where they had dinner, we
 
 The examples use an invented story about a flooded railway station. Screenshots and walkthroughs were captured in **SillyTavern 1.19.0** with scripted model replies and sample lorebooks. Your theme and model output will look different. See the [changelog](CHANGELOG.md) for version history.
 
+<details>
+<summary>Workspace walkthrough</summary>
+
+![Story, the Library timeline, Little Things, and the reply-side Memory Trail](docs/media/workspace-walkthrough.gif)
+
+</details>
+
 ## Install and make your first archive
 
 1. In SillyTavern, open **Extensions → Install extension**.
@@ -20,9 +27,9 @@ The examples use an invented story about a flooded railway station. Screenshots 
 4. Select a lorebook in **Archive → Your archive**, or use **Start here** to create one and preview a short message range.
 5. Pick **Summarize this range** for a summary, or **Archive this range thoroughly** to also create memories and update enabled trackers. Read the review, then save the entries you approve.
 
-For an existing installation, use SillyTavern’s extension update control. Before updating an active story, **All tools → Maintain → Backups and restore → Back up this story** saves its books, coverage, revisions, and unfinished job.
+For an existing installation, use SillyTavern’s extension update control. Before updating an active story, **Tools → Maintain → Backups and restore → Back up this story** saves its books, coverage, revisions, and unfinished job.
 
-**Essentials** shows Story, Archive, Characters and Library. **All tools** reveals Maintain, Prompt, Settings and the advanced sections. Your picks and unfinished job stay available. **Help & examples** has a quick start, a worked example, and a searchable button guide. Hover or focus an action for its explanation, or turn on **Show help buttons** to open it separately.
+**Story**, **Archive**, **Characters**, and **Library** are the everyday workspace. Open **Tools** for Maintain, Prompt and Settings. **Advanced controls** reveals additional sections in place. Your range picks and unfinished jobs stay available. **Help & examples** has a quick start, a worked example, and a searchable button guide. Hover or focus an action for its explanation, or turn on **Show help buttons** to open it separately.
 
 <details>
 <summary>Help and mobile view</summary>
@@ -105,7 +112,7 @@ Use **Facts, knowledge and unfinished business** to write or extract who knows, 
 
 ## Character diaries
 
-1. In **Characters → All tools**, open **Character diaries** and select a character. Optionally enter a story date, an inclusive message range, or a style note.
+1. In **Characters** with **Tools → Advanced controls** enabled, open **Character diaries** and select a character. Optionally enter a story date, an inclusive message range, or a style note.
 2. Choose **Write a diary**. The model reads original chat messages, the character card, and attached background lore. Review the first-person text before saving.
 3. After the story continues, choose **Update diary from new chat**. The previous diary provides voice and continuity, and later messages supply the new events. An exact range lets you revisit an earlier scene.
 4. Use **Condense diary** when the saved text grows too large. The previous version remains in Library history.
@@ -131,14 +138,16 @@ Diaries are saved to the archive separately from active character memories. You 
 
 ## Library and history
 
-Use **Library** to search saved entries by text, date, character, location, or record type. **Inspect** shows the text, original message ranges, linked sources, earlier revisions, and protection controls. Turn on **History** to include retired records. Use **Save a note** to keep an author note without making a model request.
+Open **Library → Timeline** to read a saved scene alongside its linked character memories and Little Things. **Jump to** opens the original message when it is available in the current chat. Use **All records** to search by text, date, character, location, or type. **Inspect** shows the text, original message ranges, linked sources, earlier revisions, and protection controls. Turn on **History** to include retired records. Use **Save a note** to keep an author note without making a model request.
 
 - **Author locked**, **Preserve exact wording**, and **Keep detailed** protect deliberate wording from automated rewrites.
 - **Prioritize in memory budget** gives an eligible record preference when Scene Archivist trims loaded entries.
 - **Exclude this record from injection** keeps it in the book for reference without including it in prompts.
 - A source edit is shown beside a proposal when relevant. Existing saved memories remain available after ordinary chat edits, and you can approve prepared work without rebuilding an existing list first.
 
-![Library with saved story records](docs/media/12-library.png)
+![Library timeline with a selected scene and links to its evidence](docs/media/37-timeline.png)
+
+![All records search and inspection](docs/media/12-library.png)
 
 <details>
 <summary>Trace a record to its original messages</summary>
@@ -148,6 +157,16 @@ Use **Sources** on a Library result. Each source range lists the chat it came fr
 ![Original messages linked to the selected archive entry](docs/media/27-original-sources.png)
 
 </details>
+
+### Little Things
+
+Keep the borrowed coat, the way someone takes their coffee, or the promise that never made it into the main plot. Use **Library → Little Things → Add a detail**, or choose **Little Thing** in **Remember this** on a chat message. Give it a cue someone might actually say. Fill in **Who knows** for private details.
+
+Reviewed archive and condense runs can suggest details in the same model response. Read the source and check the ones you want in the combined review. Little Things live in the selected archive’s story metadata and travel with full story backups. Each detail adds zero lorebook entries. A branch with verified history keeps only Little Things with matching source messages.
+
+A normal reply can load up to four matching details inside the existing memory budget on SillyTavern versions with the World Info scan hook. Relevant cues and open promises can carry over for a few replies within a scene. **Load next reply** queues a detail for the next eligible speaker. To turn off automatic selection, open **Tools → Prompt** and switch off scene recall.
+
+![Little Things with cues, a source link, and the option to queue a detail](docs/media/38-little-things.png)
 
 ## Condense by tokens
 
@@ -168,9 +187,11 @@ Optional recap automation can suggest or create a recap after newer units, ficti
 
 ## Prompt and recall
 
-- Under **Library → Search, evidence and continuity**, **Ask the archive** answers a question with source links. **Check this claim** checks one statement, and the recent or whole-archive checks look for conflicts across records.
+- Under **Library → All records → Search, evidence and continuity**, **Ask the archive** answers a question with source links. **Check this claim** checks one statement, and the recent or whole-archive checks look for conflicts across records.
 - **Previously on…** creates a short return recap for the reader. **Recall** can ask a helper model to pick relevant details before a normal reply.
-- In **Prompt**, **View last reply’s memory trail** and **Memory budget and loading reasons** show which Scene Archivist entries loaded at SillyTavern’s World Info stage, which were skipped, and why. The message menu opens the trail for that reply or swipe. The trace keeps counts, titles and source links for recent replies.
+- In **Story**, open the last reply’s **Memory Trail** beside the chat. On a small screen it opens as a bottom sheet. The chat message menu opens the trail for that reply or swipe. **Tools → Prompt** has the memory budget and more loading details. The trail reports both the native World Info matches and the Little Things Scene Archivist prepared for the reply.
+
+For a past scene, put an explicit marker such as `Flashback: February 14, 2027` on its own line in the chat. Scene recall uses the date to leave out managed memories that contain later or undated evidence. A new scene marker or a changed place ends recent cue carryover.
 
 In groups, Scene Archivist loads only the speaking card’s memories by default. Use **Remember this** to choose the exact card when two cards share a name. You can change group memory scope in Prompt. Saving a group memory for a uniquely identified card also gives its lorebook entry a SillyTavern character filter. Existing entries get that filter when edited or regenerated in the group. Filters set by hand in World Info are preserved.
 
@@ -180,7 +201,9 @@ In groups, Scene Archivist loads only the speaking card’s memories by default.
 
 ![Memory budget and activation source filters](docs/media/16-loading-budget.png)
 
-![Scene Archivist entries and loading reasons for a single reply](docs/media/35-reply-trace.png)
+![Memory Trail with cues and evidence alongside SillyTavern chat](docs/media/35-reply-trace.png)
+
+![Memory Trail as a bottom sheet on a phone-sized screen](docs/media/39-mobile-trail.png)
 
 ![Walkthrough of finding a record and its evidence](docs/media/evidence-walkthrough.gif)
 
@@ -226,7 +249,7 @@ Helper tools such as memory organization and archive search use the helper model
 
 Open **Maintain → Archive sharing** and enable **Share this archive across chats** in the original chat, then select that book in the other chat. This is for chats that intentionally share one timeline. **Where to file new summaries** can start a new unit, continue an existing unit, or file an earlier event. Each contribution keeps its own source range. Use one writer at a time when updating a shared archive.
 
-Open **All tools → Maintain → Branches** to choose verified earlier history or empty private books. To create the branch, open the original message’s three-dot menu in SillyTavern and choose **Create Branch**. The branch view shows the parent and fork point when available. Later records stay in the parent when the extension cannot verify them as part of the branch.
+Open **Tools → Maintain → Branches** to choose verified earlier history or empty private books. To create the branch, open the original message’s three-dot menu in SillyTavern and choose **Create Branch**. The branch view shows the parent and fork point when available. Later records stay in the parent when the extension cannot verify them as part of the branch.
 
 Renaming a chat in SillyTavern keeps its archive and progress. A native branch or a separate copy of the original chat file gets private books, even when the copied file has the same internal identifier. Use SillyTavern’s **Branch** action to keep lineage easy to follow.
 
