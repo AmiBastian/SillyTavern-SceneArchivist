@@ -1,4 +1,27 @@
-# Scene Archivist 2.0.1
+# Scene Archivist 2.1.0
+
+Version 2.1.0 adds precise delivery from long memory lists, verified original-message lookup, optional evidence audits, reference allowances, workflow presets and troubleshooting tools. See the [release notes](docs/releases/2.1.0.md) and [validation record](docs/releases/2.1.0-VALIDATION.md).
+
+<details>
+<summary>New controls in 2.1.0</summary>
+
+Choose a workflow from Story. Simple keeps extra recall and audit calls off; Detailed enables those optional checks. Mostly Automatic prepares rolling memories for review.
+
+![Workflow presets with an explanation of the Simple workflow](docs/media/47-workflow-presets.png)
+
+Set reference sizes, fitting and memory audits under Tools → Settings. Zero keeps the whole reference selection; a positive allowance can explain overflow or explicitly fit complete entries.
+
+![Reference allowance, fitting policy and optional evidence audit](docs/media/48-reference-allowance.png)
+
+Ask can show the complete verified original passage behind an answer. Memory Trail shows which saved lines were supplied to a reply.
+
+![Archive answer with its verified original-message passage and uncertainty](docs/media/49-verified-answer.png)
+
+![Memory Trail showing the delivered line range from a long character list](docs/media/50-trail-lines.png)
+
+These images use invented records and scripted replies in native SillyTavern 1.19.0. They demonstrate the controls and evidence views, not real-model answer quality.
+
+</details>
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -187,7 +210,8 @@ Optional recap automation can suggest or create a recap after newer units, ficti
 
 ## Prompt and recall
 
-- Under **Library → All records → Search, evidence and continuity**, **Ask the archive** answers a question with source links. **Check this claim** checks one statement, and the recent or whole-archive checks look for conflicts across records.
+- Under **Library → All records → Search, evidence and continuity**, **Ask the archive** answers a question with source links. It can select complete dated bullets from long character lists; **Evidence used** shows the supplied text, and source buttons open the saved parent record. Saved list line numbers describe that record, not verified original chat boundaries. **Check this claim** checks one statement, and the recent or whole-archive checks look for conflicts across records.
+- If saved evidence is missing or insufficient, Ask can make one follow-up pass with related search wording and hash-verified original passages from the current chat. Original-source buttons jump to the cited messages. Edited, foreign, incomplete or corrected source ranges are excluded; source limits and skipped receipts are reported. Each pass can retry malformed JSON once. No other chat is opened.
 - **Previously on…** creates a short return recap for the reader. **Recall** can ask a helper model to pick relevant details before a normal reply.
 - In **Story**, open the last reply’s **Memory Trail**. It fits beside the desktop chat when there is enough space, uses SillyTavern’s popup for wider chats, and opens as a bottom sheet on small screens. It follows Moving UI’s chat position. The chat message menu opens the trail for that reply or swipe. The header stays visible as you scroll through World Info matches and Little Things. Open **Prompt delivery** for cache details or **Tools → Prompt** for budget settings.
 - On desktop, drag the trail’s title to move it. Focus the title and use arrow keys for keyboard movement. **Reset trail position** or Enter returns it to its default placement. The popup view has a **Move trail** control. The trail follows your ST theme’s colors, transparency and blur, including live theme changes and Fast UI.
@@ -197,6 +221,32 @@ For a past scene, put an explicit marker such as `Flashback: February 14, 2027` 
 In groups, Scene Archivist loads only the speaking card’s memories by default. Use **Remember this** to choose the exact card when two cards share a name. You can change group memory scope in Prompt. Saving a group memory for a uniquely identified card also gives its lorebook entry a SillyTavern character filter. Existing entries get that filter when edited or regenerated in the group. Filters set by hand in World Info are preserved.
 
 **Cache-friendly delivery** is optional. It puts fixed lore earlier and changing matches near the reply. The memory trail reports an approximate shared prompt prefix between requests. Provider caching depends on the connection. **On-demand memory tools** are experimental and opt-in. They require a tool-capable Chat Completion connection with Function Calling enabled and may add another request.
+
+Ask and the recall tool keep a selected bullet's date heading, nested notes and continuations together. A document with unfamiliar headings or global prose stays whole. If complete evidence exceeds the allowance, it is omitted or the tool reports that it cannot fit. Recall tools apply speaker and active flashback restrictions to the parent record before selecting excerpts; Ask remains an author-facing search across the story. Normal World Info injection and optional AI Recall still use whole records.
+
+The recall-memory tool accepts up to three alternate search queries for indirect callbacks. All searches retain the same speaker and flashback limits. Raw original passages are available only to author-facing Ask, because a character's saved source range can contain private information they did not learn. Original-source lookup also respects an active Scene Recall flashback cutoff. Legacy records without matching receipts remain searchable as saved text.
+
+**Precise delivery** is an optional control in Tools → Prompt. It sends complete matching bullets from character lists that SillyTavern already activated. Dates and continuations stay together. Protected lists, explicit full-detail requests and semantic-only matches remain whole. The shared memory allowance still applies; Memory Trail records the selected line ranges. Stored lists stay intact. A bullet can depend on wider context, so protect a list or leave this option off when its full context is essential.
+
+AI Recall can select individual excerpts and propose related search wording in its existing pre-reply request. It uses the chosen helper route and configured recall count. Native vector activations reach the shared allocator independently of keyword matches; this does not create a separate semantic index of every bullet.
+
+## Workflow choices and evidence review
+
+In Story, **Choose a workflow** offers Simple, Detailed and Mostly Automatic presets. The dialog explains calls and review behavior before applying. Prompts, routes, references and persona policy stay configured; settings follow the current workflow scope.
+
+- **Simple:** reviewed archive and memories, with local precise delivery and no extra recall or audit requests.
+- **Detailed:** AI Recall and evidence-audit advice for extracted memories and shorter proposals. Each audit adds a request. Flagged automatic condensation returns to review.
+- **Mostly Automatic:** rolling chat memories after 30 eligible messages with a four-message buffer, and recap suggestions. This requires a chat-based memory source and retains review before saving.
+
+Context settings show approximate reference sizes and offer a separate reference allowance. The default reads the entire selected set; a positive allowance reports overflow. **Relevant complete entries** explicitly permits fitting whole entries and reports omissions. No external lore is rewritten. **Estimate this run** includes reference sizes and enabled memory audits.
+
+Structured memory responses can cite selected message indices or archive source ids for each memory. Inspect → Sources and dependencies and the Sources view retain these links and learning notes. Citations are model supplied and checked against the actual selection; they do not prove every claim is supported. Legacy strings remain supported. Exact current text can reuse its binding; changed or ambiguous text does not inherit an old citation.
+
+Evidence audits report unsupported details, omissions, dates and knowledge boundaries as review advice. If an audit fails, retry just the audit or use **Skip audit and review** to inspect the retained proposal. Source changes invalidate the retained request. The existing Undo journal, revisions and verified writes protect consequential edits.
+
+**Why was this forgotten?** compares saved text with the last retained delivery trace. **Export reviewed diagnostics** previews a report that excludes story text, names, credentials, URLs and raw errors. **Test helper grounding** is an explicit connection check with invented evidence and at most five real requests; passing it is not a general memory-quality score. Its preview explains possible provider charges.
+
+Library results use pages of 100 so older results remain reachable. Search data and token counts are cached with content and metadata checks; tokenizer work is coalesced and limited to six concurrent calls. Local search measurements at 1,000 and 10,000 records are in [the performance report](benchmarks/performance.json), with their scope and hardware.
 
 ![Search and continuity controls](docs/media/15-search.png)
 
@@ -226,6 +276,8 @@ In groups, Scene Archivist loads only the speaking card’s memories by default.
 ![Scene Archivist setup checks](docs/media/34-check-setup.png)
 
 **Current SillyTavern model** uses your live connection. A failed profile can be retried directly, or you can explicitly select **Use current model**. Context checks use the capacity exposed by the configured connection. Custom proxies can apply additional limits.
+
+Helper requests also keep the selected profile after a failure. To change connections, select **Current SillyTavern model** or another available profile in Settings before retrying. The helper connection test names the route it used, and diagnostics include the latest route and request status.
 
 Helper tools such as memory organization and archive search use the helper model’s context with room reserved for the reply. In **Story memory settings**, leave the helper input and count limits at **0** to fit the connection automatically. Set a positive limit to cap a request. If a connection exposes no context size, the automatic helper input estimate is 18,000 tokens.
 

@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "scope": "Manually supplied search rewrites for deterministic candidate-path checks. These are not outputs from an evaluated model.",
+  "queries": {
+    "coffee-indirect": ["drink beverage coffee tea preference sugar"],
+    "key-indirect": ["key lock given received handed returned"],
+    "coat-indirect": ["jacket coat lent returned repaired"],
+    "watch-indirect": ["timepiece watch inscription engraved engraving"]
+  }
+}

@@ -193,6 +193,22 @@ const wordList = text => (String(text ?? '').normalize('NFKC').toLocaleLowerCase
     });
 const QUERY_STOP_WORDS = new Set(("a an and are as at be been being but by can could did do does doing for from had has have he her hers herself him himself his how i if in into is it its itself me my myself no nor not of on or our ours ourselves out over own same she should so some such than that the their theirs them themselves then there these they this those through to too under until up us very was we were what when where which while who whom why will with would you your yours yourself yourselves i'm i've i'll i'd you're you've you'll you'd he's she's it's we're we've we'll they're they've they'll isn't aren't wasn't weren't don't doesn't didn't can't couldn't won't wouldn't shouldn't hadn't hasn't haven't let's").split(/\s+/));
 export const queryTerms = text => unique(wordList(text)).filter(w => !QUERY_STOP_WORDS.has(w));
+let searchCache = new WeakMap(), searchCharacters = 0;
+export function clearSearchCache() { searchCache = new WeakMap(); searchCharacters = 0; }
+function indexedText(entry, fieldsText) {
+    const content = String(entry.content || ''), previous = searchCache.get(entry);
+    if (previous?.content === content && previous.fieldsText === fieldsText) return previous;
+    if (previous) { searchCharacters -= previous.size; searchCache.delete(entry); }
+    const fields = new Set(wordList(fieldsText)), frequencies = new Map();
+    for (const word of wordList(content)) frequencies.set(word, (frequencies.get(word) || 0) + 1);
+    const size = content.length + fieldsText.length;
+    const item = { content, fieldsText, fields, frequencies, size };
+    if (size <= 4000000) {
+        if (searchCharacters + size > 4000000) clearSearchCache();
+        searchCache.set(entry, item); searchCharacters += size;
+    }
+    return item;
+}
 export function search(entries, query = '', filters = {}) {
     const needles = queryTerms(query);
     if (String(query).trim() && !needles.length) return [];
@@ -208,9 +224,7 @@ export function search(entries, query = '', filters = {}) {
             rows.push({ entry: e, score: 0, matches: 0, matchedTerms: [], fieldMatches: [], bodyMatches: [], reason: 'archive order' });
             continue;
         }
-        const fields = new Set(wordList(`${title(e)} ${(e.key ?? []).join(' ')} ${(r.dates ?? []).join(' ')} ${(r.people ?? []).join(' ')} ${(r.locations ?? []).join(' ')} ${r.subject ?? ''} ${(r.aliases ?? []).join(' ')}`));
-        const frequencies = new Map();
-        for (const word of wordList(e.content)) frequencies.set(word, (frequencies.get(word) || 0) + 1);
+        const { fields, frequencies } = indexedText(e, `${title(e)} ${(e.key ?? []).join(' ')} ${(r.dates ?? []).join(' ')} ${(r.people ?? []).join(' ')} ${(r.locations ?? []).join(' ')} ${r.subject ?? ''} ${(r.aliases ?? []).join(' ')}`);
         let score = 0;
         const matchedTerms = [], fieldMatches = [], bodyMatches = [];
         for (const w of needles) {
@@ -237,9 +251,9 @@ export function leaves(id, entries, seen = new Set()) {
 }
 
 /** One hard cap across all managed books. A recap and its covered sources cannot spend the same budget twice. */
-export function allocate(entries, { budget = 6000, query = '', selected = [], details = [], counts = {}, semantic = [] } = {}) {
+export function allocate(entries, { budget = 6000, query = '', selected = [], details = [], counts = {}, semantic = [], ranked } = {}) {
     const cap = Math.max(0, Number(budget) || 0), picked = new Set(selected), detail = new Set(details), sem = new Set(semantic);
-    const scored = new Map(search(entries, query).map(x => [record(x.entry).id, x]));
+    const scored = new Map((ranked ?? search(entries, query)).map(x => [record(x.entry).id, x]));
     const omitted = [], candidates = [];
     for (const e of entries) {
         const r = record(e); if (!r) continue;
@@ -249,8 +263,8 @@ export function allocate(entries, { budget = 6000, query = '', selected = [], de
         const textMatch = scored.get(r.id);
         const hit = textMatch?.score ?? 0;
         const selectedHere = picked.has(r.id) || detail.has(r.id);
-        const active = selectedHere || sem.has(r.id) || e.constant || r.protection?.pinned || hit > 0 || ['fact', 'thread'].includes(r.type);
-        if (!active) { omitted.push({ id: r.id, title: title(e), tokens: cost, reason: 'not relevant' }); continue; }
+        const relevant = selectedHere || sem.has(r.id) || e.constant || r.protection?.pinned || hit > 0 || ['fact', 'thread'].includes(r.type);
+        if (!relevant) { omitted.push({ id: r.id, title: title(e), tokens: cost, reason: 'not relevant' }); continue; }
         const priority = detail.has(r.id) ? 20000 : selectedHere ? 15000 :
             r.protection?.pinned ? 12000 : ['opening', 'closing', 'epoch', 'legend'].includes(r.type) ? 10000 :
             r.type === 'thread' ? 8500 : r.type === 'fact' ? 8000 : r.type === 'knowledge' ? 7500 :
@@ -447,10 +461,10 @@ export function validateWorkflow(input) {
     if ('trackers' in w && (!Array.isArray(w.trackers) || w.trackers.some(t => !t || typeof t.id !== 'string' || typeof t.name !== 'string' || typeof t.prompt !== 'string' || typeof t.enabled !== 'boolean'))) throw new Error('The workflow trackers are invalid.');
     if ('workbench' in w) {
         if (!w.workbench || Array.isArray(w.workbench) || typeof w.workbench !== 'object') throw new Error('Invalid memory workflow settings.');
-        const allowed = ['budget', 'requestBudget', 'modelAwareRequests', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview', 'branchMode', 'continuityRecent', 'groupMemoryScope', 'messageBadges', 'cacheLayers', 'memoryTools'];
+        const allowed = ['budget', 'requestBudget', 'modelAwareRequests', 'preciseDelivery', 'auditCondense', 'sceneRecall', 'autoCondense', 'trigger', 'afterUnits', 'afterDays', 'pressureTokens', 'batchSize', 'charactersPerBatch', 'reviewMode', 'recapLabel', 'recapMode', 'continuityAuto', 'recapOnReturn', 'recapAfterHours', 'semantic', 'requestLimit', 'jobPreview', 'branchMode', 'continuityRecent', 'groupMemoryScope', 'messageBadges', 'cacheLayers', 'memoryTools'];
         w.workbench = Object.fromEntries(Object.entries(w.workbench).filter(([k]) => allowed.includes(k)));
         for (const [k, v] of Object.entries(w.workbench)) if (!['number', 'string', 'boolean'].includes(typeof v) || (typeof v === 'number' && (!Number.isFinite(v) || v < 0 || v > 1000000))) throw new Error(`Invalid memory workflow value: ${k}.`);
-        for (const key of ['groupMemoryScope', 'cacheLayers', 'memoryTools']) if (key in w.workbench && typeof w.workbench[key] !== 'boolean') throw new Error(`Invalid workflow toggle: ${key}.`);
+        for (const key of ['groupMemoryScope', 'cacheLayers', 'memoryTools', 'preciseDelivery', 'auditCondense', 'sceneRecall']) if (key in w.workbench && typeof w.workbench[key] !== 'boolean') throw new Error(`Invalid workflow toggle: ${key}.`);
         if ('messageBadges' in w.workbench && !['desktop', 'all', 'off'].includes(w.workbench.messageBadges)) throw new Error('Invalid status badge preference.');
         if ('modelAwareRequests' in w.workbench && typeof w.workbench.modelAwareRequests !== 'boolean') throw new Error('Invalid request budget migration flag.');
         if ('branchMode' in w.workbench && !['inherit','fresh','prune'].includes(w.workbench.branchMode)) throw new Error('Invalid branch history mode.');
@@ -521,7 +535,7 @@ export class JobQueue {
                         await this.persist(); break;
                     }
                     job.status = 'done';
-                    if (job.options.bulk) { delete job.draft; delete job.auditParts; for (const step of job.steps) { delete step.output; delete step.combinedRaw; } }
+                    if (job.options.bulk) { delete job.draft; delete job.auditParts; for (const step of job.steps) { delete step.output; delete step.combinedRaw; delete step.memoryRaw; delete step.memoryCacheKey; delete step.memoryAudit; delete step.condenseDraft; } }
                     break;
                 }
                 const step = job.steps[job.cursor];
@@ -536,7 +550,7 @@ export class JobQueue {
                 const accepted = await this.commit(job, step);
                 if (!accepted) { if (job.status === 'running') job.status = 'paused'; await this.persist(); break; }
                 step.status = 'done'; step.completed = now(); job.cursor++;
-                if (!job.options.bulk) delete step.output;
+                if (!job.options.bulk) { delete step.output; delete step.memoryRaw; delete step.memoryCacheKey; delete step.memoryAudit; delete step.condenseDraft; }
                 await this.persist(); this.notify();
             }
         } catch (e) {
