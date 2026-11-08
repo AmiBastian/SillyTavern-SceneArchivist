@@ -1,4 +1,4 @@
-# Scene Archivist 2.0.0
+# Scene Archivist 2.0.1
 
 **Your story has consequences. Your characters should remember them.**
 
@@ -190,6 +190,7 @@ Optional recap automation can suggest or create a recap after newer units, ficti
 - Under **Library → All records → Search, evidence and continuity**, **Ask the archive** answers a question with source links. **Check this claim** checks one statement, and the recent or whole-archive checks look for conflicts across records.
 - **Previously on…** creates a short return recap for the reader. **Recall** can ask a helper model to pick relevant details before a normal reply.
 - In **Story**, open the last reply’s **Memory Trail**. It fits beside the desktop chat when there is enough space, uses SillyTavern’s popup for wider chats, and opens as a bottom sheet on small screens. It follows Moving UI’s chat position. The chat message menu opens the trail for that reply or swipe. The header stays visible as you scroll through World Info matches and Little Things. Open **Prompt delivery** for cache details or **Tools → Prompt** for budget settings.
+- On desktop, drag the trail’s title to move it. Focus the title and use arrow keys for keyboard movement. **Reset trail position** or Enter returns it to its default placement. The popup view has a **Move trail** control. The trail follows your ST theme’s colors, transparency and blur, including live theme changes and Fast UI.
 
 For a past scene, put an explicit marker such as `Flashback: February 14, 2027` on its own line in the chat. Scene recall uses the date to leave out managed memories that contain later or undated evidence. A new scene marker or a changed place ends recent cue carryover.
 

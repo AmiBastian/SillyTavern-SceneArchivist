@@ -1,6 +1,7 @@
 import * as M from './memory-engine.js';
 import { sharedPrefix } from './chat-workflows.js';
 import { escape as html } from './workflow-tools.js';
+import { addReviewHandle } from './review-window.js';
 
 const traceKey = 'sceneArchivistPrompt';
 const maxReplies = 24;
@@ -139,7 +140,7 @@ export class PromptInspection {
     async show(index = null, docked = false) {
         const w = this.w;
         this.closeDock(false);
-        docked = docked && !!this.dockPlacement();
+        docked = docked && (!!this.dockPosition || !!this.dockPlacement());
         const chat = w.h.context().chat || [], message = index === null ? null : chat[index];
         const trace = index === null
             ? this.lastTrace || chat.findLast(item => item.extra?.[traceKey])?.extra?.[traceKey]
@@ -264,8 +265,35 @@ export class PromptInspection {
             dock.append(header, root); document.body.append(dock);
             this.dock = dock;
             this.dockTrigger = trigger;
+            const movement = addReviewHandle(root, dock, {
+                clickToMove: false,
+                onMove: () => {
+                    const rect = dock.getBoundingClientRect();
+                    this.dockPosition = { left: rect.left, top: rect.top, width: rect.width };
+                },
+                onReset: () => { this.dockPosition = null; this.dockLayout(); },
+            });
+            movement.handle.innerHTML = '<i class="fa-solid fa-up-down-left-right" aria-hidden="true"></i> Memory Trail';
+            movement.handle.setAttribute('aria-label', 'Move Memory Trail');
+            header.querySelector('h3').replaceChildren(movement.handle);
+            const reset = document.createElement('button');
+            reset.type = 'button'; reset.className = 'menu_button sa-trail-reset';
+            reset.setAttribute('aria-label', 'Reset trail position'); reset.title = 'Reset trail position';
+            reset.innerHTML = '<i class="fa-solid fa-rotate-left" aria-hidden="true"></i>';
+            reset.addEventListener('click', movement.reset);
+            close.before(reset);
             this.dockLayout = () => {
                 if (this.dock !== dock) return;
+                const desktop = matchMedia('(min-width: 1001px) and (pointer: fine)').matches;
+                movement.handle.disabled = !desktop;
+                reset.hidden = !desktop;
+                if (desktop && this.dockPosition) {
+                    dock.style.width = `${this.dockPosition.width}px`;
+                    movement.move(this.dockPosition.left, this.dockPosition.top);
+                    return;
+                }
+                dock.classList.remove('sa-floating-review');
+                dock.style.removeProperty('top');
                 const placement = this.dockPlacement();
                 if (!placement) {
                     this.closeDock(false);

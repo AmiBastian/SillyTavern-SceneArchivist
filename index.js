@@ -1589,7 +1589,12 @@ jQuery(async () => {
                 return (await popup.show()) === POPUP_RESULT.AFFIRMATIVE;
             },
             confirmText: async (text, opts = {}) => { const result = await callGenericPopup(esc(text), POPUP_TYPE.CONFIRM, '', opts); return result === true || result === POPUP_RESULT.AFFIRMATIVE; },
-            show: (root, opts = {}) => { workbench?.layout?.help.observe(root); return new Popup(root, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true, ...opts }).show(); },
+            show: (root, opts = {}) => {
+                workbench?.layout?.help.observe(root);
+                const popup = new Popup(root, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true, ...opts });
+                if (root.classList.contains('sa-prompt-trace')) addReviewHandle(root, popup.dlg);
+                return popup.show();
+            },
             notify: (message, kind = 'info') => toastr[kind](message, 'Scene Archivist'),
             offerRecap: callback => toastr.info('Welcome back. Click for a dated recap of this story.', 'Scene Archivist', { timeOut: 20000, onclick: callback }),
             download: downloadFile, rebindSettings: refreshScopedControls,

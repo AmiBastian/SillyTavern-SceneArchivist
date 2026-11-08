@@ -1,9 +1,11 @@
 # Changelog
 
-## Unreleased
+## 2.0.1 · November 7, 2026
 
 - Oversized archive and memory requests show an approximate token breakdown, sorted by size, for references, messages, the scene log, instructions, and included SillyTavern chat context. The error points to reference settings when lorebooks are the largest part.
 - Memory Trail uses the available space beside the chat and switches to SillyTavern’s popup when the chat is too wide. Opening, moving, or closing the trail preserves the native chat layout and Moving UI positions.
+- Drag Memory Trail by its title, use arrow keys while the title is focused, or reset its position with the reset button or Enter. The popup view also has a Move trail control. Desktop placement is remembered while SillyTavern stays open.
+- Memory Trail inherits SillyTavern’s theme tint, transparency, text and border colors, blur strength, and Fast UI setting. Theme changes apply while the trail is open.
 
 ## 2.0.0 · November 7, 2026
 

@@ -1,11 +1,12 @@
 // Keep SillyTavern's modal review and keyboard handling while exposing the chat beside it.
-export function addReviewHandle(root, dialog) {
-    if (!root.classList.contains('sa-review') || !root.querySelector('textarea')) return;
+export function addReviewHandle(root, dialog, { onMove, onReset, clickToMove = true } = {}) {
+    const trail = root.classList.contains('sa-prompt-trace');
+    if (!root.classList.contains('sa-review') || !root.querySelector('textarea') && !trail) return;
     const handle = document.createElement('button');
     handle.type = 'button';
     handle.className = 'sa-review-handle';
-    handle.textContent = '↔️ Move review';
-    handle.title = 'Drag or use arrow keys to move the review. Enter restores the center.';
+    handle.textContent = trail ? '↔️ Move trail' : '↔️ Move review';
+    handle.title = 'Drag or use arrow keys to move this window. Enter resets its position.';
     root.prepend(handle);
     let drag = null;
     const move = (left, top) => {
@@ -13,6 +14,12 @@ export function addReviewHandle(root, dialog) {
         const rect = dialog.getBoundingClientRect();
         dialog.style.left = Math.max(4, Math.min(innerWidth - rect.width - 4, left)) + 'px';
         dialog.style.top = Math.max(4, Math.min(innerHeight - rect.height - 4, top)) + 'px';
+        onMove?.();
+    };
+    const reset = () => {
+        dialog.classList.remove('sa-floating-review');
+        dialog.style.removeProperty('top'); dialog.style.removeProperty('left');
+        onReset?.();
     };
     handle.addEventListener('pointerdown', event => {
         if (!matchMedia('(min-width: 801px)').matches || event.button !== 0) return;
@@ -25,6 +32,7 @@ export function addReviewHandle(root, dialog) {
     });
     handle.addEventListener('lostpointercapture', () => { drag = null; });
     handle.addEventListener('click', () => {
+        if (!clickToMove) return;
         if (dialog.classList.contains('sa-floating-review')) {
             const rect = dialog.getBoundingClientRect();
             move(rect.left, rect.top);
@@ -37,11 +45,11 @@ export function addReviewHandle(root, dialog) {
         if (!direction && event.key !== 'Enter') return;
         event.preventDefault();
         if (event.key === 'Enter') {
-            dialog.classList.remove('sa-floating-review');
-            dialog.style.removeProperty('top'); dialog.style.removeProperty('left');
+            reset();
         } else {
             const rect = dialog.getBoundingClientRect();
             move(rect.left + direction[0] * 24, rect.top + direction[1] * 24);
         }
     });
+    return { handle, move, reset };
 }
