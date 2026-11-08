@@ -1673,7 +1673,6 @@ jQuery(async () => {
                 if (!busy) { workbench.renderFlow(); workbench.extras.render(); }
             }, 180);
         });
-        console.log(LOG, 'loaded');
     } catch (e) {
         console.error(LOG, 'failed to load', e);
     }
