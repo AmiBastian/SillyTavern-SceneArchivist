@@ -313,7 +313,7 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
   .sa-review-handle { display:block; margin:0 0 8px auto; font:inherit; font-size:.78em; color:inherit;
     background:transparent; border:1px solid currentColor; border-radius:6px; padding:4px 9px; cursor:move; touch-action:none; }
   dialog.popup.sa-floating-review { position:fixed; inset:auto; margin:0; width:min(640px, 95vw); max-height:calc(100dvh - 12px); }
-  dialog.popup.sa-floating-review::backdrop { background:#0002; }
+  dialog.popup.sa-floating-review:not(:has(.sa-prompt-trace))::backdrop { background:#0002; }
 }
 @media(max-width:720px) {
  .sa-sidebar-workspace { display:block; padding:12px; }
@@ -378,16 +378,24 @@ dialog:has(.sa-popwrap) .popup-content { padding: 0; }
 .sa-review .sa-proposal[open] > summary::before { content: '▾'; }
 .sa-review .sa-proposal > summary b { flex: 1 1 175px; overflow-wrap: anywhere; }
 dialog:has(.sa-review) .popup-button-ok { font-family: var(--mainFontFamily, system-ui), "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif; }
+dialog:has(.sa-prompt-trace) {
+    width: min(680px, 96vw);
+    background: var(--SmartThemeBlurTintColor, #211d26);
+    backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px));
+    -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px));
+}
+.sa-prompt-trace .sa-trail-title h3 { font: 650 1.15em/1.35 var(--mainFontFamily, system-ui), sans-serif; }
 .sa-trail-dock {
     /* ST transforms the document root and fixes its body on mobile. */
     position: fixed; z-index: 500; top: 100dvh; left: 0; right: 0; transform: translateY(-100%);
     display: flex; flex-direction: column; max-height: 48dvh; overflow: hidden; box-sizing: border-box;
     padding-bottom: env(safe-area-inset-bottom); border: 1px solid var(--sa-trail-line); border-radius: 12px 12px 0 0;
-    --sa-trail-line: color-mix(in srgb, currentColor 20%, transparent);
+    --sa-trail-line: var(--SmartThemeBorderColor, #62586d);
     --sa-trail-wash: color-mix(in srgb, currentColor 7%, transparent);
-    color: var(--SmartThemeBodyColor, #eeeaf5); box-shadow: 0 6px 24px #0006;
+    color: var(--SmartThemeBodyColor, #eeeaf5); box-shadow: 0 6px 24px var(--black70a, #0006);
     background: var(--SmartThemeBlurTintColor, #211d26);
-    background: rgb(from var(--SmartThemeBlurTintColor, #211d26) r g b / 1);
+    backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px));
+    -webkit-backdrop-filter: blur(var(--SmartThemeBlurStrength, 0px));
     font-size: .9rem; text-shadow: none;
 }
 .sa-trail-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
@@ -395,6 +403,12 @@ dialog:has(.sa-review) .popup-button-ok { font-family: var(--mainFontFamily, sys
 .sa-trail-stats li { padding: 3px 8px; border-radius: 6px; font-size: .86em; line-height: 1.4; background: var(--sa-trail-wash, #8882); }
 .sa-trail-dock .sa-trail-head { flex: none; padding: 10px 12px; border-bottom: 1px solid var(--sa-trail-line); }
 .sa-trail-dock h3 { margin: 0; font: 650 1.15em/1.35 var(--mainFontFamily, system-ui), sans-serif; }
+.sa-trail-dock .sa-review-handle {
+    display: inline-flex; align-items: center; gap: 6px; border: 0; padding: 0; margin: 0;
+    background: transparent; color: inherit; font: inherit; text-align: start; cursor: grab;
+}
+.sa-trail-dock .sa-review-handle:disabled { opacity: 1; cursor: default; }
+.sa-trail-dock .sa-trail-reset[hidden] { display: none; }
 .sa-trail-reply { margin: 2px 0 0; font-size: .86em; opacity: .8; }
 .sa-trail-body { min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; padding: 9px 10px 10px 12px; }
 .sa-trail-dock .sa-review details { margin: 0 0 6px; padding: 0; border-color: var(--sa-trail-line); }
@@ -413,18 +427,9 @@ dialog:has(.sa-review) .popup-button-ok { font-family: var(--mainFontFamily, sys
     .sa-trail-dock .menu_button { min-height: 44px; }
 }
 @media (min-width: 1001px) and (pointer: fine) {
-    body.sa-trail-open:not(.movingUI) {
-        --sa-trail-width: clamp(312px, 24dvw, 380px);
-        --sa-trail-gap: 12px;
-        --sa-trail-chat-width: min(var(--sheldWidth, 100dvw), calc(100dvw - var(--sa-trail-width) - 3 * var(--sa-trail-gap)));
-    }
-    body.sa-trail-open:not(.movingUI) #sheld {
-        right: calc(var(--sa-trail-width) + var(--sa-trail-gap)); max-width: var(--sa-trail-chat-width);
-    }
-    body.sa-trail-open:not(.movingUI) .sa-trail-dock {
+    .sa-trail-dock {
         top: calc(var(--topBarBlockSize, 45px) + 8px); right: auto; transform: none; border-radius: 12px;
-        left: calc((100dvw + var(--sa-trail-chat-width) - var(--sa-trail-width) + var(--sa-trail-gap)) / 2);
-        width: var(--sa-trail-width); max-height: calc(100dvh - var(--topBarBlockSize, 45px) - 16px);
+        max-width: calc(100dvw - 24px); max-height: calc(100dvh - var(--topBarBlockSize, 45px) - 16px);
     }
 }
 @media (max-width: 720px) {
