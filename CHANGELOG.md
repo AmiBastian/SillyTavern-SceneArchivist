@@ -1,11 +1,9 @@
 # Changelog
 
-## Unreleased
+## 2.0.1 · November 8, 2026
 
 - Replaced a story-specific location in the default archive prompt with the guide’s invented setting.
 - Added an explicit ESM package with an npm test command and removed the routine startup console message.
-
-## 2.0.1 · November 7, 2026
 
 - Oversized archive and memory requests show an approximate token breakdown, sorted by size, for references, messages, the scene log, instructions, and included SillyTavern chat context. The error points to reference settings when lorebooks are the largest part.
 - Memory Trail uses the available space beside the chat and switches to SillyTavern’s popup when the chat is too wide. Opening, moving, or closing the trail preserves the native chat layout and Moving UI positions.
