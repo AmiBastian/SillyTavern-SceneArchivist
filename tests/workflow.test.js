@@ -100,6 +100,49 @@ test('helpers migrate the old default and allow large requests within the config
     assert.equal(requests.length, 1);
 });
 
+test('an unavailable helper profile never borrows current-model capacity', async () => {
+    const f = fixture(), lookedUp = [], sent = [];
+    f.w.h.flowModelInfo = profile => {
+        lookedUp.push(profile);
+        if (profile === 'notes') throw new Error('Saved profile unavailable');
+        return { name: 'Current', context: 200000, output: 2000 };
+    };
+    f.w.h.model = async (...args) => { sent.push(args); return 'Done'; };
+    await assert.rejects(f.w.call({ system: '', prompt: 'Material', maxTokens: 500 }, 'helper'), /Saved profile unavailable/);
+    assert.deepEqual(lookedUp, ['notes']);
+    assert.equal(sent.length, 0);
+    assert.equal(f.metadata.workbench.telemetry.requests, 0);
+});
+
+test('helper preflight and sending retain one profile if settings change during counting', async () => {
+    const f = fixture(), sent = [];
+    f.w.h.tokenCount = async text => { f.config.sideProfile = 'different'; return M.tokens(text); };
+    f.w.h.model = async (request, profile) => { sent.push({ request, profile }); return 'Done'; };
+    await f.w.call({ system: '', prompt: 'Material', maxTokens: 500 }, 'helper');
+    assert.equal(sent[0].profile, 'notes');
+    assert.equal(f.metadata.workbench.telemetry.last.profile, 'notes');
+    assert.equal(f.metadata.workbench.telemetry.last.model, 'notes');
+});
+
+test('Ask the archive allocates non-empty evidence and answers on the selected helper route', async () => {
+    const entry = { uid: 0, content: 'The brass key opened the front gate.', key: ['brass key'] };
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'fact', storyId: 'story' }, { id: 'key-evidence' });
+    const f = fixture({ existing: { Story: { entries: { 0: entry } } } });
+    const result = { innerHTML: '' }, requests = [];
+    f.w.root = { querySelector: () => result };
+    f.w.showTab = () => {};
+    f.w.h.model = async (request, profile) => {
+        requests.push({ request, profile });
+        return JSON.stringify({ answer: 'The brass key opened the gate [key-evidence].', sources: ['key-evidence'] });
+    };
+    await f.w.ask('What did the brass key open?');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].profile, 'notes');
+    assert.match(requests[0].request.prompt, /SOURCE key-evidence/);
+    assert.match(result.innerHTML, /brass key opened the gate/);
+    assert.match(result.innerHTML, /key-evidence/);
+});
+
 test('automatic helper grouping replaces the old unit and character counts', async () => {
     const entries = Object.fromEntries(Array.from({ length: 9 }, (_, uid) => {
         const name = 'Character ' + uid;
@@ -495,4 +538,326 @@ test('saving group memories writes a native lorebook filter for the assigned car
     const memory = Object.values(f.books.Memories.entries).find(entry => M.record(entry)?.type === 'memory');
     assert.deepEqual(memory.characterFilter, { names: ['zelga'], tags: [], isExclude: false });
     assert.equal(M.record(memory).subjectAvatar, 'zelga.png');
+});
+
+test('Ask retrieves a deep complete memory excerpt and its citation opens the stored parent', async () => {
+    const content = '## ► Memories ' + String.fromCharCode(0x2014) + ' Zelga\n\n[February 14, 2027 - Day 1]\n'
+        + '- Zelga counted a routine crate.\n'.repeat(1500) + '- Zelga hid the brass key in the blue teapot.\n  This is a suspicion, not a confirmed location.';
+    const entry = { uid: 0, content };
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'memory', storyId: 'story' }, { id: 'zelga-list', subject: 'Zelga' });
+    const f = fixture({ existing: { Memories: { entries: { 0: entry } } }, limits: { notes: 4000 } });
+    const before = structuredClone(f.books), result = { innerHTML: '' }, requests = [];
+    f.w.root = { querySelector: () => result }; f.w.showTab = () => {};
+    f.w.h.model = async (request, profile) => {
+        requests.push({ request, profile });
+        const id = request.prompt.match(/^SOURCE (.+)$/m)[1];
+        assert.notEqual(id, 'zelga-list');
+        return JSON.stringify({ answer: `The suspected location is the blue teapot [${id}].`, sources: [id] });
+    };
+    await f.w.ask('Where is the brass key?');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].profile, 'notes');
+    assert.match(requests[0].request.prompt, /February 14, 2027/);
+    assert.match(requests[0].request.prompt, /This is a suspicion, not a confirmed location/);
+    assert.doesNotMatch(requests[0].request.prompt, /routine crate/);
+    assert.match(result.innerHTML, /Evidence used/);
+    assert.match(result.innerHTML, /data-id="zelga-list"/);
+    assert.doesNotMatch(result.innerHTML, /data-id="zelga-list~/);
+    assert.match(result.innerHTML, /Original message links belong to the whole saved record/);
+    assert.deepEqual(f.books, before);
+});
+
+test('Ask refuses a matching bullet that exceeds the helper allowance without making a request', async () => {
+    const entry = { uid: 0, content: '## ► Memories ' + String.fromCharCode(0x2014) + ' Zelga\n- Zelga counted linen.\n- A brass key. ' + 'Necessary qualifier. '.repeat(2000) };
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'memory', storyId: 'story' }, { id: 'oversized' });
+    const f = fixture({ existing: { Memories: { entries: { 0: entry } } }, limits: { notes: 4000 } });
+    let calls = 0;
+    f.w.h.model = async () => { calls++; return ''; };
+    await assert.rejects(f.w.ask('brass key'), /No matching current evidence fits/);
+    assert.equal(calls, 0);
+});
+
+test('Ask rejects citations to an unselected whole list when only an excerpt was supplied', async () => {
+    const entry = { uid: 0, content: '## ► Memories ' + String.fromCharCode(0x2014) + ' Zelga\n- Zelga counted linen.\n- Zelga hid the brass key.' };
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'memory', storyId: 'story' }, { id: 'zelga-list' });
+    const f = fixture({ existing: { Memories: { entries: { 0: entry } } } });
+    let calls = 0;
+    f.w.h.model = async () => { calls++; return JSON.stringify({ answer: 'Hidden [zelga-list].', sources: ['zelga-list'] }); };
+    await assert.rejects(f.w.ask('brass key'), /did not cite valid evidence/);
+    assert.equal(calls, 2);
+});
+
+function sourceQuestion() {
+    const f = fixture(), entry = { uid: 0, content: 'Zelga and Mira discussed the brass key.' };
+    f.chat[0].mes = 'February 14, 2027. Where did you leave the brass key?';
+    f.chat[1].mes = 'It might be inside the blue teapot. I have not checked, so the location is unconfirmed.';
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'unit', storyId: 'story', source: f.w.source([{ from: 0, to: 1 }]) }, { id: 'key-scene' });
+    f.books.Story.entries[0] = entry;
+    const result = { innerHTML: '' };
+    f.w.root = { querySelector: () => result }; f.w.showTab = () => {};
+    return { ...f, result };
+}
+
+test('Ask follows insufficient saved evidence with verified original messages once on the helper route', async () => {
+    const f = sourceQuestion(), sent = [], before = structuredClone(f.books), jumped = [];
+    f.w.h.jumpToMessage = async (index, root) => { assert.equal(root, f.w.root); jumped.push(index); };
+    f.w.h.model = async (request, profile) => {
+        sent.push({ request, profile });
+        if (sent.length === 1) return JSON.stringify({ answer: 'The saved note does not establish the location.', sources: [], needsMore: true, queries: ['brass key location'] });
+        const original = request.prompt.match(/^SOURCE (original-.+)$/m)[1];
+        assert.match(request.prompt, /blue teapot[\s\S]*unconfirmed/);
+        assert.match(request.system, /final retrieval pass/);
+        return JSON.stringify({ answer: `Possibly the blue teapot, unconfirmed [${original}].`, sources: [original], needsMore: false, queries: [] });
+    };
+    await f.w.ask('Where is the brass key?');
+    assert.equal(sent.length, 2);
+    assert.deepEqual(sent.map(call => call.profile), ['notes', 'notes']);
+    assert.match(f.result.innerHTML, /Hash-verified original messages #0-#1/);
+    assert.match(f.result.innerHTML, /One retrieval follow-up was used/);
+    assert.match(f.result.innerHTML, /data-sa-action="askSource"/);
+    const id = [...f.w.questions.evidence.keys()].find(value => value.startsWith('original-'));
+    await f.w.questions.open(id);
+    assert.deepEqual(jumped, [0]);
+    f.chat[1].mes = 'This is now a different swipe.';
+    await assert.rejects(f.w.questions.open(id), /evidence changed/);
+    assert.deepEqual(jumped, [0]);
+    assert.deepEqual(f.books, before);
+});
+
+test('Ask finds omitted source detail without a saved-text match and escapes original message HTML', async () => {
+    const f = sourceQuestion();
+    f.chat[1].mes += ' <script>alert("story text")</script>';
+    M.record(f.books.Story.entries[0]).source = f.w.source([{ from: 0, to: 1 }]);
+    let calls = 0;
+    f.w.h.model = async request => {
+        calls++;
+        const id = request.prompt.match(/^SOURCE (original-.+)$/m)[1];
+        return JSON.stringify({ answer: `Unconfirmed [${id}].`, sources: [id], needsMore: false });
+    };
+    await f.w.ask('teapot');
+    assert.equal(calls, 1);
+    assert.match(f.result.innerHTML, /&lt;script&gt;/);
+    assert.doesNotMatch(f.result.innerHTML, /<script>/);
+});
+
+test('an indirect question can add a related-wording candidate that shared no literal query terms', async () => {
+    const f = fixture(), entry = { uid: 0, content: 'Mara takes coffee black, without sugar.' };
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'fact', storyId: 'story' }, { id: 'coffee' });
+    f.books.Story.entries[0] = entry;
+    const result = { innerHTML: '' }, requests = [];
+    f.w.root = { querySelector: () => result }; f.w.showTab = () => {};
+    f.w.h.model = async request => {
+        requests.push(request);
+        if (requests.length === 1) {
+            assert.match(request.prompt, /No matching saved evidence/);
+            return JSON.stringify({ answer: 'The supplied evidence does not establish her preference.', sources: [], needsMore: true, queries: ['usual drink coffee tea preference'] });
+        }
+        assert.match(request.prompt, /SOURCE coffee[\s\S]*coffee black, without sugar/);
+        return JSON.stringify({ answer: 'Black coffee without sugar [coffee].', sources: ['coffee'], needsMore: true, queries: ['more'] });
+    };
+    await f.w.ask('How should I prepare her usual drink?');
+    assert.equal(requests.length, 2, 'even a second needsMore cannot start a retrieval loop');
+    assert.match(result.innerHTML, /Black coffee without sugar/);
+    assert.equal(f.metadata.workbench.telemetry.requests, 2);
+});
+
+test('unknown questions stop after one answer when the follow-up finds no additional evidence', async () => {
+    const f = fixture(), result = { innerHTML: '' };
+    f.w.root = { querySelector: () => result }; f.w.showTab = () => {};
+    let calls = 0;
+    f.w.h.model = async () => {
+        calls++;
+        return JSON.stringify({ answer: 'The available evidence does not establish who stole the crown.', sources: [], needsMore: true, queries: ['emerald crown thief'] });
+    };
+    await f.w.ask('Who stole the emerald crown?');
+    assert.equal(calls, 1);
+    assert.match(result.innerHTML, /does not establish/);
+    assert.match(result.innerHTML, /No retrieval follow-up was needed/);
+});
+
+test('original messages are reverified after token counting and a changed passage reaches no model', async () => {
+    const f = sourceQuestion();
+    let calls = 0;
+    f.w.h.tokenCount = async text => {
+        if (text.includes('SOURCE original-')) f.chat[1].mes = 'Edited while counting.';
+        return M.tokens(text);
+    };
+    f.w.h.model = async () => { calls++; return ''; };
+    await assert.rejects(f.w.ask('teapot'), /evidence changed/);
+    assert.equal(calls, 0);
+});
+
+test('a chat change or changed original message during the answer prevents rendering the result', async () => {
+    for (const change of [f => { f.identity.chatId = 'Other chat'; }, f => { f.chat[1].mes = 'Different answer.'; }]) {
+        const f = sourceQuestion();
+        f.w.h.model = async request => {
+            const id = request.prompt.match(/^SOURCE (original-.+)$/m)[1];
+            change(f);
+            return JSON.stringify({ answer: `Old detail [${id}].`, sources: [id] });
+        };
+        await assert.rejects(f.w.ask('teapot'), /changed/);
+        assert.equal(f.result.innerHTML, '');
+    }
+});
+
+test('foreign and corrected original scenes stay out of a follow-up, even when its query asks for them', async () => {
+    for (const amend of [r => { r.source.chatId = 'Foreign'; }, r => { r.authorCorrections = [{ text: 'The key was destroyed.' }]; }]) {
+        const f = sourceQuestion(), requests = [];
+        amend(M.record(f.books.Story.entries[0]));
+        f.w.h.model = async request => {
+            requests.push(request);
+            assert.doesNotMatch(request.prompt, /blue teapot|SOURCE original-/);
+            return JSON.stringify({ answer: 'The supplied note does not establish the location.', sources: [], needsMore: true, queries: ['teapot'] });
+        };
+        await f.w.ask('brass key');
+        assert.equal(requests.length, 1);
+        assert.match(f.result.innerHTML, /skipped/);
+    }
+});
+
+test('a failed question request propagates without starting an alternate search or model route', async () => {
+    const f = sourceQuestion(), before = structuredClone(f.books);
+    let calls = 0;
+    f.w.h.model = async () => { calls++; throw new Error('Selected helper is unavailable'); };
+    await assert.rejects(f.w.ask('brass key'), /Selected helper is unavailable/);
+    assert.equal(calls, 1);
+    assert.equal(f.result.innerHTML, '');
+    assert.equal(f.w.questions.completed, null);
+    assert.deepEqual(f.books, before);
+});
+
+test('native scan excerpt delivery keeps activation rules, a shared cap and unrelated injectors intact', async () => {
+    const f = fixture(), content = '## ► Memories ' + String.fromCharCode(0x2014) + ' Zelga\n[February 14, 2027 - Day 1]\n'
+        + '- Routine linen count.\n'.repeat(800) + '- The brass key is in a teapot.\n  This is still unconfirmed.';
+    const parent = { uid: 1, world: 'Story', sceneArchivistArchive: 'Story', content };
+    parent.sceneArchivist = M.makeRecord(parent, { type: 'memory', storyId: 'story' }, { id: 'long-list', subject: 'Zelga' });
+    const notActivated = { ...parent, uid: 2, sceneArchivist: { ...M.record(parent), id: 'not-activated' } };
+    const external = { uid: 3, world: 'External', content: 'External injector text' };
+    const scan = { sortedEntries: [parent, notActivated], activated: { entries: new Map([[1, parent], [3, external]]), text: '' },
+        new: { all: [parent, external], successful: [parent, external] }, state: { next: 0, loopCount: 1 } };
+    f.w.h.isActive = () => true; f.w.h.scanSupported = true;
+    f.w.options().preciseDelivery = true; f.w.options().budget = 400;
+    f.w.scanSuppressed = false;
+    const before = structuredClone(parent);
+    await f.w.onWorldInfoScan(scan);
+    assert.equal(scan.activated.entries.size, 2);
+    assert.match(scan.activated.entries.get(1).content, /brass key[\s\S]*unconfirmed/);
+    assert.doesNotMatch(scan.activated.entries.get(1).content, /Routine linen/);
+    assert.equal(scan.activated.entries.get(3), external);
+    assert.ok(f.w.lastBudget.used <= 400);
+    assert.ok(f.w.lastBudget.omitted.some(item => item.id === 'not-activated' && item.reason === 'not activated by SillyTavern'));
+    assert.deepEqual(parent, before);
+    assert.equal(scan.new.successful[0], scan.activated.entries.get(1));
+});
+
+test('reply recall chooses excerpt ids and related wording while nested quiet events keep the main run', async () => {
+    const entry = { uid: 0, content: '## ► Memories ' + String.fromCharCode(0x2014) + ' Zelga\n- Zelga likes coffee black.\n- Zelga counted linen.' };
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'memory', storyId: 'story' }, { id: 'zelga-list', subject: 'Zelga' });
+    const f = fixture({ existing: { Memories: { entries: { 0: entry } } } });
+    f.config.recall = true; f.w.h.isActive = () => true;
+    f.chat[0].mes = 'How should I prepare her usual drink?'; f.chat[1].mes = 'She waited.';
+    let calls = 0;
+    f.w.h.model = async (_request, profile) => {
+        calls++; assert.equal(profile, 'notes');
+        const run = f.w.sceneRecall.run;
+        await f.w.beforeGeneration('quiet', {}, false);
+        assert.equal(f.w.sceneRecall.run, run);
+        return JSON.stringify({ load: [], queries: ['coffee preference'] });
+    };
+    await f.w.beforeGeneration('normal', {}, false);
+    assert.equal(calls, 1); assert.equal(f.w.scanSuppressed, false);
+    assert.ok(f.w.held.has('zelga-list'));
+    assert.match(f.w.recallDetails.get('zelga-list')[0].entry.content, /likes coffee black/);
+    assert.equal(f.w.generationEpoch, 1);
+});
+
+test('a failed memory audit retains extraction and retry sends only the audit', async () => {
+    const f = fixture({ prefs: { auditMemories: true } }), sent = [];
+    let fail = true;
+    f.w.h.sendFlowRequest = async (request, profile) => {
+        sent.push({ request, profile });
+        if (request.system.startsWith('Audit proposed memories')) {
+            if (fail) { fail = false; throw Error('Audit connection unavailable'); }
+            return JSON.stringify({ issues: [{ kind: 'knowledge', explanation: 'Review who heard the location.' }] });
+        }
+        return JSON.stringify({ characters: [{ name: 'Zelga', memories: [{ text: '[Date: February 14, 2027] Mira gave Zelga a brass key.', messages: [0], sourceIds: [], howLearned: 'witnessed' }] }] });
+    };
+    await f.w.startFlow('memories');
+    assert.equal(f.metadata.workbench.job.status, 'failed');
+    assert.ok(f.metadata.workbench.job.steps[0].memoryRaw);
+    assert.equal(sent.length, 2);
+    const fresh = f.create();
+    await fresh.queue.resume();
+    assert.equal(f.metadata.workbench.job.status, 'done');
+    assert.equal(sent.length, 3);
+    assert.ok(sent[2].request.system.startsWith('Audit proposed memories'));
+    const record = Object.values(f.books.Memories.entries).map(M.record)[0];
+    assert.equal(record.memoryEvidence.length, 1);
+    assert.match(f.reviews.at(-1).note, /Evidence audit/);
+    assert.equal(f.metadata.workbench.job.steps[0].memoryRaw, undefined);
+});
+
+test('reference overflow is diagnosed before generation and an explicit fit omits whole entries only', async () => {
+    const f = fixture({ prefs: { readReferences: true, references: [{ book: 'Lore', uid: null }], referenceBudget: 100 } });
+    f.w.h.readReferenceEntries = async () => [{ book: 'Lore', uid: 1, title: 'Routine', text: 'Linen '.repeat(1000) }, { book: 'Lore', uid: 2, title: 'Key', text: 'Zelga knows locks and brass keys.' }];
+    await assert.rejects(f.w.startFlow('archive'), /separate allowance/);
+    assert.equal(f.calls.length, 0);
+    f.metadata.workbench.flowSettings.referenceFit = 'relevant';
+    await f.w.startFlow('archive');
+    assert.equal(f.metadata.workbench.job.status, 'done');
+    assert.doesNotMatch(f.calls[0].req.prompt, /Linen/);
+    assert.match(f.calls[0].req.prompt, /Zelga knows locks/);
+    assert.ok(f.alerts.some(text => text.includes('omitted')));
+});
+
+test('a paused extraction starts no audit until resume and preserves the received memories', async () => {
+    const f = fixture({ prefs: { auditMemories: true } }); let calls = 0;
+    f.w.h.sendFlowRequest = async request => {
+        calls++;
+        if (request.system.startsWith('Audit proposed memories')) return JSON.stringify({ issues: [] });
+        await f.w.queue.pause();
+        return JSON.stringify({ characters: [{ name: 'Zelga', memories: ['[Date: February 14, 2027] Mira gave Zelga a brass key.'] }] });
+    };
+    await f.w.startFlow('memories');
+    assert.equal(calls, 1); assert.equal(f.metadata.workbench.job.status, 'paused');
+    assert.ok(f.metadata.workbench.job.steps[0].memoryRaw);
+    await f.w.queue.resume();
+    assert.equal(calls, 2); assert.equal(f.metadata.workbench.job.status, 'done');
+});
+
+test('a failed optional audit can be skipped without regenerating or discarding extracted memories', async () => {
+    const f = fixture({ prefs: { auditMemories: true } }); let calls = 0;
+    f.w.h.sendFlowRequest = async request => {
+        calls++;
+        if (request.system.startsWith('Audit proposed memories')) throw Error('Provider unavailable');
+        return JSON.stringify({ characters: [{ name: 'Zelga', memories: ['[Date: February 14, 2027] Mira gave Zelga a brass key.'] }] });
+    };
+    await f.w.startFlow('memories');
+    assert.equal(f.metadata.workbench.job.status, 'failed');
+    await f.w.dispatch('skipMemoryAudit', { dataset: {} });
+    assert.equal(f.metadata.workbench.job.status, 'done'); assert.equal(calls, 2);
+    assert.match(Object.values(f.books.Memories.entries)[0].content, /brass key/);
+});
+
+test('a failed condensation audit keeps its shorter proposal and skip returns to review without another request', async () => {
+    const entry = { uid: 0, content: '## ► Day 1 - February 14, 2027\nThe brass key opens the gate. ' + 'Routine detail. '.repeat(100) };
+    entry.sceneArchivist = M.makeRecord(entry, { type: 'unit', storyId: 'story' }, { id: 'scene' });
+    const f = fixture({ existing: { Story: { entries: { 0: entry } } } });
+    f.w.options().auditCondense = true;
+    let calls = 0;
+    f.w.h.sendFlowRequest = async request => {
+        calls++;
+        if (request.system.startsWith('Compare the shorter proposal')) throw Error('Audit unavailable');
+        return JSON.stringify({ entries: [{ id: 'scene', content: '## ► Day 1 - February 14, 2027\nThe brass key opens the gate.' }] });
+    };
+    await f.w.loadBooks();
+    await f.w.startCondense(f.w.entries, false, true);
+    assert.equal(f.metadata.workbench.job.status, 'failed');
+    assert.ok(f.metadata.workbench.job.steps[0].condenseDraft);
+    assert.match(f.books.Story.entries[0].content, /Routine detail/);
+    await f.w.dispatch('skipCondenseAudit', { dataset: {} });
+    assert.equal(calls, 2); assert.equal(f.metadata.workbench.job.status, 'done');
+    assert.doesNotMatch(f.books.Story.entries[0].content, /Routine detail/);
+    assert.ok(M.record(f.books.Story.entries[0]).revisions.length);
+    assert.equal(f.metadata.workbench.job.steps[0].condenseDraft, undefined);
 });

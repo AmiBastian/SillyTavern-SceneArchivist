@@ -352,7 +352,20 @@ export class WorkbenchExtras {
             const reserve = info.output || (stage === 'trackers' ? 4000 : 6000);
             input += estimate; output += reserve; count++;
             lines.append(el('li', `${jobLabel(payload.kind)} · ${info.name} · ~${estimate.toLocaleString()} input tokens${info.context && estimate + reserve > info.context ? ' · ⚠️ exceeds this context budget' : ''}`));
+            if (flow.auditMemories && payload.kind === 'memories') {
+                const auditInput = estimate + reserve;
+                input += auditInput; output += 1800; count++;
+                lines.append(el('li', `Evidence audit · ~${auditInput.toLocaleString()} input tokens including an estimated memory response · 1 additional request.`));
+            }
         }
+        if (flow.referenceReport) {
+            const report = flow.referenceReport;
+            root.append(el('p', `Reference lore: ${report.selected.length} complete entries selected, ${report.omitted.length} omitted · ~${report.tokens.toLocaleString()} tokens from ~${report.total.toLocaleString()} selected initially.`));
+            const books = new Map();
+            for (const item of report.selected) books.set(item.book, (books.get(item.book) || 0) + item.tokens);
+            for (const [book, tokens] of books) lines.append(el('li', `Reference book ${book} · ~${tokens.toLocaleString()} tokens.`));
+        }
+        root.append(el('p', 'Estimates include enabled audits. Malformed replies can add a bounded retry; input can change after earlier stages generate new material.', 'sa-hint'));
         root.append(el('p', `${flow.singleRequest && count > 1 ? '1 combined request' : `${count} planned ${count === 1 ? 'request' : 'requests'}`} · ~${input.toLocaleString()} input tokens.`), lines);
         const inputPrice = field(root, 'Input price per million tokens, optional', el('input'));
         const outputPrice = field(root, 'Output price per million tokens, optional', el('input'));

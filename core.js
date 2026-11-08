@@ -730,7 +730,8 @@ export function parseMemoryResponse(text) {
         const name = String(c?.name ?? '').trim();
         if (!name || name.length > 60) continue;
         if (isPlaceholderName(name)) { echoed++; continue; }
-        const mem = (Array.isArray(c.memories) ? c.memories : []).map(x => String(x).replace(/\s+/g, ' ').trim()).filter(x => x.length >= 8 && !isPlaceholderText(x));
+        const mem = (Array.isArray(c.memories) ? c.memories : []).map(x => typeof x === 'string' ? x : typeof x?.text === 'string' ? x.text : '')
+            .map(x => x.replace(/\s+/g, ' ').trim()).filter(x => x.length >= 8 && !isPlaceholderText(x));
         if (!mem.length) continue;
         const al = (Array.isArray(c.aliases) ? c.aliases : []).map(x => String(x).trim()).filter(x => x.length >= 2 && x.length <= 40 && x.toLowerCase() !== name.toLowerCase());
         const k = name.toLowerCase();

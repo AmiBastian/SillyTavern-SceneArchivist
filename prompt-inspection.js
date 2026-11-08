@@ -2,6 +2,7 @@ import * as M from './memory-engine.js';
 import { sharedPrefix } from './chat-workflows.js';
 import { escape as html } from './workflow-tools.js';
 import { addReviewHandle } from './review-window.js';
+import { MemoryIndex, toolEvidence } from './memory-retrieval.js';
 
 const traceKey = 'sceneArchivistPrompt';
 const maxReplies = 24;
@@ -15,16 +16,17 @@ export function placePromptLayers(entry) {
     }
 }
 
-export function toolLookup(entries, scopeReason, { topic, character, day } = {}) {
+export function toolLookup(entries, scopeReason, { topic, character, day, queries } = {}, index = new MemoryIndex()) {
     const visible = entries.filter(entry => M.active(entry) && !entry.disable && !scopeReason(entry));
-    if (Number.isInteger(day)) return visible.filter(entry => M.record(entry).type === 'unit' && M.record(entry).unit?.number === day).slice(0, 1);
+    if (Number.isInteger(day)) return visible.filter(entry => M.record(entry).type === 'unit' && M.record(entry).unit?.number === day).slice(0, 1).map(entry => ({ entry, parent: entry, excerpt: null }));
     const name = String(character || '').trim().toLowerCase();
     const memories = visible.filter(entry => {
         const r = M.record(entry);
         return ['memory', 'knowledge', 'thread', 'fact'].includes(r.type)
             && (!name || [r.subject, ...(r.aliases || [])].some(alias => String(alias).toLowerCase() === name));
     });
-    return M.search(memories, String(topic || '').slice(0, 200)).slice(0, 3).map(hit => hit.entry);
+    const query = String(topic || '').trim().slice(0, 200);
+    return query ? index.searchMany(memories, query, queries).slice(0, 3) : [];
 }
 
 export class PromptInspection {
@@ -87,7 +89,7 @@ export class PromptInspection {
         const active = run.active.map(entry => {
             const id = M.record(entry).id, choice = accepted.get(id);
             return { id, title: M.title(entry).slice(0, 160), tokens: choice?.cost ?? M.tokens(entry.content),
-                reasons: choice?.reasons || w.activationReasons(entry) };
+                reasons: choice?.reasons || w.activationReasons(entry), excerpts: entry.sceneArchivistDelivery?.excerpts };
         });
         const picked = w.sceneRecall.selection();
         const little = picked.items.map(item => ({ id: item.note.id, title: item.note.text.slice(0, 180),
@@ -182,6 +184,11 @@ export class PromptInspection {
                     const row = document.createElement('div');
                     row.className = 'sa-result';
                     row.innerHTML = `<b>${html(item.title)}</b><p class="sa-hint">~${Number(item.tokens) || 0} tokens · ${html(item.reason || item.reasons?.join(', ') || 'World Info')}</p>`;
+                    if (Array.isArray(item.excerpts) && item.excerpts.length) {
+                        const detail = document.createElement('p'); detail.className = 'sa-hint';
+                        detail.textContent = 'Complete saved bullets supplied from lines ' + item.excerpts.map(excerpt => `${excerpt.fromLine}-${excerpt.toLine}`).join(', ') + '.';
+                        row.append(detail);
+                    }
                     if (w.find(item.id)) {
                         const actions = document.createElement('div');
                         actions.className = 'sa-row sa-trail-actions';
@@ -322,20 +329,22 @@ export class PromptInspection {
 export function registerMemoryTools(w) {
     const context = w.h.context();
     if (typeof context.registerFunctionTool !== 'function') return;
+    const index = w.memoryIndex || new MemoryIndex();
     const available = () => w.options().memoryTools && !w.h.isBusy() && !w.scanSuppressed && w.h.isActive() && !!w.h.context().isToolCallingSupported?.();
     const lookup = async options => {
         if (!available()) return 'Scene Archivist memory tools are unavailable in this chat.';
-        const origin = w.identity(), group = w.h.groupSpeaker?.();
+        const origin = w.identity(), group = w.h.groupSpeaker?.(), epoch = w.generationEpoch;
         await w.loadBooks();
-        if (origin !== w.identity() || group?.speaker !== w.h.groupSpeaker?.()?.speaker || !available()) return 'The chat or speaker changed.';
-        const entries = toolLookup(w.entries, entry => w.memoryScopeReason(entry, group), options);
-        return entries.map(entry => `${M.title(entry)}\n${entry.content}`.slice(0, 2400)).join('\n\n').slice(0, 4800) || 'No matching active Scene Archivist records.';
+        if (origin !== w.identity() || group?.speaker !== w.h.groupSpeaker?.()?.speaker || epoch !== w.generationEpoch || !available()) return 'The chat or speaker changed.';
+        const rows = toolLookup(w.entries, entry => w.memoryScopeReason(entry, group) || w.sceneRecall?.reason(entry), options, index);
+        return toolEvidence(rows);
     };
     context.registerFunctionTool({
         name: 'scene_archivist_recall_memory', displayName: 'Recall a story memory',
-        description: 'Look up active Scene Archivist memories for the responding character and topic.',
-        parameters: { type: 'object', properties: { character: { type: 'string' }, topic: { type: 'string' } }, required: ['topic'] },
-        shouldRegister: available, action: ({ topic, character }) => lookup({ topic, character }),
+        description: 'Look up active Scene Archivist memories for the responding character and topic. For an indirect callback, supply up to three alternate search queries using related wording; these are search hints, not facts. This tool reads saved memories, not raw private scenes.',
+        parameters: { type: 'object', properties: { character: { type: 'string' }, topic: { type: 'string' },
+            queries: { type: 'array', maxItems: 3, items: { type: 'string', maxLength: 200 }, description: 'Optional alternate wording for the same topic. Do not guess an answer.' } }, required: ['topic'] },
+        shouldRegister: available, action: ({ topic, character, queries }) => lookup({ topic, character, queries }),
         formatMessage: () => 'Look up a story memory',
     });
     context.registerFunctionTool({

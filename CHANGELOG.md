@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.0 · November 8, 2026
+
+- Added optional precise delivery after native World Info activation, excerpt-aware AI Recall with related queries, and Memory Trail line ranges. Protected/full-detail and semantic-only activations remain whole; saved lists stay intact.
+- Added selection-checked per-memory citations and learning notes for structured extraction, plus optional memory and condensation evidence audits. Failed audits retain proposals for retry or explicit skip and review; flagged automatic condensation requires review.
+- Added reference sizes, an explicit fitting allowance, workflow presets, forgotten-detail diagnosis, privacy-preview diagnostics and a bounded connection grounding check.
+- Added 100-result Library paging, bounded/coalesced tokenizer work and a content-aware search cache. Recorded 1,000/10,000-record local search measurements and expanded native-host, theme, movement and workflow regression checks.
+- Escaped imported record ids in state, Library and continuity controls. Preserved new delivery toggles in workflow exports and counted condensation through helper telemetry and request limits.
+- Ask can make one bounded retrieval follow-up using related wording and verified original messages in the current chat. Answers expose the exact passage and a guarded jump link; changed, foreign, incomplete and corrected source ranges cannot enter the fallback.
+- Recall tools accept alternate queries without widening speaker or flashback access. Manual text corrections now explicitly mark author provenance so older source dialogue cannot silently replace them. Added citation agreement checks, source regression tests and an optional real-host browser smoke check.
+- Ask the archive and optional recall tools can select complete dated bullets from long character lists. Answers show the evidence used and open the original saved record. Stored memories stay intact.
+- Rare topic words receive more weight than repeated character names during excerpt retrieval. Excerpt packing counts citation wrappers and keeps recap overlap protection.
+- Recall tools respect the active flashback cutoff and return complete evidence or an allowance notice instead of cutting text mid-note. Added a separate long-list comparison and regression coverage.
+- Selected helper profiles stay selected after a failure. Helper capacity checks use that same profile, and connection tests and diagnostics identify the route used.
+- Fixed a name collision that caused non-empty archive search allocations to throw before selecting evidence.
+- Added offline recall fixtures, a reproducible candidate and budget baseline, routing and recovery regression tests, and checks for syntax, imports and release metadata.
+
 ## 2.0.1 · November 8, 2026
 
 - Replaced a story-specific location in the default archive prompt with the guide’s invented setting.

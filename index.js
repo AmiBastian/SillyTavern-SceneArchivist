@@ -20,7 +20,9 @@ import { Workbench } from './workbench.js';
 import { ChatControls } from './chat-controls.js';
 import { addReviewHandle } from './review-window.js';
 import { VERSION } from './version.js';
+import { createModelRouter } from './model-routing.js';
 import { entryReasons } from './vector-diagnostics.js';
+import { readReferenceEntries as collectReferenceEntries, referenceText } from './reference-context.js';
 import { createWorldInfoIO } from './world-info-io.js';
 import * as Journal from './entry-journal.js';
 import { validateSharedUnits, placeSharedUnits } from './workflow-tools.js';
@@ -680,7 +682,6 @@ async function pasteOutput() {
 
 // ---------------------------------------------------------------- side calls (keywords, recall, memories, condense)
 
-let sideWarned = false;
 const issues = [];
 const noteIssue = (msg) => { issues.push(`${new Date().toISOString().slice(11, 19)} ${msg}`); if (issues.length > 12) issues.shift(); };
 
@@ -708,6 +709,7 @@ async function copyDiagnostics() {
         `SillyTavern: ${typeof ctx.version === 'string' ? ctx.version : 'unknown'} | API: ${main_api} | ${navigator.userAgent}`,
         `Delivery: ${s.delivery} (depth ${s.depth}, role ${s.role}, outlet "${s.outlet}") | Archive mode: ${s.archiveMode} | Keywords: ${s.keyMode}`,
         `Side-call profile: ${s.sideProfile || '(current model)'} | Recall: ${s.recall ? 'on' : 'off'} | Memories auto: ${s.memoryAuto ? 'on' : 'off'} (${s.memoryTarget}${s.memoryTarget === 'separate' ? ', book "' + memoryBookName() + '", active: ' + (selected_world_info.includes(memoryBookName()) ? 'yes' : 'no') : ''})`,
+        `Last model route: ${modelRouter.lastRoute() ? JSON.stringify(modelRouter.lastRoute()) : 'No request this session'}`,
         `Lorebook: ${s.lorebook || '(none)'} | entries: ${entries.length} | attached to chat: ${isLorebookActive(s.lorebook) ? 'yes' : 'no'}`,
         `Prompt: ${s.promptId} (${String(s.prompt ?? '').length} chars) | model-aware range processing | auto-hide ${s.hideArchived ? 'on, keep ' + s.keepVisible : 'off'}`,
         `Chat: ${(ctx.chat ?? []).length} messages | archived through ${m.archivedThrough ?? 'none'} | ranges ${(m.ranges ?? []).length}`,
@@ -718,24 +720,21 @@ async function copyDiagnostics() {
     catch { await callGenericPopup(text, POPUP_TYPE.TEXT, '', { wide: true, large: true }); }
 }
 
-/** Small helper requests use a Connection Manager profile when one is chosen, otherwise the current model. */
-async function sideCall({ prompt, system = '', maxTokens = 1200 }) {
-    const s = settings();
-    if (s.sideProfile) {
-        try {
-            const svc = getContext().ConnectionManagerRequestService;
-            if (!svc) throw new Error('Connection Manager is not available');
-            const messages = [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content: prompt }];
-            const res = await svc.sendRequest(s.sideProfile, messages, maxTokens);
-            const text = typeof res === 'string' ? res : res?.content;
-            if (text && String(text).trim()) return String(text);
-            throw new Error('empty reply');
-        } catch (e) {
-            console.warn(LOG, 'side profile failed, using the current model', e);
-            if (!sideWarned) { sideWarned = true; toastr.warning('The chosen side-call profile failed (' + (e?.message ?? e) + '), so the current model is being used instead.'); }
-        }
-    }
-    return await generateRaw({ prompt, systemPrompt: system, responseLength: maxTokens });
+const modelRouter = createModelRouter({
+    describe: flowModelInfo,
+    assert: assertCurrentChat,
+    current: req => generateRaw({ prompt: req.assembled ?? req.prompt,
+        systemPrompt: req.assembled ? '' : req.system, responseLength: req.maxTokens }),
+    sendProfile: (profile, messages, maxTokens) => {
+        const service = getContext().ConnectionManagerRequestService;
+        if (!service?.sendRequest) throw new Error('Connection Manager is unavailable. Re-enable it or choose another connection.');
+        return service.sendRequest(profile, messages, maxTokens);
+    },
+});
+
+/** A chosen profile is pinned to this request. A failed profile never changes the route. */
+async function sideCall({ prompt, system = '', maxTokens = 1200 }, profile = settings().sideProfile || '') {
+    return modelRouter.request({ prompt, system, maxTokens }, profile);
 }
 
 function refreshProfileList() {
@@ -751,25 +750,7 @@ function refreshProfileList() {
 }
 
 async function readReferences(refs) {
-    const grouped = new Map();
-    for (const item of refs) {
-        if (!grouped.has(item.book)) grouped.set(item.book, []);
-        grouped.get(item.book).push(item);
-    }
-    const chunks = [];
-    for (const [name, selections] of grouped) {
-        const book = await readFresh(name);
-        if (!book) throw new Error(`Reference lorebook "${name}" is unavailable. Update the selection before running.`);
-        for (const entry of Object.values(book.entries || {})) {
-            if (!entry.content || !selections.some(item => item.uid == null || String(item.uid) === String(entry.uid))) continue;
-            chunks.push(`[Reference: ${name} / ${entry.comment || entry.uid}]
-${entry.content}`);
-        }
-        if (selections.some(item => item.uid != null && !Object.values(book.entries || {}).some(entry => String(entry.uid) === String(item.uid)))) {
-            throw new Error(`A selected entry in "${name}" was removed. Update the reference selection.`);
-        }
-    }
-    return chunks.join('\n\n');
+    return (await collectReferenceEntries(refs, readFresh)).map(referenceText).join('\n\n');
 }
 
 async function readDiaryLore(card) {
@@ -821,23 +802,15 @@ async function buildFlowContext(req) {
 }
 
 async function sendFlowRequest(req, profile) {
-    const prompt = req.assembled ?? req.prompt;
-    const messages = Array.isArray(prompt) ? prompt : [
-        ...(!req.assembled && req.system ? [{ role: 'system', content: req.system }] : []),
-        { role: 'user', content: prompt },
-    ];
-    if (!profile) return generateRaw({ prompt, systemPrompt: req.assembled ? '' : req.system, responseLength: req.maxTokens });
-    const service = getContext().ConnectionManagerRequestService;
-    if (!service?.sendRequest) throw new Error('Connection Manager is unavailable. Re-enable it or retry on the current model.');
-    const result = await service.sendRequest(profile, messages, req.maxTokens);
-    return typeof result === 'string' ? result : result?.content;
+    return modelRouter.request(req, profile || '');
 }
 
 async function testSide() {
     try {
-        const out = await sideCall({ prompt: 'Reply with the single word: ready', maxTokens: 30 });
-        toastr.success('The side model answered: ' + String(out).trim().slice(0, 60), 'Side-call test');
-    } catch (e) { toastr.error('The side model failed: ' + (e?.message ?? e)); }
+        const profile = settings().sideProfile || '', name = flowModelInfo(profile).name;
+        const out = await sideCall({ prompt: 'Reply with the single word: ready', maxTokens: 30 }, profile);
+        toastr.success(name + ' answered: ' + String(out).trim().slice(0, 60), 'Helper connection test');
+    } catch (e) { toastr.error('The helper connection failed: ' + (e?.message ?? e)); }
 }
 
 // ---------------------------------------------------------------- what the model saw
@@ -1573,7 +1546,7 @@ jQuery(async () => {
             end: () => { pendingUndo = null; busy = false; operationChat = null; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', false); },
             confirmRecovered: async (name, actual) => { if (pendingUndo) { Journal.confirmWrite(pendingUndo.journal, name, actual); await persistMeta(); } },
             undoStart: beginUndoWrite, snapshot: saveUndoSnapshot, reload: name => { try { reloadEditor(name); } catch { /* editor closed */ } },
-            model: sideCall, flowModelInfo, sendFlowRequest, buildFlowContext, readReferences, readDiaryLore, tokenCount: getTokenCountAsync, hide: hideChatMessageRange, renderLedger, prepareArchive, refreshInfo: updateInfoLine,
+            model: sideCall, flowModelInfo, sendFlowRequest, buildFlowContext, readReferences, readReferenceEntries: refs => collectReferenceEntries(refs, readFresh), readDiaryLore, tokenCount: getTokenCountAsync, hide: hideChatMessageRange, renderLedger, prepareArchive, refreshInfo: updateInfoLine,
             archiveModel: async (req, range) => settings().archiveMode === 'chat' && !range.explicit
                 ? generateQuietPrompt({ quietPrompt: req.system + '\n\n' + req.prompt, responseLength: Number(settings().maxTokens) > 0 ? Number(settings().maxTokens) : null })
                 : generateRaw({ prompt: req.prompt, systemPrompt: req.system, responseLength: Number(settings().maxTokens) > 0 ? Number(settings().maxTokens) : 6000 }),

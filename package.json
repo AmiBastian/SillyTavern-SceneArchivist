@@ -3,6 +3,8 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "test": "node --test"
+        "test": "node --test",
+        "check": "node scripts/check.mjs",
+        "benchmark": "node scripts/benchmarks.mjs"
     }
 }
