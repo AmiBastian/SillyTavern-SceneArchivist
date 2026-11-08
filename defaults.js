@@ -100,7 +100,7 @@ If a section has no content, do not write the header. No placeholder text.
 
 📍 [time or "Unknown time"] · [named location or "Unknown location"]
 
-- Never combine "Unknown" with a named place in the same field. If location is known, name it. If time is unknown, write "Unknown time". Never write "Unknown · SHIELD HQ", that is a contradiction.
+- Never combine "Unknown" with a named place in the same field. If location is known, name it. If time is unknown, write "Unknown time". Never write "Unknown · Ember Station", that is a contradiction.
 
 (repeat for all Days in calendar order)
 
