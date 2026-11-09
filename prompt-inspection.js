@@ -1,5 +1,5 @@
 import * as M from './memory-engine.js';
-import { sharedPrefix, soloMemoryReason } from './chat-workflows.js';
+import { sharedPrefix, soloMemoryScope } from './chat-workflows.js';
 import { escape as html } from './workflow-tools.js';
 import { addReviewHandle } from './review-window.js';
 import { MemoryIndex, toolEvidence } from './memory-retrieval.js';
@@ -340,8 +340,9 @@ export function registerMemoryTools(w) {
         if (origin !== w.identity() || !!group !== !!currentGroup || group?.speaker !== currentGroup?.speaker
             || !group && soloAvatar !== current.characters?.[current.characterId]?.avatar
             || epoch !== w.generationEpoch || !available()) return 'The chat or speaker changed.';
+        const soloScope = group ? null : soloMemoryScope(current, w.h.currentAvatar);
         const rows = toolLookup(w.entries, entry => w.memoryScopeReason(entry, group) || w.sceneRecall?.reason(entry)
-            || !group && soloMemoryReason(M.record(entry), current, w.h.currentAvatar), options, index);
+            || soloScope?.(M.record(entry)), options, index);
         return toolEvidence(rows);
     };
     context.registerFunctionTool({
