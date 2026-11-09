@@ -2,6 +2,10 @@
 
 ## 2.1.0 · November 9, 2026
 
+- Ask accepts ordinary bracketed story labels and dates beside its source citations. Explicit and legacy source citations still have to agree with the supplied evidence.
+- Scoped optional solo-chat memory tools to the responding card's personal memories and knowledge, including alternate queries, aliases and renamed cards. Shared story records remain searchable, and author-facing Ask stays story-wide.
+- Restored the GitHub Sponsor button. The clean installation retains only `.github/FUNDING.yml` as repository metadata; tests, benchmarks, npm tooling and CI stay private.
+- Added repeatable 2.0.1-to-2.1.0 upgrade checks using actual paused archive/memory and condensation jobs with 1,120 fictional messages. Prepared results, revisions and coverage survive; only a remaining tracker stage needs a new request. Private CI runs on every branch push and pull request.
 - Refreshed guide screenshots and walkthroughs, including the current movable Memory Trail on desktop and its mobile sheet.
 - Kept tests, benchmarks, fixtures, developer scripts and package tooling in the development repository. The public installation contains the extension runtime, license and user documentation only.
 - Checked the browser module dependency graph and every README media link before preparing the installation.

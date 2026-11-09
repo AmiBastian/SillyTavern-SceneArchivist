@@ -1,5 +1,5 @@
 // Chat-local controls and prompt bookkeeping. These helpers also run without SillyTavern.
-import { record, uid } from './memory-engine.js';
+import { record, uid, unique } from './memory-engine.js';
 
 const messageKey = 'sceneArchivistMessageId';
 
@@ -77,6 +77,19 @@ export function groupMemoryReason(record, group, enabled) {
     const subject = memorySubject(record, group.members);
     if (!subject || !group.speaker) return 'No unique character card for this memory';
     return subject.avatar === group.speaker ? '' : 'Belongs to another group character';
+}
+
+/** Model-initiated solo recall reads personal records of the responding card. */
+export function soloMemoryReason(record, context, currentAvatar) {
+    if (!['memory', 'knowledge'].includes(record?.type)) return '';
+    const card = context.characters?.[context.characterId];
+    if (!card?.avatar) return 'No unique responding character card';
+    const members = context.characters.filter(Boolean).map(member => ({ avatar: member.avatar, name: member.name,
+        aliases: unique([...(member.aliases || []), member.data?.nickname, ...(member === card ? [context.name2] : [])]) }));
+    const subjectAvatar = record.subjectAvatar && (currentAvatar?.(record.subjectAvatar) || record.subjectAvatar);
+    const subject = memorySubject({ ...record, subjectAvatar }, members);
+    if (!subject) return 'No unique character card for this personal record';
+    return subject.avatar === card.avatar ? '' : 'Belongs to another character';
 }
 
 function ownsNativeGroupFilter(entry) {

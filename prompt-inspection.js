@@ -1,5 +1,5 @@
 import * as M from './memory-engine.js';
-import { sharedPrefix } from './chat-workflows.js';
+import { sharedPrefix, soloMemoryReason } from './chat-workflows.js';
 import { escape as html } from './workflow-tools.js';
 import { addReviewHandle } from './review-window.js';
 import { MemoryIndex, toolEvidence } from './memory-retrieval.js';
@@ -334,14 +334,19 @@ export function registerMemoryTools(w) {
     const lookup = async options => {
         if (!available()) return 'Scene Archivist memory tools are unavailable in this chat.';
         const origin = w.identity(), group = w.h.groupSpeaker?.(), epoch = w.generationEpoch;
+        const before = w.h.context(), soloAvatar = group ? null : before.characters?.[before.characterId]?.avatar;
         await w.loadBooks();
-        if (origin !== w.identity() || group?.speaker !== w.h.groupSpeaker?.()?.speaker || epoch !== w.generationEpoch || !available()) return 'The chat or speaker changed.';
-        const rows = toolLookup(w.entries, entry => w.memoryScopeReason(entry, group) || w.sceneRecall?.reason(entry), options, index);
+        const current = w.h.context(), currentGroup = w.h.groupSpeaker?.();
+        if (origin !== w.identity() || !!group !== !!currentGroup || group?.speaker !== currentGroup?.speaker
+            || !group && soloAvatar !== current.characters?.[current.characterId]?.avatar
+            || epoch !== w.generationEpoch || !available()) return 'The chat or speaker changed.';
+        const rows = toolLookup(w.entries, entry => w.memoryScopeReason(entry, group) || w.sceneRecall?.reason(entry)
+            || !group && soloMemoryReason(M.record(entry), current, w.h.currentAvatar), options, index);
         return toolEvidence(rows);
     };
     context.registerFunctionTool({
         name: 'scene_archivist_recall_memory', displayName: 'Recall a story memory',
-        description: 'Look up active Scene Archivist memories for the responding character and topic. For an indirect callback, supply up to three alternate search queries using related wording; these are search hints, not facts. This tool reads saved memories, not raw private scenes.',
+        description: 'Look up active Scene Archivist memories for the responding character and topic. In solo chats, personal memories and knowledge belong to the responding card only. For an indirect callback, supply up to three alternate search queries using related wording; these are search hints, not facts. This tool reads saved memories, not raw private scenes.',
         parameters: { type: 'object', properties: { character: { type: 'string' }, topic: { type: 'string' },
             queries: { type: 'array', maxItems: 3, items: { type: 'string', maxLength: 200 }, description: 'Optional alternate wording for the same topic. Do not guess an answer.' } }, required: ['topic'] },
         shouldRegister: available, action: ({ topic, character, queries }) => lookup({ topic, character, queries }),
