@@ -2,6 +2,7 @@
 
 ## 2.1.0 · November 9, 2026
 
+- Prepare solo recall's character-card list once per lookup instead of once per personal record. Each new lookup reads fresh card metadata; identity, ambiguity and renamed-card checks remain in place.
 - Ask accepts ordinary bracketed story labels and dates beside its source citations. Explicit and legacy source citations still have to agree with the supplied evidence.
 - Scoped optional solo-chat memory tools to the responding card's personal memories and knowledge, including alternate queries, aliases and renamed cards. Shared story records remain searchable, and author-facing Ask stays story-wide.
 - Restored the GitHub Sponsor button. The clean installation retains only `.github/FUNDING.yml` as repository metadata; tests, benchmarks, npm tooling and CI stay private.
