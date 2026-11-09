@@ -1,23 +1,23 @@
 # Scene Archivist 2.1.0
 
-Version 2.1.0 adds precise delivery from long memory lists, verified original-message lookup, optional evidence audits, reference allowances, workflow presets and troubleshooting tools. See the [release notes](docs/releases/2.1.0.md) and [validation record](docs/releases/2.1.0-VALIDATION.md).
+The cleaned 2.1.0 build updates the guide media and keeps developer tools out of the public installation. It includes 2.1.0's precise delivery from long memory lists, verified original-message lookup, optional evidence audits, reference allowances, workflow presets and troubleshooting tools. See the [release notes](https://github.com/AmiBastian/SillyTavern-SceneArchivist/releases/tag/v2.1.0).
 
 <details>
 <summary>New controls in 2.1.0</summary>
 
 Choose a workflow from Story. Simple keeps extra recall and audit calls off; Detailed enables those optional checks. Mostly Automatic prepares rolling memories for review.
 
-![Workflow presets with an explanation of the Simple workflow](docs/media/47-workflow-presets.png)
+![Workflow presets with an explanation of the Simple workflow](docs/media/47-workflow-presets.png?v=2.1.0-clean)
 
 Set reference sizes, fitting and memory audits under Tools → Settings. Zero keeps the whole reference selection; a positive allowance can explain overflow or explicitly fit complete entries.
 
-![Reference allowance, fitting policy and optional evidence audit](docs/media/48-reference-allowance.png)
+![Reference allowance, fitting policy and optional evidence audit](docs/media/17-reference-context.png?v=2.1.0-clean)
 
-Ask can show the complete verified original passage behind an answer. Memory Trail shows which saved lines were supplied to a reply.
+Ask shows the supplied evidence behind an answer and can recover verified original passages when saved notes are insufficient. Memory Trail identifies loaded records and, when excerpt delivery applies, their selected lines.
 
-![Archive answer with its verified original-message passage and uncertainty](docs/media/49-verified-answer.png)
+![Archive answer with its supplied source links](docs/media/49-verified-answer.png?v=2.1.0-clean)
 
-![Memory Trail showing the delivered line range from a long character list](docs/media/50-trail-lines.png)
+![Current Memory Trail with movement, reset and loaded-record controls](docs/media/50-trail-lines.png?v=2.1.0-clean)
 
 These images use invented records and scripted replies in native SillyTavern 1.19.0. They demonstrate the controls and evidence views, not real-model answer quality.
 
@@ -29,16 +29,16 @@ Scene Archivist is a continuity and memory extension for **SillyTavern**, made b
 
 If your characters can hide a body but cannot remember where they had dinner, we have some filing to do.
 
-![Story overview with archive coverage and the Archive thoroughly action](docs/media/31-story.png)
+![Story overview with archive coverage and the Archive thoroughly action](docs/media/31-story.png?v=2.1.0-clean)
 
 [Install](#install-and-make-your-first-archive) · [Archive thoroughly](#archive-thoroughly) · [Characters](#characters) · [Diaries](#character-diaries) · [Library](#library-and-history) · [Condense](#condense-by-tokens) · [Prompt and recall](#prompt-and-recall) · [Settings](#settings-and-connections) · [Sharing and branches](#sharing-and-branches) · [Recovery](#backups-and-job-recovery) · [Commands](#slash-commands)
 
-The examples use an invented story about a flooded railway station. Screenshots and walkthroughs were captured in **SillyTavern 1.19.0** with scripted model replies and sample lorebooks. Your theme and model output will look different. See the [changelog](CHANGELOG.md) for version history.
+The guide media has been updated for this cleaned 2.1.0 build, including desktop and mobile Memory Trail. The examples use an invented story about a flooded railway station. Screenshots and walkthroughs were captured in **SillyTavern 1.19.0** with scripted model replies and sample lorebooks. Your theme and model output will look different. See the [changelog](CHANGELOG.md) for version history.
 
 <details>
 <summary>Workspace walkthrough</summary>
 
-![Story, the Library timeline, Little Things, and the reply-side Memory Trail](docs/media/workspace-walkthrough.gif)
+![Story, the Library timeline, Little Things, and the reply-side Memory Trail](docs/media/workspace-walkthrough.gif?v=2.1.0-clean)
 
 </details>
 
@@ -57,11 +57,11 @@ For an existing installation, use SillyTavern’s extension update control. Befo
 <details>
 <summary>Help and mobile view</summary>
 
-![Built-in help and worked example navigation](docs/media/25-help.png)
+![Built-in help and worked example navigation](docs/media/25-help.png?v=2.1.0-clean)
 
-![Archive tab on a narrow screen](docs/media/26-mobile.png)
+![Archive tab on a narrow screen](docs/media/26-mobile.png?v=2.1.0-clean)
 
-![Message menu and range markers on a phone-sized screen](docs/media/36-mobile-message-menu.png)
+![Message menu and range markers on a phone-sized screen](docs/media/36-mobile-message-menu.png?v=2.1.0-clean)
 
 </details>
 
@@ -79,25 +79,25 @@ Use the small book icon beside a chat message’s edit controls. Choose **Start 
 
 The same menu can **Skip when archiving**, **Remember this**, or open a reply’s memory trail. **Suggest scene breaks** gives you possible end points to pick from. Use the newest-message buffer to keep an unfinished scene out of automatic suggestions. **Estimate this run** previews requests and approximate tokens without contacting the model.
 
-![Scene Archivist message menu with range, memory and reply actions](docs/media/32-message-menu.png)
+![Scene Archivist message menu with range, memory and reply actions](docs/media/32-message-menu.png?v=2.1.0-clean)
 
 Day, Chapter, Episode, Session, Act, Part, Week, Scene, and custom units are available under **Settings → Prompts**.
 
-![Archive layout with Ledger and Tidy side by side](docs/media/01-archive-overview.png)
+![Archive layout with Ledger and Tidy side by side](docs/media/01-archive-overview.png?v=2.1.0-clean)
 
-![Inclusive range preview and combined range actions](docs/media/02-message-range.png)
+![Inclusive range preview and combined range actions](docs/media/02-message-range.png?v=2.1.0-clean)
 
 Archive thoroughly normally uses one request per stage, up to three when everything fits. **Settings → Optional automation** can combine stages into one request when they use the same profile. If the context is too small, the job shows the problem and offers an explicit split or retry. Review the prepared entries together and approve the ones you want. **Review later** retains the draft.
 
-![Archive, memories, and trackers prepared for one review](docs/media/03-combined-review.png)
+![Archive, memories, and trackers prepared for one review](docs/media/03-combined-review.png?v=2.1.0-clean)
 
 The **Ledger** shows which ranges are covered. Use **Redo summaries** to replace linked summaries from their original messages, or **Mark unprocessed** to make a range available again. **Hide this range** and **Show this range** control the chat’s visibility separately. **Tidy the shelves** reorders saved entries without an AI rewrite.
 
-![Archive ledger showing the saved range](docs/media/04-ledger.png)
+![Archive ledger showing the saved range](docs/media/04-ledger.png?v=2.1.0-clean)
 
-![Walkthrough of selecting a range and approving an Archive thoroughly run](docs/media/range-walkthrough.gif)
+![Walkthrough of selecting a range and approving an Archive thoroughly run](docs/media/range-walkthrough.gif?v=2.1.0-clean)
 
-[Watch the range walkthrough in MP4](docs/media/range-walkthrough.mp4)
+[Watch the range walkthrough in MP4](docs/media/range-walkthrough.mp4?v=2.1.0-clean)
 
 ## Characters
 
@@ -113,25 +113,25 @@ When you create **Chat** memories before choosing an archive, Scene Archivist cr
 
 **Scope** can target new material, exact chat messages, an archive unit range, or the last several units. Use an exact selection to fill a gap even if coverage says the surrounding range was processed. **Create memories for my persona** is available in Settings and starts unchecked.
 
-![Memory extraction from an exact chat range](docs/media/05-memory-source-range.png)
+![Memory extraction from an exact chat range](docs/media/05-memory-source-range.png?v=2.1.0-clean)
 
 Select a character in the **Character memory browser** to read or search their lists. **AI update…** lets you propose corrections with chat evidence. **Organize saved memories** is a separate reviewed rewrite. Routine generation adds to existing lists and removes exact repeats. Protected lists are reported and the associated sources remain available for extraction.
 
-![Character memory browser with a saved list](docs/media/06-memory-browser.png)
+![Character memory browser with a saved list](docs/media/06-memory-browser.png?v=2.1.0-clean)
 
 **Character timeline** groups dated memories and opens their evidence. **Export character memories** downloads plain Markdown. **Remember this** on a chat message saves one detail for a chosen character, with optional keywords and a link to that message. The AI polish button is optional.
 
-![Reviewing one memory clipped from a chat message](docs/media/33-remember-message.png)
+![Reviewing one memory clipped from a chat message](docs/media/33-remember-message.png?v=2.1.0-clean)
 
 ### Trackers, facts, and knowledge
 
 Under **Characters → Trackers**, select a tracker and enable **Keep this one updated**. Use the built-in templates for relationships, promises, secrets, items, or whereabouts, or add your own. **Update all enabled** uses one tracker request when the input fits. Archive thoroughly includes enabled trackers in its final review.
 
-![Relationship tracker and its update controls](docs/media/08-trackers.png)
+![Relationship tracker and its update controls](docs/media/08-trackers.png?v=2.1.0-clean)
 
 Use **Facts, knowledge and unfinished business** to write or extract who knows, suspects, or is unaware of a fact. **Knowledge as of a date** shows a character’s earlier learning state when one was recorded. The **Character roster** lets you review aliases, merge matching lists, and set destinations. Pin an unresolved thread to give it priority within the memory budget. The recap can know where the body is buried. The cast can keep their secrets.
 
-![Controls for recording secrets, facts, and unresolved promises](docs/media/07-knowledge.png)
+![Controls for recording secrets, facts, and unresolved promises](docs/media/07-knowledge.png?v=2.1.0-clean)
 
 ## Character diaries
 
@@ -142,22 +142,22 @@ Use **Facts, knowledge and unfinished business** to write or extract who knows, 
 
 Diaries are saved to the archive separately from active character memories. You can find them with the **diary** type filter in Library.
 
-![Write, update, and condense controls for the character diary](docs/media/09-diary-controls.png)
+![Write, update, and condense controls for the character diary](docs/media/09-diary-controls.png?v=2.1.0-clean)
 
-![Review a first-person diary before saving](docs/media/10-diary-review.png)
+![Review a first-person diary before saving](docs/media/10-diary-review.png?v=2.1.0-clean)
 
 <details>
 <summary>Updating and finding a saved diary</summary>
 
-![Reviewed diary update based on later chat messages](docs/media/11-diary-update.png)
+![Reviewed diary update based on later chat messages](docs/media/11-diary-update.png?v=2.1.0-clean)
 
-![Saved diary in the Library](docs/media/13-saved-diary.png)
+![Saved diary in the Library](docs/media/13-saved-diary.png?v=2.1.0-clean)
 
 </details>
 
-![Walkthrough of writing and updating a diary](docs/media/diary-walkthrough.gif)
+![Walkthrough of writing and updating a diary](docs/media/diary-walkthrough.gif?v=2.1.0-clean)
 
-[Watch the diary walkthrough in MP4](docs/media/diary-walkthrough.mp4)
+[Watch the diary walkthrough in MP4](docs/media/diary-walkthrough.mp4?v=2.1.0-clean)
 
 ## Library and history
 
@@ -168,16 +168,16 @@ Open **Library → Timeline** to read a saved scene alongside its linked charact
 - **Exclude this record from injection** keeps it in the book for reference without including it in prompts.
 - A source edit is shown beside a proposal when relevant. Existing saved memories remain available after ordinary chat edits, and you can approve prepared work without rebuilding an existing list first.
 
-![Library timeline with a selected scene and links to its evidence](docs/media/37-timeline.png)
+![Library timeline with a selected scene and links to its evidence](docs/media/37-timeline.png?v=2.1.0-clean)
 
-![All records search and inspection](docs/media/12-library.png)
+![All records search and inspection](docs/media/12-library.png?v=2.1.0-clean)
 
 <details>
 <summary>Trace a record to its original messages</summary>
 
 Use **Sources** on a Library result. Each source range lists the chat it came from and links to the messages that are still available. A linked recap can lead back to its full original units.
 
-![Original messages linked to the selected archive entry](docs/media/27-original-sources.png)
+![Original messages linked to the selected archive entry](docs/media/27-original-sources.png?v=2.1.0-clean)
 
 </details>
 
@@ -189,7 +189,7 @@ Find approved details under **Library → Little Things**. To keep something the
 
 A normal reply can load up to four matching details inside the existing memory budget on SillyTavern versions with the World Info scan hook. Relevant cues and open promises can carry over for a few replies within a scene. **Load next reply** queues a detail for the next eligible speaker. To turn off automatic selection, open **Tools → Prompt** and switch off scene recall.
 
-![Little Things with cues, a source link, and the option to queue a detail](docs/media/38-little-things.png)
+![Little Things with cues, a source link, and the option to queue a detail](docs/media/38-little-things.png?v=2.1.0-clean)
 
 ## Condense by tokens
 
@@ -204,9 +204,9 @@ Set a flexible **Token target**, or use **0** for the shortest faithful version.
 
 Optional recap automation can suggest or create a recap after newer units, fictional time, or archive token pressure. Choose the automation setting before relying on it. Protected records keep their detailed text.
 
-![Token target and archive condensation modes](docs/media/14-condense-controls.png)
+![Token target and archive condensation modes](docs/media/14-condense-controls.png?v=2.1.0-clean)
 
-![Diary condensation review showing estimated tokens before and after](docs/media/28-diary-condense.png)
+![Diary condensation review showing estimated tokens before and after](docs/media/28-diary-condense.png?v=2.1.0-clean)
 
 ## Prompt and recall
 
@@ -246,19 +246,19 @@ Evidence audits report unsupported details, omissions, dates and knowledge bound
 
 **Why was this forgotten?** compares saved text with the last retained delivery trace. **Export reviewed diagnostics** previews a report that excludes story text, names, credentials, URLs and raw errors. **Test helper grounding** is an explicit connection check with invented evidence and at most five real requests; passing it is not a general memory-quality score. Its preview explains possible provider charges.
 
-Library results use pages of 100 so older results remain reachable. Search data and token counts are cached with content and metadata checks; tokenizer work is coalesced and limited to six concurrent calls. Local search measurements at 1,000 and 10,000 records are in [the performance report](benchmarks/performance.json), with their scope and hardware.
+Library results use pages of 100 so older results remain reachable. Search data and token counts are cached with content and metadata checks; tokenizer work is coalesced and limited to six concurrent calls.
 
-![Search and continuity controls](docs/media/15-search.png)
+![Search and continuity controls](docs/media/15-search.png?v=2.1.0-clean)
 
-![Memory budget and activation source filters](docs/media/16-loading-budget.png)
+![Memory budget and activation source filters](docs/media/16-loading-budget.png?v=2.1.0-clean)
 
-![Memory Trail with cues and evidence alongside SillyTavern chat](docs/media/35-reply-trace.png)
+![Memory Trail with cues and evidence alongside SillyTavern chat](docs/media/35-reply-trace.png?v=2.1.0-clean)
 
-![Memory Trail as a bottom sheet on a phone-sized screen](docs/media/39-mobile-trail.png)
+![Memory Trail as a bottom sheet on a phone-sized screen](docs/media/39-mobile-trail.png?v=2.1.0-clean)
 
-![Walkthrough of finding a record and its evidence](docs/media/evidence-walkthrough.gif)
+![Walkthrough of finding a record and its evidence](docs/media/evidence-walkthrough.gif?v=2.1.0-clean)
 
-[Watch the evidence walkthrough in MP4](docs/media/evidence-walkthrough.mp4)
+[Watch the evidence walkthrough in MP4](docs/media/evidence-walkthrough.mp4?v=2.1.0-clean)
 
 ## Settings and connections
 
@@ -273,7 +273,7 @@ Library results use pages of 100 so older results remain reachable. Search data 
 
 **Check setup** checks the archive attachment, delivery, budget and optional integrations. Its model test buttons each send one short request on the named connection. **Manage workflow profiles** saves prompts, budgets and delivery for this chat, character or group. Chat profiles take precedence over character and group profiles. Connection profiles are configured separately.
 
-![Scene Archivist setup checks](docs/media/34-check-setup.png)
+![Scene Archivist setup checks](docs/media/34-check-setup.png?v=2.1.0-clean)
 
 **Current SillyTavern model** uses your live connection. A failed profile can be retried directly, or you can explicitly select **Use current model**. Context checks use the capacity exposed by the configured connection. Custom proxies can apply additional limits.
 
@@ -283,20 +283,20 @@ Helper tools such as memory organization and archive search use the helper model
 
 If an archive or memory stage exceeds its model context, the error lists its largest input parts. Check the figures for reference lorebooks, selected messages, the scene log, instructions, and included SillyTavern chat context. Use the suggested setting to reduce extra context or choose **Split this stage**.
 
-![Optional persona, reference lore, and prompt-preview settings](docs/media/17-reference-context.png)
+![Optional persona, reference lore, and prompt-preview settings](docs/media/17-reference-context.png?v=2.1.0-clean)
 
-![Archive and memory connection profile selectors](docs/media/18-connections.png)
+![Archive and memory connection profile selectors](docs/media/18-connections.png?v=2.1.0-clean)
 
 <details>
 <summary>Automation, prompts, and lorebook delivery</summary>
 
 **Optional automation** also contains the single-request mode. **Prompts** is where you choose story units and edit prompt presets. **Prompt → Delivery** controls how eligible entries are placed in the prompt. If you use an outlet, add its macro to the relevant preset or prompt.
 
-![Single-request mode and rolling memory controls](docs/media/19-automation.png)
+![Single-request mode and rolling memory controls](docs/media/19-automation.png?v=2.1.0-clean)
 
-![Lorebook delivery controls](docs/media/21-delivery.png)
+![Lorebook delivery controls](docs/media/21-delivery.png?v=2.1.0-clean)
 
-![Archive prompt and story unit settings](docs/media/22-prompts.png)
+![Archive prompt and story unit settings](docs/media/22-prompts.png?v=2.1.0-clean)
 
 </details>
 
@@ -308,9 +308,9 @@ Open **Tools → Maintain → Branches** to choose verified earlier history or e
 
 Renaming a chat in SillyTavern keeps its archive and progress. A native branch or a separate copy of the original chat file gets private books, even when the copied file has the same internal identifier. Use SillyTavern’s **Branch** action to keep lineage easy to follow.
 
-![Archive sharing controls](docs/media/24-sharing.png)
+![Archive sharing controls](docs/media/24-sharing.png?v=2.1.0-clean)
 
-![Story branch settings and lineage controls](docs/media/23-branches.png)
+![Story branch settings and lineage controls](docs/media/23-branches.png?v=2.1.0-clean)
 
 ## Backups and job recovery
 
@@ -318,14 +318,14 @@ Renaming a chat in SillyTavern keeps its archive and progress. A native branch o
 
 If a later stage fails, choose **Review ready results** to save completed work, then **Retry failed stage**. A canceled review can be reopened through the saved job. **Discard unfinished job** clears its pending proposals. **Undo** checks what was written and preserves newer edits it cannot safely reverse.
 
-![Job recovery controls after a failed tracker stage](docs/media/29-job-recovery.png)
+![Job recovery controls after a failed tracker stage](docs/media/29-job-recovery.png?v=2.1.0-clean)
 
 <details>
 <summary>Review prepared work and keep a backup</summary>
 
-![Review of completed stages while a later stage awaits retry](docs/media/30-review-ready.png)
+![Review of completed stages while a later stage awaits retry](docs/media/30-review-ready.png?v=2.1.0-clean)
 
-![Story backup and restore controls](docs/media/20-backups.png)
+![Story backup and restore controls](docs/media/20-backups.png?v=2.1.0-clean)
 
 </details>
 

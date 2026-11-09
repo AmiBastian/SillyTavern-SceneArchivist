@@ -1,6 +1,10 @@
 # Changelog
 
-## 2.1.0 · November 8, 2026
+## 2.1.0 · November 9, 2026
+
+- Refreshed guide screenshots and walkthroughs, including the current movable Memory Trail on desktop and its mobile sheet.
+- Kept tests, benchmarks, fixtures, developer scripts and package tooling in the development repository. The public installation contains the extension runtime, license and user documentation only.
+- Checked the browser module dependency graph and every README media link before preparing the installation.
 
 - Added optional precise delivery after native World Info activation, excerpt-aware AI Recall with related queries, and Memory Trail line ranges. Protected/full-detail and semantic-only activations remain whole; saved lists stay intact.
 - Added selection-checked per-memory citations and learning notes for structured extraction, plus optional memory and condensation evidence audits. Failed audits retain proposals for retry or explicit skip and review; flagged automatic condensation requires review.
