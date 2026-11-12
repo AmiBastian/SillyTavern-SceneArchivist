@@ -193,7 +193,7 @@ function refreshScopedControls() {
     const s = settings();
     const fields = { sa_delivery: 'delivery', sa_outlet: 'outlet', sa_depth: 'depth', sa_role: 'role', sa_keepdays: 'keepDays',
         sa_mem_days: 'memoryDays', sa_mem_cap: 'memoryCap', sa_mem_prompt: 'memoryPrompt', sa_cond_above: 'condenseAbove', sa_cond_prompt: 'condensePrompt',
-        sa_archive_cond_prompt: 'archiveCondensePrompt',
+        sa_archive_cond_prompt: 'archiveCondensePrompt', sa_mem_shorten_prompt: 'memoryShortenPrompt',
         sa_recall_msgs: 'recallMessages', sa_recall_max: 'recallMax', sa_keepvis: 'keepVisible', sa_tr_days: 'trackerDays' };
     for (const [id, key] of Object.entries(fields)) $('#' + id).val(s[key]);
     for (const [id, key] of Object.entries({ sa_mem_auto: 'memoryAuto', sa_tr_auto: 'trackerAuto', sa_recall: 'recall', sa_review: 'review', sa_hide: 'hideArchived' })) $('#' + id).prop('checked', s[key]);
@@ -1515,7 +1515,17 @@ function bindUi() {
     renderLedger();
     $('#sa_cond_run').on('click', () => runCondense());
     bindVal('#sa_cond_prompt', 'condensePrompt');
-    $('#sa_cond_prompt_reset').on('click', () => { s.condensePrompt = DEFAULT_SETTINGS.condensePrompt; $('#sa_cond_prompt').val(s.condensePrompt); saveSettingsDebounced(); toastr.info('Condense prompt reset to the default.'); });
+    $('#sa_cond_prompt_reset').on('click', () => { if (busy) return; s.condensePrompt = DEFAULT_SETTINGS.condensePrompt; $('#sa_cond_prompt').val(s.condensePrompt); saveSettingsDebounced(); toastr.info('Organize memories prompt reset to the default.'); });
+    $('#sa_mem_shorten_prompt').val(s.memoryShortenPrompt).on('input change', function () {
+        s.memoryShortenPrompt = this.value;
+        saveSettingsDebounced();
+    });
+    $('#sa_mem_shorten_prompt_reset').on('click', () => {
+        s.memoryShortenPrompt = DEFAULT_SETTINGS.memoryShortenPrompt;
+        $('#sa_mem_shorten_prompt').val(s.memoryShortenPrompt);
+        saveSettingsDebounced();
+        toastr.info('Shorten memories prompt reset to the default.');
+    });
     bindVal('#sa_archive_cond_prompt', 'archiveCondensePrompt');
     $('#sa_archive_cond_prompt_reset').on('click', () => {
         if (busy) return;

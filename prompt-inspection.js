@@ -3,6 +3,7 @@ import { sharedPrefix, soloMemoryScope } from './chat-workflows.js';
 import { escape as html } from './workflow-tools.js';
 import { addReviewHandle } from './review-window.js';
 import { MemoryIndex, toolEvidence } from './memory-retrieval.js';
+import { showForgotten } from './release-tools.js';
 
 const traceKey = 'sceneArchivistPrompt';
 const maxReplies = 24;
@@ -159,6 +160,15 @@ export class PromptInspection {
         if (!trace) {
             root.insertAdjacentHTML('beforeend', '<p class="sa-hint">No trace for this swipe. Generate a reply with an attached archive to start recording.</p>');
         } else {
+            const origin = w.identity(), actions = document.createElement('div');
+            actions.className = 'sa-row';
+            const diagnose = document.createElement('button');
+            diagnose.type = 'button'; diagnose.className = 'menu_button'; diagnose.textContent = '🔎 Find a missing detail';
+            diagnose.addEventListener('click', () => {
+                if (origin !== w.identity()) return;
+                void showForgotten(w, { index: replyIndex, trace }).catch(error => w.h.notify(error.message, 'error'));
+            });
+            actions.append(diagnose); root.append(actions);
             if (trace.scanObserved) {
                 const stats = document.createElement('ul');
                 stats.className = 'sa-trail-stats';

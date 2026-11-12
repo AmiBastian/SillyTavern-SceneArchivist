@@ -88,6 +88,7 @@ export function mountWorkbench(w, root) {
         <details class="sa-inline-tools"><summary>🧩 Recap suggestions</summary>
             <p class="sa-hint">The model reads the full text of eligible archive entries in your Library selection. Fill in both fields to use an inclusive unit range instead.</p>
             <div class="sa-grid">${field('recapFrom', 'First unit (optional)', '', 'number', 'min="0" step="1"')}${field('recapThrough', 'Last unit (optional)', '', 'number', 'min="0" step="1"')}</div>
+            ${field('recapFocus', 'Focus (optional)', '', 'text', 'maxlength="500" placeholder="Find the scenes that set up the station escape"')}
             <div class="sa-row">${button('suggestRecapGroups', '✨ Suggest recap groups')}</div>
             <p id="sa-recap-groups-status" class="sa-hint" role="status"></p>
             <div id="sa-recap-groups"></div>
@@ -103,8 +104,12 @@ export function mountWorkbench(w, root) {
         <details class="sa-inline-tools"><summary>🧠 Character memories</summary>
             <p class="sa-hint">Measure savings in tokens while keeping every distinct memory. Review and Undo remain available.</p>
             <div class="sa-row"><input id="sa_cond_run" class="menu_button sa-cond-run" type="button" value="✂️ Condense character memories"></div>
-            <label class="sa-field"><span>Condense prompt</span><textarea id="sa_cond_prompt" class="text_pole" rows="6"></textarea></label>
-            <div class="sa-row"><input id="sa_cond_prompt_reset" class="menu_button" type="button" value="Reset prompt"></div>
+            <label class="sa-field"><span>Shorten character memories prompt</span><textarea id="sa_mem_shorten_prompt" class="text_pole" rows="5"></textarea></label>
+            <div class="sa-row"><input id="sa_mem_shorten_prompt_reset" class="menu_button" type="button" value="Reset shorten prompt"></div>
+            <details class="sa-inline-tools"><summary>Organize existing memories prompt</summary>
+                <label class="sa-field"><span>Instructions used by Organize existing memories</span><textarea id="sa_cond_prompt" class="text_pole" rows="6"></textarea></label>
+                <div class="sa-row"><input id="sa_cond_prompt_reset" class="menu_button" type="button" value="Reset organize prompt"></div>
+            </details>
         </details>
         <details class="sa-inline-tools"><summary>⏰ Condense automatically</summary>
             <div class="sa-grid"><label class="sa-field"><span>Automation</span><select class="text_pole" data-sa-option="autoCondense"><option value="off">Manual only</option><option value="suggest">Suggest and review</option><option value="auto">Automatically create recaps</option></select></label><label class="sa-field"><span>Trigger</span><select class="text_pole" data-sa-option="trigger"><option value="units">After newer units</option><option value="time">After fictional calendar time</option><option value="pressure">Archive token pressure</option></select></label>${w.optionField('afterUnits', 'Newer units', 'number')}${w.optionField('afterDays', 'Fictional days passed', 'number')}${w.optionField('pressureTokens', 'Archive token threshold', 'number')}</div><p class="sa-hint">Time-based rules require a known full story date. Automatic mode is opt-in and still keeps original records and revisions. Locked, exact and keep-detailed records are excluded.</p>

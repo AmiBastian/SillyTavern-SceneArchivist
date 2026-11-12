@@ -1,5 +1,6 @@
 import * as M from './memory-engine.js';
 import * as Core from './core.js';
+import { DEFAULT_MEMORY_SHORTEN_PROMPT } from './defaults.js';
 import { BulkRun } from './bulk-jobs.js';
 import { newVectorRun, observeVectorRequests } from './vector-diagnostics.js';
 import * as Tools from './workflow-tools.js';
@@ -23,7 +24,8 @@ import { TokenCounter } from './token-cache.js';
 import { runtimeMemories } from './runtime-memory.js';
 import { recallQueries } from './memory-retrieval.js';
 import { fitReferences } from './reference-context.js';
-import { memoryEvidence, mergeMemoryEvidence } from './memory-provenance.js';
+import { memoryEvidence, mergeMemoryEvidence, memoryRewriteSources, memoryRewriteEvidence,
+    memoryLinkInstructions, memorySourcePositions, memoryEvidenceWarning, memoryEvidencePatch } from './memory-provenance.js';
 import { chooseWorkflow, showForgotten, showDiagnostics } from './release-tools.js';
 import { checkGrounding } from './quality-check.js';
 
@@ -357,7 +359,7 @@ export class Workbench {
         this.chatControls?.mount();
         const candidates = M.condensationCandidates(this.entries, this.options());
         this.root.querySelector('#sa-condense-suggestion').textContent = `${candidates.length} unprotected older entries meet the current trigger.`;
-        this.recapSuggestions.resetIfChanged();
+        this.recapSuggestions.render();
         this.fillDiarySelects();
         const meter = this.state().telemetry || {};
         this.root.querySelector('#sa-telemetry').textContent = `${meter.requests || 0} workbench requests in this chat; about ${meter.input || 0} input and ${meter.output || 0} output tokens. Token figures are estimates; the injection budget uses the host tokenizer.`;
@@ -965,13 +967,15 @@ export class Workbench {
         }
         flush(); return rest;
     }
-    organizedMemory(raw, bullets, name) {
+    organizedMemory(raw, bullets, name, sources) {
         const result = Core.parseCondenseResponse(raw);
         if (!result) throw new Error(`The organized memory list for ${name} was empty or invalid.`);
         const items = Core.parseMemoryDoc('## ► Memories — X\n' + result.bullets.map(x => '- ' + x).join('\n'));
         const dates = M.unique(Core.parseMemoryDoc('## ► Memories — X\n' + bullets.map(x => '- ' + x).join('\n')).map(x => x.date));
         for (const date of dates) if (!result.bullets.some(x => x.includes(date)) && !items.some(x => x.date.includes(date))) throw new Error(`The organized list dropped a source date: ${date}.`);
-        return { content: Core.memoryDocText(name, items, {}, this.h.settings().unit) };
+        const reply = sources?.size ? M.parseJSON(raw) : null;
+        if (reply?.memoryLinks != null && reply.memories.length !== items.length) throw new Error('Return one complete dated memory for each linked bullet position.');
+        return { content: Core.memoryDocText(name, items, {}, this.h.settings().unit), ...memoryRewriteEvidence(sources, items, reply?.memoryLinks) };
     }
     memoryAuditEntries(condense = false) {
         const above = Math.max(0, Number(this.value('condenseTarget')) || 0);
@@ -1349,7 +1353,7 @@ ${transcript}`;
         return this.withLock(() => this.queue.resume());
     }
 
-    async prepareCondensation(job, step, inputs, request, transport) {
+    async prepareCondensation(job, step, inputs, request, transport, rewrites) {
         const prepare = async () => {
             const feedback = step.condenseFeedback;
             const next = feedback ? {
@@ -1360,7 +1364,12 @@ ${transcript}`;
             // An audit draft already passed validation for these source hashes and job options.
             const raw = step.condenseDraft?.raw ?? await this.call(next, feedback ? 'condensation retry' : 'condensation', null, transport);
             try {
-                const proposed = M.condensationResult(raw, inputs, job.options.mode, job.options.label);
+                const reply = M.parseJSON(raw);
+                const proposed = M.condensationResult(reply, inputs, job.options.mode, job.options.label);
+                for (const item of proposed) if (rewrites.has(item.id)) {
+                    const links = reply.entries.find(entry => entry.id === item.id).memoryLinks;
+                    Object.assign(item, memoryRewriteEvidence(rewrites.get(item.id), Core.parseMemoryDoc(item.content), links));
+                }
                 delete step.condenseFeedback;
                 return { raw, proposed };
             } catch (error) {
@@ -1432,8 +1441,24 @@ ${transcript}`;
         if (kind === 'condense') {
             if (!M.condensationPrecheck(inputs, job.options.mode, job.options.label).possible) throw new Error('These records cannot become smaller after preserving their headings and required chronology. No model request was made.');
             // Resume can use an edited prompt while the original selection stays queued.
-            const writingPrompt = inputs.some(e => ['unit', 'recap'].includes(M.record(e).type)) ? this.baseHost.settings().archiveCondensePrompt : undefined;
-            const req = M.condensationRequest(inputs, job.options.mode, job.options.label, job.options.target, writingPrompt);
+            const settings = this.baseHost.settings();
+            const memories = job.options.mode === 'shorten' ? inputs.filter(e => M.record(e).type === 'memory') : [];
+            const memoryPrompt = settings.memoryShortenPrompt?.trim() || DEFAULT_MEMORY_SHORTEN_PROMPT;
+            const archivePrompt = inputs.some(e => ['unit', 'recap'].includes(M.record(e).type)) ? settings.archiveCondensePrompt : undefined;
+            const req = M.condensationRequest(inputs, job.options.mode, job.options.label, job.options.target,
+                memories.length === inputs.length ? memoryPrompt : archivePrompt);
+            if (memories.length && memories.length < inputs.length) {
+                req.system += `\nFor these character memory IDs, use the separate writing instructions below: ${memories.map(e => M.record(e).id).join(', ')}.\n${memoryPrompt}`;
+            }
+            const rewrites = new Map();
+            for (const e of memories) {
+                const sources = memoryRewriteSources(e);
+                if (sources.size) rewrites.set(M.record(e).id, sources);
+            }
+            if (rewrites.size) {
+                req.system += '\n' + memoryLinkInstructions + ' Put the array inside the corresponding entries item.';
+                req.prompt += '\n\nMEMORY SOURCE POSITIONS\n' + [...rewrites].map(([id, sources]) => `Source ${id}. ${memorySourcePositions(sources)}`).join('\n');
+            }
             const records = new Map(inputs.filter(e => {
                 const r = M.record(e);
                 return ['unit', 'memory'].includes(r.type) || r.type === 'recap' && r.covers?.length && r.covers.every(id => M.record(this.find(id))?.type === 'unit');
@@ -1444,7 +1469,7 @@ ${transcript}`;
             const maxTokens = this.helperCapacity(model?.output || 6000, model).output;
             const count = async value => Number(await this.h.tokenCount(value)) || M.tokens(value);
             const transport = this.h.sendFlowRequest ? { profile, send: (request, route) => this.h.sendFlowRequest(request, route) } : null;
-            const { raw, proposed } = await this.prepareCondensation(job, step, inputs, { ...req, maxTokens }, transport);
+            const { raw, proposed } = await this.prepareCondensation(job, step, inputs, { ...req, maxTokens }, transport, rewrites);
             const result = [];
             for (const item of proposed) {
                 const before = item.id ? inputs.find(e => M.record(e).id === item.id).content : inputs.map(e => e.content).join('\n\n');
@@ -1492,29 +1517,38 @@ ${transcript}`;
         }
         if (kind === 'memory-audit') {
             const e = inputs[0], r = M.record(e);
-            const fromParts = (step.payload.dependencies || []).flatMap(key => {
+            const parts = (step.payload.dependencies || []).map(key => {
                 const part = job.auditParts?.[key]; if (!part) throw new Error('An earlier audit chunk is missing. Restart this audit.');
-                return Core.memoryEntries({ entries: { 0: { uid: 0, content: part } } }, this.h.settings().unit)[0]?.bullets || [];
+                return typeof part === 'string' ? { content: part } : part;
             });
-            const bullets = step.payload.auditBullets || fromParts;
+            const bullets = step.payload.auditBullets || parts.flatMap(part =>
+                Core.memoryEntries({ entries: { 0: { uid: 0, content: part.content } } }, this.h.settings().unit)[0]?.bullets || []);
+            const basis = parts.length ? { ...e, content: Core.memoryDocText(r.subject || Core.classifyEntry(e).name, parts.flatMap(part => Core.parseMemoryDoc(part.content)), {}, this.h.settings().unit),
+                sceneArchivist: { ...r, memoryEvidence: [...new Map([...(r.memoryEvidence || []), ...parts.flatMap(part => part.memoryEvidence || [])].map(item => [M.hash(item), item])).values()] } } : e;
+            const sources = memoryRewriteSources(basis, bullets.map(b => '- ' + b).join('\n'));
             const req = { system: `${Core.unitize(this.h.settings().condensePrompt, this.h.settings().unit)}\nRead every supplied memory and organize it. Merge duplicate or repeated meaning. Keep natural, readable character memories with concrete experiences and how they learned things. Keep all consequential events, full dates including years, relevant locations, people, promises and asymmetric knowledge. No jargon, no redundant repeated date prefixes. Never invent knowledge or resolve contradictions without evidence. Do not drop memories because they are old. Return {"memories":["[unit N, full date] natural memory"]}. Ranges are allowed only if the exact first and last dates remain.`,
                 prompt: `CHARACTER ${r.subject || Core.classifyEntry(e).name}\n\n${step.payload.phase === 'map' ? 'COMPLETE AUDIT CHUNK, other chunks are retained separately' : 'COMPLETE MEMORY LIST OR MERGED AUDIT CHUNKS'}\n${bullets.join('\n')}` };
-            return this.json({ ...req, maxTokens: auditReplyTokens(M.tokens(bullets.join('\n'))) }, raw => {
-                return this.organizedMemory(raw, bullets, r.subject || Core.classifyEntry(e).name);
-            }, 'read and organize memories');
+            if (sources.size) {
+                req.system += '\n' + memoryLinkInstructions;
+                req.prompt += '\n\n' + memorySourcePositions(sources);
+            }
+            return this.json({ ...req, maxTokens: auditReplyTokens(M.tokens(bullets.join('\n'))) },
+                raw => this.organizedMemory(raw, bullets, r.subject || Core.classifyEntry(e).name, sources), 'read and organize memories');
         }
         if (kind === 'memory-audit-batch') {
             const audits = step.payload.audits;
             const names = new Map(inputs.map(e => [M.record(e).id, M.record(e).subject || Core.classifyEntry(e).name]));
+            const sources = new Map(audits.map(a => [a.id, memoryRewriteSources(inputs.find(e => M.record(e).id === a.id), a.bullets.map(b => '- ' + b).join('\n'))]));
             const req = {
                 system: `${Core.unitize(this.h.settings().condensePrompt, this.h.settings().unit)}\nOrganize each supplied character's complete memory list independently. Merge repeated meaning within that character only. Keep every consequential event, full date and year, place, person, promise, uncertainty and knowledge difference. Never move memories between characters, infer shared knowledge, invent a fact, or discard memories just because they are old. Keep natural sentences and dated unit tags. Return {"characters":[{"id":"exact supplied id","memories":["[unit N, full date] natural memory"]}]}. Include every supplied id exactly once, no additional ids.`,
-                prompt: audits.map(a => `CHARACTER ID ${a.id}\nNAME ${names.get(a.id)}\nCOMPLETE MEMORIES\n${a.bullets.join('\n')}`).join('\n\n'),
+                prompt: audits.map(a => `CHARACTER ID ${a.id}\nNAME ${names.get(a.id)}\nCOMPLETE MEMORIES\n${a.bullets.join('\n')}${sources.get(a.id).size ? '\n\n' + memorySourcePositions(sources.get(a.id)) : ''}`).join('\n\n'),
                 maxTokens: auditReplyTokens(audits.reduce((n, a) => n + M.tokens(a.bullets.join('\n')), 0), audits.length),
             };
+            if ([...sources.values()].some(s => s.size)) req.system += '\n' + memoryLinkInstructions + ' Put the array inside the corresponding characters item.';
             return this.json(req, raw => {
                 const chars = M.parseJSON(raw)?.characters;
                 if (!Array.isArray(chars) || chars.length !== audits.length || new Set(chars.map(c => c.id)).size !== audits.length || chars.some(c => !names.has(c.id))) throw new Error('The memory batch omitted, duplicated or invented a character id.');
-                return audits.map(a => ({ id: a.id, ...this.organizedMemory(JSON.stringify({ memories: chars.find(c => c.id === a.id).memories }), a.bullets, names.get(a.id)) }));
+                return audits.map(a => ({ id: a.id, ...this.organizedMemory(JSON.stringify(chars.find(c => c.id === a.id)), a.bullets, names.get(a.id), sources.get(a.id)) }));
             }, 'organize character memory batch');
         }
         if (kind === 'diary-chat') {
@@ -1611,7 +1645,9 @@ ${update.content}`;
             const notes = Array.isArray(step.output) ? [] : step.output.notes;
             if (!results.length && !notes.length) return true;
             const changes = results.map((o, i) => ({ ...o, title: job.options.mode === 'shorten' ? M.title(inputs.find(e => M.record(e).id === o.id) || inputs[i]) : job.options.label,
-                before: o.before ?? (job.options.mode === 'shorten' ? inputs[i].content : inputs.map(e => e.content).join('\n\n')) }));
+                before: o.before ?? (job.options.mode === 'shorten' ? inputs[i].content : inputs.map(e => e.content).join('\n\n')),
+                warning: memoryEvidenceWarning(o),
+                ...(job.options.mode === 'recap' ? { beforeLabel: 'Original source entries', afterLabel: 'Proposed recap' } : {}) }));
             const proposals = this.bulkRun ? [] : notes.map(note => Little.reviewLittleThing(note, archiveBook));
             const auditNote = step.output.audit ? 'Condensation audit, advice only: ' + (step.output.audit.issues.map(issue => issue.kind + ': ' + issue.explanation).join('\n') || 'No issues reported by the audit model.') : '';
             if (auditNote && this.bulkRun && !this.bulkRun.data.notices.includes(auditNote)) this.bulkRun.data.notices.push(auditNote);
@@ -1619,13 +1655,18 @@ ${update.content}`;
             Little.addLittleThings(books[archiveBook], this.bulkRun ? notes : proposals.filter(c => c.include).map(c => ({ ...c.note, text: c.content, quote: c.content === c.note.text ? c.note.quote : '' })), this.state().storyId);
             if (job.options.mode === 'shorten') for (const change of changes) {
                 const e = this.entryIn(books, change.id).entry;
-                M.revise(e, change.content, 'Shorten entry');
-                if (this.bulkRun) (this.bulkRun.data.metrics ??= {})[change.id] = { beforeTokens: change.beforeTokens, afterTokens: change.afterTokens };
+                M.revise(e, change.content, 'Shorten entry', memoryEvidencePatch(change));
+                if (this.bulkRun) (this.bulkRun.data.metrics ??= {})[change.id] = {
+                    beforeTokens: change.beforeTokens, afterTokens: change.afterTokens, memoryWarning: change.warning,
+                };
             } else if (changes.length) {
                 const levels = inputs.map(e => Number(M.record(e).level) || 0);
-                this.add(books, 'recap', changes[0].content, { covers: inputs.map(e => M.record(e).id), derivedFrom: inputs.map(e => M.record(e).id), level: Math.max(...levels) + 1,
+                const recap = this.add(books, 'recap', changes[0].content, { covers: inputs.map(e => M.record(e).id), derivedFrom: inputs.map(e => M.record(e).id), level: Math.max(...levels) + 1,
                     dates: M.unique(inputs.flatMap(e => M.record(e).dates || [])), people: M.unique(inputs.flatMap(e => M.record(e).people || [])), locations: M.unique(inputs.flatMap(e => M.record(e).locations || [])),
                     source: this.source([]) }, true);
+                if (this.bulkRun) (this.bulkRun.data.metrics ??= {})[M.record(recap).id] = {
+                    beforeTokens: changes[0].beforeTokens, afterTokens: changes[0].afterTokens, stepId: step.id,
+                };
             }
             await this.write(books, bases, 'Archive condensation', step.id); return true;
         }
@@ -1642,15 +1683,21 @@ ${update.content}`;
         }
         if (kind === 'memories') return this.commitMemories(job, step, inputs);
         if (kind === 'memory-audit') {
+            const warning = memoryEvidenceWarning(step.output);
             if (step.payload.phase === 'map') {
-                (job.auditParts ??= {})[step.payload.outputKey] = step.output.content;
+                (job.auditParts ??= {})[step.payload.outputKey] = step.output;
+                if (warning) {
+                    if (this.bulkRun && !this.bulkRun.data.notices.includes(warning)) this.bulkRun.data.notices.push(warning);
+                    else if (!this.bulkRun) this.h.notify(warning, 'warning');
+                }
                 this.state().applied = M.unique([...(this.state().applied || []), step.id]); await this.persist(); return true;
             }
             const e = this.entryIn(books, M.record(inputs[0]).id).entry;
             if (M.record(e).protection?.locked || M.record(e).protection?.exact) throw new Error('This memory entry is now protected. Cancel the audit or unlock it first.');
-            const changes = [{ title: M.title(e), before: e.content, content: step.output.content }];
+            const changes = [{ title: M.title(e), before: e.content, content: step.output.content, warning }];
             if (!(await this.review(changes, 'Read and organize character memories'))) return false;
-            M.revise(e, changes[0].content, 'Organize whole character memory list');
+            M.revise(e, changes[0].content, 'Organize whole character memory list', memoryEvidencePatch(step.output));
+            if (warning && this.bulkRun) (this.bulkRun.data.metrics ??= {})[M.record(e).id] = { memoryWarning: warning };
 
             await this.write(books, bases, 'Memory audit', step.id); return true;
         }
@@ -1658,10 +1705,13 @@ ${update.content}`;
             const changes = step.output.map(o => {
                 const e = this.entryIn(books, o.id).entry, r = M.record(e);
                 if (r.protection?.locked || r.protection?.exact || r.protection?.detailed || !M.active(e)) throw new Error('A character memory list became protected or in History. Cancel this run and choose current records.');
-                return { id: o.id, title: M.title(e), before: e.content, content: o.content };
+                return { ...o, title: M.title(e), before: e.content, warning: memoryEvidenceWarning(o) };
             });
             if (!(await this.review(changes, 'Read and organize character memories'))) return false;
-            for (const c of changes) M.revise(this.entryIn(books, c.id).entry, c.content, 'Organize whole character memory list');
+            for (const c of changes) {
+                M.revise(this.entryIn(books, c.id).entry, c.content, 'Organize whole character memory list', memoryEvidencePatch(c));
+                if (c.warning && this.bulkRun) (this.bulkRun.data.metrics ??= {})[c.id] = { memoryWarning: c.warning };
+            }
 
             await this.write(books, bases, 'Memory audit batch', step.id); return true;
         }
@@ -2111,7 +2161,7 @@ ${update.content}`;
         }
     }
     async onChatOpened() {
-        for (const field of ['rangeFrom', 'rangeTo', 'recapFrom', 'recapThrough']) {
+        for (const field of ['rangeFrom', 'rangeTo', 'recapFrom', 'recapThrough', 'recapFocus']) {
             const input = this.root?.querySelector(`[data-sa-field="${field}"]`);
             if (input) input.value = '';
         }

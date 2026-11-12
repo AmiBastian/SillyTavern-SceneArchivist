@@ -470,13 +470,13 @@ export function tidyMemory(items, { removeExact = false } = {}) {
 }
 
 // Portable workflow settings deliberately exclude connection profiles, credentials and destination names.
-export const PRESET_KEYS = ['delivery', 'outlet', 'depth', 'role', 'unit', 'keepDays', 'archiveMode', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'condenseAbove', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'archiveCondensePrompt', 'askPrompt', 'recapPrompt', 'workbench'];
+export const PRESET_KEYS = ['delivery', 'outlet', 'depth', 'role', 'unit', 'keepDays', 'archiveMode', 'keepVisible', 'hideArchived', 'review', 'recall', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'memoryAuto', 'condenseAbove', 'trackerAuto', 'trackerDays', 'trackers', 'promptLibrary', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'archiveCondensePrompt', 'memoryShortenPrompt', 'askPrompt', 'recapPrompt', 'workbench'];
 export const workflow = settings => Object.fromEntries(PRESET_KEYS.filter(k => k in settings).map(k => [k, copy(settings[k])]));
 export function validateWorkflow(input) {
     const w = workflow(input || {});
     const numbers = ['depth', 'role', 'keepDays', 'keepVisible', 'recallMessages', 'recallMax', 'memoryDays', 'memoryCap', 'condenseAbove', 'trackerDays'];
     const booleans = ['hideArchived', 'review', 'recall', 'memoryAuto', 'trackerAuto'];
-    const strings = ['delivery', 'outlet', 'unit', 'archiveMode', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'archiveCondensePrompt', 'askPrompt', 'recapPrompt'];
+    const strings = ['delivery', 'outlet', 'unit', 'archiveMode', 'promptId', 'prompt', 'legend', 'opening', 'memoryPrompt', 'condensePrompt', 'archiveCondensePrompt', 'memoryShortenPrompt', 'askPrompt', 'recapPrompt'];
     for (const key of numbers) if (key in w && (!Number.isFinite(w[key]) || w[key] < 0 || w[key] > 1000000)) throw new Error(`Invalid workflow number: ${key}.`);
     for (const key of booleans) if (key in w && typeof w[key] !== 'boolean') throw new Error(`Invalid workflow toggle: ${key}.`);
     for (const key of strings) if (key in w && typeof w[key] !== 'string') throw new Error(`Invalid workflow text: ${key}.`);

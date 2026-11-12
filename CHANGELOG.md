@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.3 · November 12, 2026
+
+- Recap suggestions accept an optional focus, show existing recap coverage, and stay available after reload. Changed or protected sources are flagged before creating a recap.
+- Combined recap review shows the actual source entries and before and after token estimates. The recap stays separate from its originals.
+- Added a **Shorten character memories prompt** and clarified which prompt is used for **Organize existing memories**. AI memory rewrites can carry the original bullet links into reviewed replacements.
+- Combined review holds proposals affected by a World Info edit, shows the original, saved and proposed text, and lets unaffected results save separately.
+- Reduced duplicate lorebook data in unfinished drafts and kept support for resuming existing jobs.
+- Added **Find a missing detail** to each reply’s Memory Trail, with shortcuts to sources, Inspect, and loading the full source next reply.
+
 ## 2.1.2 · November 12, 2026
 
 - Added **Suggest recap groups** under **Maintain → Condense story records**. The model reads complete archive entries from your Library selection or an inclusive unit range and suggests groups with a title and reason.

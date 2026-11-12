@@ -1,6 +1,6 @@
-# Scene Archivist 2.1.2
+# Scene Archivist 2.1.3
 
-2.1.2 adds **Suggest recap groups**. Let Scene Archivist read your saved archive entries and propose which ones tell the same story thread. Review and edit the group before creating a linked recap. See the [release notes](https://github.com/AmiBastian/SillyTavern-SceneArchivist/releases/tag/v2.1.2).
+2.1.3 adds focus and saved recap coverage to **Suggest recap groups**, gives character memory shortening its own prompt, and keeps independent results available to save after a World Info edit. See the [release notes](https://github.com/AmiBastian/SillyTavern-SceneArchivist/releases/tag/v2.1.3).
 
 <details>
 <summary>New controls in 2.1.0</summary>
@@ -204,13 +204,18 @@ Set a flexible **Token target**, or use **0** for the shortest faithful version.
 
 Open **Maintain → Condense story records → Archive condense prompt** to edit the writing instructions for **Shorten individual entries** and **Create recap**. **Reset archive prompt** restores the default. If a proposal drops a required detail, Scene Archivist retries with that detail. If the retry fails, the job shows what was missing and keeps the source entries. You can edit the prompt and choose **Resume**.
 
+Under **Maintain → Character memories**, **Shorten character memories prompt** is used by **Condense character memories**. **Organize existing memories prompt** controls the separate organization pass and keeps any custom instructions from the old character memory condense prompt. Each has its own reset button.
+
 ### Suggest recap groups
 
 1. Select archive entries in **Library**, or enter the first and last unit under **Maintain → Condense story records → Recap suggestions**. The range includes both endpoints.
-2. Choose **Suggest recap groups**. The model reads each eligible entry in full and proposes related scenes, including a setup and its payoff several units apart. If the selection exceeds the connection’s context, narrow the range.
-3. Open **Review group** to read the source text, rename the recap, or add and remove entries from the selection the model read. Choose **Create recap**, then review and save the new recap. The original entries stay in Library at full length.
+2. Optionally enter a **Focus**, such as “Find the scenes that set up the station escape.” Choose **Suggest recap groups**. The model reads every eligible entry in full. If the selection exceeds the connection’s context, narrow the range.
+3. Open **Review group** to read the source text, rename the recap, or adjust which entries to include. Existing recaps with matching or overlapping sources are shown as you change the selection. You can read them before choosing **Create recap**.
+4. The save review shows the original source text and the proposed recap with before and after token estimates. The originals stay in Library at full length.
 
-![Suggested recap linking the key on Day 4 with the gate opening on Day 8](docs/media/51-recap-suggestions.png?v=2.1.2)
+The latest suggestions stay with the chat after a reload. If an entry changes, is deleted, or becomes protected, the group flags it. Run suggestions again to use updated eligible entries.
+
+![Focused recap suggestion with matching saved coverage](docs/media/51-recap-suggestions.png?v=2.1.3)
 
 Optional recap automation can suggest or create a recap after newer units, fictional time, or archive token pressure. Choose the automation setting before relying on it. Protected records keep their detailed text.
 
@@ -250,11 +255,13 @@ In Story, **Choose a workflow** offers Simple, Detailed and Mostly Automatic pre
 
 Context settings show approximate reference sizes and offer a separate reference allowance. The default reads the entire selected set; a positive allowance reports overflow. **Relevant complete entries** explicitly permits fitting whole entries and reports omissions. No external lore is rewritten. **Estimate this run** includes reference sizes and enabled memory audits.
 
-Structured memory responses can cite selected message indices or archive source ids for each memory. Inspect → Sources and dependencies and the Sources view retain these links and learning notes. Citations are model supplied and checked against the actual selection; they do not prove every claim is supported. Legacy strings remain supported. Exact current text can reuse its binding; changed or ambiguous text does not inherit an old citation.
+Structured memory responses can cite selected message indices or archive source IDs for each memory. **Inspect → Sources and dependencies** and the Sources view retain these links and learning notes. When shortening, organizing, or updating a list with AI, the model can carry the links from several original bullets into one rewritten bullet. Scene Archivist checks the links against the supplied bullets and flags missing links in review. The original links remain in revisions.
 
 Evidence audits report unsupported details, omissions, dates and knowledge boundaries as review advice. If an audit fails, retry just the audit or use **Skip audit and review** to inspect the retained proposal. Source changes invalidate the retained request. The existing Undo journal, revisions and verified writes protect consequential edits.
 
-**Why was this forgotten?** compares saved text with the last retained delivery trace. **Export reviewed diagnostics** previews a report that excludes story text, names, credentials, URLs and raw errors. **Test helper grounding** is an explicit connection check with invented evidence and at most five real requests; passing it is not a general memory-quality score. Its preview explains possible provider charges.
+Open the Memory Trail on a reply and choose **Find a missing detail** to compare saved text with that reply’s retained delivery trace. Results show whether the record or matching lines were recorded as delivered. From there you can view sources, inspect or edit a record, or queue its full text for the next eligible reply. **Why was this forgotten?** in Tools starts with the latest trace.
+
+**Export reviewed diagnostics** previews a report that excludes story text, names, credentials, URLs and raw errors. **Test helper grounding** is an explicit connection check with invented evidence and at most five real requests; passing it is not a general memory-quality score. Its preview explains possible provider charges.
 
 Library results use pages of 100 so older results remain reachable. Search data and token counts are cached with content and metadata checks; tokenizer work is coalesced and limited to six concurrent calls.
 
@@ -327,6 +334,8 @@ Renaming a chat in SillyTavern keeps its archive and progress. A native branch o
 **Back up this story** includes books, original source links, revisions, settings, and the unfinished job. **Restore a story backup** previews the import and creates separate books. The historical draft remains available in the backup. Start a fresh run in the restored destination. Workflow presets transfer settings separately from story content. **Copy from another lorebook** lets you review and copy one entry as a clip. Check setup flags possible overlapping memory extensions or books.
 
 If a later stage fails, choose **Review ready results** to save completed work, then **Retry failed stage**. A canceled review can be reopened through the saved job. **Discard unfinished job** clears its pending proposals. **Undo** checks what was written and preserves newer edits it cannot safely reverse.
+
+If a World Info edit conflicts with a prepared result in combined review, you can compare the original entry, the version saved in World Info, and the proposal. Save unaffected results and come back to the held proposals through **Resume or review**. You can discard an individual held proposal and prepare a new one from the corrected source. Unfinished jobs store unchanged draft entries once, and existing paused jobs can still resume.
 
 ![Job recovery controls after a failed tracker stage](docs/media/29-job-recovery.png?v=2.1.0-clean)
 

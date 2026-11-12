@@ -44,24 +44,39 @@ export async function chooseWorkflow(w) {
     w.h.saveSettings(); await w.persist(); w.syncOptions(); w.renderFlow();
 }
 
-export async function showForgotten(w) {
+export async function showForgotten(w, selectedReply = null) {
+    const identity = w.identity();
     await w.loadBooks();
+    if (identity !== w.identity()) return;
     const root = document.createElement('div'); root.className = 'sa-review';
-    root.innerHTML = '<h3>Why was this forgotten?</h3><p>Check saved evidence and the latest recorded delivery. A loaded memory is not proof that the model used it.</p><input class="text_pole" type="search" placeholder="The fact or detail you expected" aria-label="Forgotten detail"><div class="sa-prose" aria-live="polite"></div>';
+    const reply = selectedReply?.index;
+    root.innerHTML = `<h3>Why was this forgotten?${Number.isInteger(reply) && reply >= 0 ? ` · Reply #${reply}` : ''}</h3><p>Compare your saved evidence with what ${selectedReply ? 'this reply’s' : 'the latest'} Memory Trail recorded.</p><input class="text_pole" type="search" placeholder="The fact or detail you expected" aria-label="Forgotten detail"><div class="sa-prose" aria-live="polite"></div>`;
     const query = root.querySelector('input'), result = root.querySelector('.sa-prose');
-    const trace = w.extras?.prompt.lastTrace || w.h.context().chat?.findLast(message => message.extra?.sceneArchivistPrompt)?.extra.sceneArchivistPrompt;
+    const trace = selectedReply ? selectedReply.trace
+        : w.extras?.prompt.lastTrace || w.h.context().chat?.findLast(message => message.extra?.sceneArchivistPrompt)?.extra.sceneArchivistPrompt;
     let timer;
     const check = () => {
         const rows = query.value.trim() ? w.memoryIndex.search(w.entries, query.value).slice(0, 8) : [];
         result.innerHTML = query.value.trim() ? (rows.length ? rows.map(row => {
             const id = M.record(row.parent).id, loaded = trace?.active?.find(item => item.id === id), skipped = trace?.omitted?.find(item => item.id === id);
-            const reason = loaded ? 'The latest trail records delivery. Check its selected lines and actual prompt; the model may have overlooked or misunderstood the detail.'
-                : skipped ? 'The latest trail records: ' + skipped.reason : trace ? 'No delivery is recorded among this trail’s retained items. Check activation, character scope and the prompt.'
+            const excerpt = row.excerpt;
+            const differentLines = excerpt && loaded?.excerpts?.length && !loaded.excerpts.some(part =>
+                part.fromLine <= excerpt.fromLine && part.toLine >= excerpt.toLine);
+            const reason = differentLines ? 'This reply received other lines from this record.'
+                : loaded ? 'The trail records delivery. Check the source if the model overlooked or misunderstood the detail.'
+                : skipped ? 'Skipped · ' + skipped.reason : trace ? 'No delivery is recorded among this trail’s retained items. Check activation, character scope and the prompt.'
                     : 'No reply trail is available. Generate a reply, then inspect its Memory Trail.';
-            return `<p><b>${html(M.title(row.parent))}</b><br>${html(reason)}</p>`;
+            const control = (action, label) => `<button type="button" class="menu_button" data-fix-action="${action}" data-id="${html(id)}">${label}</button>`;
+            return `<article class="sa-result"><b>${html(M.title(row.parent))}</b><p>${html(reason)}</p>
+                <div class="sa-row">${control('sources', 'View sources')}${control('inspect', 'Inspect / edit')}${control('loadDetail', 'Load full source next reply')}</div></article>`;
         }).join('') : '<p>No saved text matches those words. Try a synonym, Ask the archive, or inspect original sources to distinguish a missing extraction from different wording.</p>') : '';
     };
     query.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(check, 120); });
+    result.addEventListener('click', event => {
+        const control = event.target.closest('[data-fix-action]');
+        if (!control || w.identity() !== identity) return;
+        void w.dispatch(control.dataset.fixAction, control).catch(error => w.h.notify(error.message, 'error'));
+    });
     try { await w.h.show(root); } finally { clearTimeout(timer); }
 }
 
