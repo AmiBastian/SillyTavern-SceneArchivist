@@ -1,6 +1,6 @@
-# Scene Archivist 2.1.0
+# Scene Archivist 2.1.1
 
-The cleaned 2.1.0 build updates the guide media and keeps developer tools out of the public installation. It includes 2.1.0's precise delivery from long memory lists, verified original-message lookup, optional evidence audits, reference allowances, workflow presets and troubleshooting tools. See the [release notes](https://github.com/AmiBastian/SillyTavern-SceneArchivist/releases/tag/v2.1.0).
+2.1.1 fixes archive condensing when a model reformats a time like `5:43pm` as `5:43 PM`. You can also edit the writing prompt for shorter entries and linked recaps. See the [release notes](https://github.com/AmiBastian/SillyTavern-SceneArchivist/releases/tag/v2.1.1).
 
 <details>
 <summary>New controls in 2.1.0</summary>
@@ -33,7 +33,7 @@ If your characters can hide a body but cannot remember where they had dinner, we
 
 [Install](#install-and-make-your-first-archive) · [Archive thoroughly](#archive-thoroughly) · [Characters](#characters) · [Diaries](#character-diaries) · [Library](#library-and-history) · [Condense](#condense-by-tokens) · [Prompt and recall](#prompt-and-recall) · [Settings](#settings-and-connections) · [Sharing and branches](#sharing-and-branches) · [Recovery](#backups-and-job-recovery) · [Commands](#slash-commands)
 
-The guide media has been updated for this cleaned 2.1.0 build, including desktop and mobile Memory Trail. The examples use an invented story about a flooded railway station. Screenshots and walkthroughs were captured in **SillyTavern 1.19.0** with scripted model replies and sample lorebooks. Your theme and model output will look different. See the [changelog](CHANGELOG.md) for version history.
+The guide uses an invented story about a flooded railway station. Screenshots and walkthroughs were captured in **SillyTavern 1.19.0** with scripted model replies and sample lorebooks. Your theme and model output will look different. See the [changelog](CHANGELOG.md) for version history.
 
 <details>
 <summary>Workspace walkthrough</summary>
@@ -202,9 +202,11 @@ A normal reply can load up to four matching details inside the existing memory b
 
 Set a flexible **Token target**, or use **0** for the shortest faithful version. You can keep the same number of entries or memory bullets and still save tokens by tightening their wording. The result checks preserve required headings, dates, times, and exact quotations. Review the diff for decisions, relationship shifts, promises, clues, and other details that matter to your story.
 
+Open **Maintain → Condense story records → Archive condense prompt** to edit the writing instructions for **Shorten individual entries** and **Create recap**. **Reset archive prompt** restores the default. If a proposal drops a required detail, Scene Archivist retries with that detail. If the retry fails, the job shows what was missing and keeps the source entries. You can edit the prompt and choose **Resume**.
+
 Optional recap automation can suggest or create a recap after newer units, fictional time, or archive token pressure. Choose the automation setting before relying on it. Protected records keep their detailed text.
 
-![Token target and archive condensation modes](docs/media/14-condense-controls.png?v=2.1.0-clean)
+![Archive condense prompt and controls for shorter entries and recaps](docs/media/14-condense-controls.png?v=2.1.1)
 
 ![Diary condensation review showing estimated tokens before and after](docs/media/28-diary-condense.png?v=2.1.0-clean)
 
@@ -346,6 +348,7 @@ If a later stage fails, choose **Review ready results** to save completed work, 
 | Memories skip part of the story | Set **Read from** to **Chat** or **Both** and select the exact missing messages. For archive-only work, use a unit range or **Last X units**. |
 | A request exceeds the context | Choose a larger context on the selected connection, shorten the selection, or explicitly split the failed stage. |
 | A generated entry will not condense | Check its protection flags and the review’s token estimate. A shorter version must preserve the required chronology and quotations. |
+| Condensing reports a missing date, time, or quotation | Read the detail named in the job panel. Adjust the archive condense prompt if needed, then choose **Resume**. The source entries are kept. |
 | A diary does not update | Check that the character has a saved diary and that later messages exist. An exact range can cover an earlier scene. |
 | You need to report a problem | Include the Scene Archivist and SillyTavern versions, steps to reproduce, and the exact error. Keep private story text and credentials out of the report. |
 

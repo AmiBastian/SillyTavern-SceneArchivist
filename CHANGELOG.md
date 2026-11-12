@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1 · November 12, 2026
+
+- Fixed archive condensation rejecting equivalent clock times such as `5:43pm` and `5:43 PM`. Changed or missing times, required dates, and exact quotations still stop a proposal.
+- Added an editable **Archive condense prompt** for shortening entries and creating recaps, with a reset control.
+- List required details for each source and retry an invalid proposal once with specific feedback. Resume can continue a paused retry, and a saved proposal can still be reviewed after an audit failure.
+
 ## 2.1.0 · November 9, 2026
 
 - Prepare solo recall's character-card list once per lookup instead of once per personal record. Each new lookup reads fresh card metadata; identity, ambiguity and renamed-card checks remain in place.

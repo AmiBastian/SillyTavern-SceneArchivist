@@ -88,6 +88,11 @@ export function mountWorkbench(w, root) {
         <details class="sa-inline-tools"><summary>🎯 Token target</summary>
             ${field('condenseTarget', 'Target tokens (0 = shortest faithful version)', 0, 'number', 'min="0"')}
         </details>
+        <details class="sa-inline-tools"><summary>✍️ Archive condense prompt</summary>
+            <label class="sa-field"><span>Writing instructions for shorter entries and recaps</span><textarea id="sa_archive_cond_prompt" class="text_pole" rows="5"></textarea></label>
+            <p class="sa-hint">Use this to guide wording and emphasis. Scene Archivist still checks required headings, dates, times, and quotations.</p>
+            <div class="sa-row"><input id="sa_archive_cond_prompt_reset" class="menu_button" type="button" value="Reset archive prompt"></div>
+        </details>
         <details class="sa-inline-tools"><summary>🧠 Character memories</summary>
             <p class="sa-hint">Measure savings in tokens while keeping every distinct memory. Review and Undo remain available.</p>
             <div class="sa-row"><input id="sa_cond_run" class="menu_button sa-cond-run" type="button" value="✂️ Condense character memories"></div>

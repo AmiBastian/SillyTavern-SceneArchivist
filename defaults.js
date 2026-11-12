@@ -182,6 +182,8 @@ Return only JSON in this shape. The names and text below are placeholders that o
 
 If nobody has a meaningful memory in the excerpt, return {"characters":[],"reason":"brief explanation"}.`;
 
+export const DEFAULT_ARCHIVE_CONDENSE_PROMPT = `Tighten the wording and combine repeated facts. Keep the order of events, who did what, and every distinct story detail. Use as many bullets as you need to keep the result readable.`;
+
 export const DEFAULT_CONDENSE_PROMPT = `You tidy one character's memory list from a roleplay. Merge duplicates and near-duplicates, and fold a sequence of small related memories into one clear memory, so the list is shorter without losing anything that affects how the character behaves later.
 
 Rules:
@@ -280,6 +282,7 @@ export const DEFAULT_SETTINGS = {
     archiveProfile: '',
     condenseAbove: 12,
     condensePrompt: DEFAULT_CONDENSE_PROMPT,
+    archiveCondensePrompt: DEFAULT_ARCHIVE_CONDENSE_PROMPT,
     remindEvery: 0,
     memoryPrompt: DEFAULT_MEMORY_PROMPT,
     memoryTarget: 'separate',
