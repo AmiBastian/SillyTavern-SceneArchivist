@@ -85,6 +85,13 @@ export function mountWorkbench(w, root) {
     w.panes.maintain.insertAdjacentHTML('afterbegin', card('✂️ Condense story records', `
         <label class="checkbox_label"><input type="checkbox" data-sa-option="auditCondense"><span>Audit shorter proposals for missing facts, one extra request</span></label>
         <p class="sa-hint">For the archive entries (Day, Episode or Chapter units), not for character memories. Select entries in Library. Shorten preserves each heading; Create recap links a smaller record to all its originals. Protected sources stay detailed.</p><div class="sa-grid"><label class="sa-field"><span>Mode</span><select class="text_pole" data-sa-option="recapMode"><option value="recap">Create recap</option><option value="shorten">Shorten individual entries</option></select></label>${field('recapLabel', 'Name or level, for example Arc or Volume', w.options().recapLabel)}</div><div class="sa-row">${button('condenseSelected', 'Condense selected, gently')}${button('condenseSuggested', 'Review suggested sources')}</div><div id="sa-condense-suggestion" class="sa-hint"></div>
+        <details class="sa-inline-tools"><summary>🧩 Recap suggestions</summary>
+            <p class="sa-hint">The model reads the full text of eligible archive entries in your Library selection. Fill in both fields to use an inclusive unit range instead.</p>
+            <div class="sa-grid">${field('recapFrom', 'First unit (optional)', '', 'number', 'min="0" step="1"')}${field('recapThrough', 'Last unit (optional)', '', 'number', 'min="0" step="1"')}</div>
+            <div class="sa-row">${button('suggestRecapGroups', '✨ Suggest recap groups')}</div>
+            <p id="sa-recap-groups-status" class="sa-hint" role="status"></p>
+            <div id="sa-recap-groups"></div>
+        </details>
         <details class="sa-inline-tools"><summary>🎯 Token target</summary>
             ${field('condenseTarget', 'Target tokens (0 = shortest faithful version)', 0, 'number', 'min="0"')}
         </details>

@@ -1,6 +1,6 @@
-# Scene Archivist 2.1.1
+# Scene Archivist 2.1.2
 
-2.1.1 fixes archive condensing when a model reformats a time like `5:43pm` as `5:43 PM`. You can also edit the writing prompt for shorter entries and linked recaps. See the [release notes](https://github.com/AmiBastian/SillyTavern-SceneArchivist/releases/tag/v2.1.1).
+2.1.2 adds **Suggest recap groups**. Let Scene Archivist read your saved archive entries and propose which ones tell the same story thread. Review and edit the group before creating a linked recap. See the [release notes](https://github.com/AmiBastian/SillyTavern-SceneArchivist/releases/tag/v2.1.2).
 
 <details>
 <summary>New controls in 2.1.0</summary>
@@ -203,6 +203,14 @@ A normal reply can load up to four matching details inside the existing memory b
 Set a flexible **Token target**, or use **0** for the shortest faithful version. You can keep the same number of entries or memory bullets and still save tokens by tightening their wording. The result checks preserve required headings, dates, times, and exact quotations. Review the diff for decisions, relationship shifts, promises, clues, and other details that matter to your story.
 
 Open **Maintain → Condense story records → Archive condense prompt** to edit the writing instructions for **Shorten individual entries** and **Create recap**. **Reset archive prompt** restores the default. If a proposal drops a required detail, Scene Archivist retries with that detail. If the retry fails, the job shows what was missing and keeps the source entries. You can edit the prompt and choose **Resume**.
+
+### Suggest recap groups
+
+1. Select archive entries in **Library**, or enter the first and last unit under **Maintain → Condense story records → Recap suggestions**. The range includes both endpoints.
+2. Choose **Suggest recap groups**. The model reads each eligible entry in full and proposes related scenes, including a setup and its payoff several units apart. If the selection exceeds the connection’s context, narrow the range.
+3. Open **Review group** to read the source text, rename the recap, or add and remove entries from the selection the model read. Choose **Create recap**, then review and save the new recap. The original entries stay in Library at full length.
+
+![Suggested recap linking the key on Day 4 with the gate opening on Day 8](docs/media/51-recap-suggestions.png?v=2.1.2)
 
 Optional recap automation can suggest or create a recap after newer units, fictional time, or archive token pressure. Choose the automation setting before relying on it. Protected records keep their detailed text.
 

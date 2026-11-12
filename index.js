@@ -1566,7 +1566,9 @@ jQuery(async () => {
             trackers: () => runTrackers(null, true),
             confirm: async (root, opts = {}) => {
                 workbench?.layout?.help.observe(root);
-                const popup = new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: '💾 Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true, ...opts });
+                const { canConfirm, ...options } = opts;
+                const popup = new Popup(root, POPUP_TYPE.CONFIRM, '', { okButton: '💾 Apply', cancelButton: 'Cancel', wide: true, large: true, allowVerticalScrolling: true, ...options });
+                if (canConfirm) popup.onClosing = current => current.result !== POPUP_RESULT.AFFIRMATIVE || canConfirm();
                 addReviewHandle(root, popup.dlg);
                 return (await popup.show()) === POPUP_RESULT.AFFIRMATIVE;
             },

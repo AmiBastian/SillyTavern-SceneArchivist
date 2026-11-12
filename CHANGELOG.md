@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.2 · November 12, 2026
+
+- Added **Suggest recap groups** under **Maintain → Condense story records**. The model reads complete archive entries from your Library selection or an inclusive unit range and suggests groups with a title and reason.
+- Review the original text, edit the title and adjust the sources before creating a recap. Each approved recap is a separate entry with links to its full originals.
+
 ## 2.1.1 · November 12, 2026
 
 - Fixed archive condensation rejecting equivalent clock times such as `5:43pm` and `5:43 PM`. Changed or missing times, required dates, and exact quotations still stop a proposal.

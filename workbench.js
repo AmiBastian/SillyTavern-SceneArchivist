@@ -18,6 +18,7 @@ import { SceneRecall } from './scene-recall.js';
 import { reviewChanges } from './workbench-review.js';
 import { MemoryIndex } from './memory-retrieval.js';
 import { ArchiveQuestions } from './archive-questions.js';
+import { RecapSuggestions } from './recap-suggestions.js';
 import { TokenCounter } from './token-cache.js';
 import { runtimeMemories } from './runtime-memory.js';
 import { recallQueries } from './memory-retrieval.js';
@@ -47,6 +48,7 @@ export class Workbench {
         this.sceneRecall = new SceneRecall(this);
         this.memoryIndex = new MemoryIndex();
         this.questions = new ArchiveQuestions(this);
+        this.recapSuggestions = new RecapSuggestions(this);
         this.tokenCounts = new TokenCounter(text => this.h.tokenCount?.(text));
         this.recallDetails = new Map();
         this.queue = new M.JobQueue({ state: () => this.liveState(), persist: () => this.persist(),
@@ -355,6 +357,7 @@ export class Workbench {
         this.chatControls?.mount();
         const candidates = M.condensationCandidates(this.entries, this.options());
         this.root.querySelector('#sa-condense-suggestion').textContent = `${candidates.length} unprotected older entries meet the current trigger.`;
+        this.recapSuggestions.resetIfChanged();
         this.fillDiarySelects();
         const meter = this.state().telemetry || {};
         this.root.querySelector('#sa-telemetry').textContent = `${meter.requests || 0} workbench requests in this chat; about ${meter.input || 0} input and ${meter.output || 0} output tokens. Token figures are estimates; the injection budget uses the host tokenizer.`;
@@ -873,11 +876,11 @@ export class Workbench {
         }
         await this.refresh();
     }
-    async startCondense(entries, automatic = false, individual = false) {
+    async startCondense(entries, automatic = false, individual = false, recapLabel = '') {
         let eligible = entries.filter(M.eligible);
         if (!eligible.length) throw new Error('Select unprotected, current units or recaps in Library first.');
-        const mode = individual ? 'shorten' : automatic ? 'recap' : this.options().recapMode;
-        const label = this.value('recapLabel') || this.options().recapLabel || 'Arc';
+        const mode = recapLabel ? 'recap' : individual ? 'shorten' : automatic ? 'recap' : this.options().recapMode;
+        const label = recapLabel || this.value('recapLabel') || this.options().recapLabel || 'Arc';
         let skipped = 0;
         if (mode === 'shorten') eligible = eligible.filter(e => {
             const possible = M.condensationPrecheck([e], mode, label).possible;
@@ -2108,7 +2111,7 @@ ${update.content}`;
         }
     }
     async onChatOpened() {
-        for (const field of ['rangeFrom', 'rangeTo']) {
+        for (const field of ['rangeFrom', 'rangeTo', 'recapFrom', 'recapThrough']) {
             const input = this.root?.querySelector(`[data-sa-field="${field}"]`);
             if (input) input.value = '';
         }
@@ -2122,6 +2125,7 @@ ${update.content}`;
         M.clearSearchCache();
         this.recallDetails.clear();
         this.questions.reset();
+        this.recapSuggestions.reset();
         this.extras?.prompt.clear();
         this.semanticHits.clear(); this.vectorRun = null; this.activatedIds.clear(); this.activationKnown = false;
         this.scanSuppressed = true; this.generationEpoch++; this.scanEntries = []; this.scanReasons.clear();
@@ -2167,6 +2171,8 @@ ${update.content}`;
         if (action === 'tidy') return this.withLock(() => this.tidy());
         if (action === 'condenseSelected') return this.startCondense(this.selectedEntries());
         if (action === 'condenseSuggested') { this.selected = new Set(M.condensationCandidates(this.entries, this.options()).map(e => M.record(e).id)); this.showTab('library'); this.library?.show('all'); return this.renderDashboard(); }
+        if (action === 'suggestRecapGroups') return this.recapSuggestions.suggest();
+        if (action === 'reviewRecapGroup') return this.recapSuggestions.review(Number(el?.dataset?.index));
         if (action === 'extract') return this.startExtract();
         if (action === 'clip') return this.capture('clip');
         if (action === 'newKnowledge') return this.capture('knowledge');
