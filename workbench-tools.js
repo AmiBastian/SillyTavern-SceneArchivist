@@ -18,6 +18,8 @@ export function mountTools(w) {
         <label class="sa-field"><span>Event date through</span><input class="text_pole sa-library-filter" type="date" id="sa-library-dateTo"></label>
         <label class="sa-field"><span>Protection</span><select class="text_pole sa-library-filter" id="sa-library-protection">${option('', 'Any protection')}${option('detailed','Keep detailed')}${option('exact','Preserve exact wording')}${option('locked','Author locked')}${option('pinned','Budget priority')}</select></label></div></details>`);
     w.panes.library.insertAdjacentHTML('beforeend', card('📋 Selected records', `<div class="sa-row"><select class="text_pole" data-sa-field="protectFlag">${option('detailed','Keep detailed')}${option('exact','Preserve exact wording')}${option('locked','Author locked')}</select><select class="text_pole" data-sa-field="protectValue">${option('true','Apply protection')}${option('false','Clear protection')}</select>${button('protectSelected','Update selected protections')}</div><label class="checkbox_label"><input type="checkbox" data-sa-field="exportSources"><span>Include linked original sources in selection exports</span></label><div class="sa-row">${button('exportMarkdown','Export selected as Markdown')}${button('exportSelection','Export selected as JSON')}</div>`));
+    w.panes.maintain.insertAdjacentHTML('beforeend', card('🩹 Repair linked records', `<p class="sa-hint">Review recaps and other records affected by a source correction.</p>
+        <div class="sa-row">${button('repairStale', 'Preview repairs')}${button('repairSelected', 'Repair selected records and dependents')}</div>`));
     w.panes.characters.insertAdjacentHTML('beforeend', card('🕰️ What did they know by this date?', `<p class="sa-hint">This uses recorded learning dates and historical states explicitly preserved in Inspect. An event date alone never proves when someone learned about it. Undated knowledge is shown separately.</p><div class="sa-grid"><label class="sa-field"><span>Character</span><select class="text_pole" data-sa-field="knowledgeSubject"></select></label>${field('knowledgeDate','Knowledge as of','date')}</div><div class="sa-row">${button('knowledgeAt','Show dated knowledge')}</div><div id="sa-knowledge-results"></div>`));
     w.panes.characters.insertAdjacentHTML('beforeend', card('👥 Character roster and aliases', `<p class="sa-hint">Choose a canonical name and the names you have confirmed belong to that person. Matching memory lists can be combined, with original records kept in History. Knowledge records keep their own evidence. Protected lists must be unlocked first.</p><div id="sa-roster-list" class="sa-hint"></div><div class="sa-grid">${field('rosterName','Canonical character name')}${field('rosterAliases','Other confirmed names, separated by semicolons')}<label class="sa-field"><span>Destination for their memory list</span><select class="text_pole" data-sa-field="rosterBook"></select></label></div><label class="checkbox_label"><input type="checkbox" data-sa-field="rosterKeywords"><span>Also add these approved names as native lorebook keywords</span></label><div class="sa-row">${button('rosterApply','Preview identity changes')}</div>`));
     w.panes.settings.insertAdjacentHTML('beforeend', card('🕒 Recent activity', `<p class="sa-hint">Jobs and Undo history from this chat, plus the latest confirmed record updates from other chats using this archive.</p><div id="sa-activity-list"></div>`));
@@ -94,14 +96,16 @@ async function repair(w, selectedOnly) {
         }
         return;
     }
-    await w.refresh();const roots=selectedOnly?[...w.selected]:w.entries.filter(e=>M.record(e)?.status==='stale').map(e=>M.record(e).id);
+    await w.refresh();
+    const recapReviews = M.recapReview(w.entries);
+    const roots = selectedOnly ? [...w.selected] : w.entries.filter(e => M.record(e)?.status === 'stale' || recapReviews.has(M.record(e)?.id)).map(e => M.record(e).id);
     if(!roots.length){
         const guide=document.createElement('div');guide.className='sa-review';
         guide.innerHTML='<h3>Find records that need repair</h3><p>A record needs review when its original messages or a linked source changed. Repair rebuilds its derived memories and recaps after the source is corrected.</p><p>Open Library and select a record you want to rebuild. Inspect its source first, then use Repair selected records and dependents if the linked records also need a rewrite.</p><p>For a normal character update from recent chat events, use Characters → Character memory browser → AI update.</p>';
         if(await w.h.confirm(guide,{okButton:'📚 Open Library',cancelButton:'Close',large:false})){w.showTab('library');w.renderLibrary();}
         return;
     }
-    const ordered=T.repairOrder(w.entries,roots);if(!ordered.length)return w.h.notify('No dependent records need repair.','info');
+    const ordered=T.repairOrder(w.entries,roots,recapReviews);if(!ordered.length)return w.h.notify('No dependent records need repair.','info');
     const protectedEntries=ordered.filter(e=>['detailed','exact','locked'].some(flag=>M.record(e).protection?.[flag]));
     if(protectedEntries.length)throw new Error('Review protected records before repairing: '+protectedEntries.map(M.title).join('; '));
     const root=document.createElement('div');root.className='sa-review';root.innerHTML='<h3>Review repair order</h3><p>Each result is reviewed and saved before its dependents are generated.</p>';

@@ -29,6 +29,7 @@ export class ChatControls {
         });
         window.addEventListener('resize', () => this.close());
         document.querySelector('#chat')?.addEventListener('scroll', () => this.close(), { passive: true });
+        this.mountSceneControls();
     }
 
     chat() { return this.w.h.context().chat || []; }
@@ -38,6 +39,7 @@ export class ChatControls {
     async save() {
         this.syncRange();
         this.mount();
+        this.w.extras?.render();
         await this.w.persist();
     }
 
@@ -123,6 +125,7 @@ export class ChatControls {
     }
 
     mount(messageIndex) {
+        this.renderScene();
         const chat = this.chat(), bounds = this.endpoints(), metadata = this.w.h.meta();
         const receipts = metadata.workbench?.chatMemoryReceipts || [];
         const coverage = archivedRanges(metadata);
@@ -198,4 +201,58 @@ export class ChatControls {
     }
 
     anchor(index) { return anchorMessage(this.chat()[index]); }
+
+    mountSceneControls() {
+        const composer = document.querySelector('#send_form');
+        if (!composer) return;
+        this.sceneControls = document.createElement('div');
+        this.sceneControls.className = 'sa-composer-scene';
+        this.sceneControls.hidden = true;
+        this.sceneControls.innerHTML = '<span class="sa-hint" role="status" hidden></span><button type="button" class="menu_button">🕰️ Start flashback</button><button type="button" class="menu_button" hidden>Back to present</button>';
+        const [start, end] = this.sceneControls.querySelectorAll('button');
+        const run = action => void action().catch(error => this.w.h.notify(error.message, 'warning'));
+        start.addEventListener('click', () => run(() => this.chooseFlashback()));
+        end.addEventListener('click', () => run(() => this.changeFlashback('')));
+        composer.before(this.sceneControls);
+        this.renderScene();
+    }
+
+    renderScene() {
+        const w = this.w, controls = this.sceneControls;
+        if (!controls) return;
+        controls.hidden = !w.options().sceneRecall || !w.h.isActive() || !w.h.context().chatId;
+        if (controls.hidden) return;
+        const date = w.sceneRecall.frame().flashback;
+        const status = controls.querySelector('[role="status"]');
+        const [start, end] = controls.querySelectorAll('button');
+        status.textContent = date ? '🕰️ Flashback · ' + new Date(date + 'T00:00:00Z').toLocaleDateString(undefined, {
+            timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric',
+        }) : '';
+        status.hidden = end.hidden = !date;
+        start.textContent = date ? 'Change date' : '🕰️ Start flashback';
+    }
+
+    async chooseFlashback() {
+        const w = this.w, chat = this.chat(), origin = w.identity();
+        const frame = w.sceneRecall.frame();
+        const root = document.createElement('div');
+        root.className = 'sa-review';
+        root.innerHTML = `<h3>${frame.flashback ? 'Change flashback date' : 'Start flashback'}</h3><label class="sa-field"><span>Story date</span><input class="text_pole" type="date" required></label>`;
+        const input = root.querySelector('input');
+        input.value = frame.flashback || frame.date;
+        if (await w.h.confirm(root, { okButton: 'Set flashback date', large: false, canConfirm: () => input.reportValidity() })) {
+            if (origin !== w.identity() || chat !== this.chat()) return;
+            await this.changeFlashback(input.value);
+        }
+    }
+
+    async changeFlashback(date) {
+        const w = this.w;
+        if (w.h.isBusy() || w.h.isGenerating?.()) throw new Error('Finish the current reply or archive action before changing the scene date.');
+        if (!w.options().sceneRecall || !w.h.isActive()) throw new Error('Enable Scene Recall and attach this story’s archive first.');
+        w.sceneRecall.setFlashback(date);
+        this.renderScene();
+        await w.persist();
+        this.sceneControls?.querySelector(date ? 'button:last-child' : 'button:first-of-type')?.focus();
+    }
 }

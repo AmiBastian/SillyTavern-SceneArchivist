@@ -6,7 +6,7 @@ const parsedBullet = text => Core.parseMemoryDoc('- ' + normalized(text))[0];
 const bulletKey = item => JSON.stringify([item.textHash || M.hash(normalized(item.text)), item.a, item.b, item.date]);
 
 /** A model's citation is checked against the actual supplied selection, not invented. */
-export function memoryEvidence(raw, { source, inputs = [], dateMap = {} } = {}) {
+export function memoryEvidence(raw, { source, inputs = [], dateMap = {}, archiveIds = new Map() } = {}) {
     const output = typeof raw === 'string' ? M.parseJSON(raw) : raw;
     const allowed = new Map((source?.ranges || []).flatMap(range => range.messages || []).map(message => [message.index, message]));
     const ids = new Set(inputs.map(entry => M.record(entry)?.id));
@@ -14,7 +14,8 @@ export function memoryEvidence(raw, { source, inputs = [], dateMap = {} } = {}) 
     for (const character of output?.characters || []) for (const item of character.memories || []) {
         if (typeof item === 'string') continue; // Legacy strings have no per-bullet claim.
         if (!item || typeof item.text !== 'string' || !Array.isArray(item.messages) || !Array.isArray(item.sourceIds)
-            || item.messages.some(index => !Number.isInteger(index) || !allowed.has(index)) || item.sourceIds.some(id => !ids.has(id))) {
+            || item.messages.some(index => !Number.isInteger(index) || !allowed.has(index))
+            || item.sourceIds.some(id => !ids.has(id) && !archiveIds.has(id))) {
             throw new Error('A memory cited messages or archive records outside the selected evidence.');
         }
         const bullet = parsedBullet(item.text);
@@ -24,7 +25,7 @@ export function memoryEvidence(raw, { source, inputs = [], dateMap = {} } = {}) 
         result.push({ character: String(character.name), text: bullet.text, textHash: M.hash(normalized(bullet.text)),
             a: bullet.a, b: bullet.b, date: bullet.date || dateMap[bullet.a] || '',
             ...(ranges.length ? { source: { chatId: source.chatId, ...(source.actualChatId ? { actualChatId: source.actualChatId } : {}), ranges } } : {}),
-            sourceIds: M.unique(item.sourceIds), learnedAt: typeof item.learnedAt === 'string' ? item.learnedAt.slice(0, 120) : '',
+            sourceIds: M.unique(item.sourceIds.map(id => archiveIds.get(id) ?? id)), learnedAt: typeof item.learnedAt === 'string' ? item.learnedAt.slice(0, 120) : '',
             howLearned: typeof item.howLearned === 'string' ? item.howLearned.slice(0, 200) : '', citation: 'model-cited, selection-checked' });
     }
     return result;

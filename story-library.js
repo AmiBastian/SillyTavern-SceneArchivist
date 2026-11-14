@@ -55,6 +55,7 @@ export class StoryLibrary {
         const unit = units.find(entry => M.record(entry).id === this.unitId) || units[0];
         if (!unit) { view.innerHTML = '<p class="sa-empty-state">Your timeline starts with the first scene you save.</p>'; return; }
         const r = M.record(unit);
+        const review = r.type === 'recap' && M.recapReview(w.entries).get(r.id);
         const related = w.entries.filter(entry => {
             const memory = M.record(entry);
             return memory?.type === 'memory' && M.active(entry) && (memory.derivedFrom?.some(id => id === r.id || r.covers?.includes(id)) ||
@@ -71,7 +72,8 @@ export class StoryLibrary {
                 <b>${html(M.title(entry))}</b><small>${html(label ? `Messages ${label}` : dateLabel(entry) || entry.world)}</small></button>`;
         }).join('')}${units.length > ids.size ? action('more', 'Show older scenes') : ''}</div>
         <article class="sa-timeline-detail"><header><p class="sa-eyebrow">${r.type === 'recap' ? 'RECAP' : 'ARCHIVED SCENE'}</p><h3>${html(M.title(unit))}</h3></header>
-            <p class="sa-hint">${html([dateLabel(unit), sourceLabel(source) && `Messages ${sourceLabel(source)}`].filter(Boolean).join(' · '))}</p>
+            <p class="sa-hint">${html([dateLabel(unit), sourceLabel(source) && `Messages ${sourceLabel(source)}`, review && 'Needs review'].filter(Boolean).join(' · '))}</p>
+            ${review ? `<p class="sa-note">${html(review)}. Use Repair in Maintain to review a rebuild.</p>` : ''}
             <div class="sa-row">${recordAction('sources', '🔎 View sources', r.id)}${this.jumpButton(source, 'unitSource', r.id)}
                 ${recordAction('inspect', '✏️ Edit summary', r.id)}</div>
             <h4>🗂️ Summary</h4><pre class="sa-scene-text">${html(String(unit.content).trim().split('\n').slice(1).join('\n').trim() || unit.content)}</pre>

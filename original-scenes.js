@@ -13,6 +13,7 @@ const ranges = source => Array.isArray(source?.ranges) ? source.ranges : [];
 export function correctedSource(entry) {
     const r = M.record(entry);
     return !!(r?.authorCorrections?.length || r?.authorCorrections && !Array.isArray(r.authorCorrections) || r?.externalHash
+        || r?.contentHash && r.contentHash !== M.hash(entry.content)
         || r?.revisions && !Array.isArray(r.revisions) || r?.revisions?.some(revision =>
             !revision || revision.content !== entry.content && !automaticRevisions.has(revision.reason)));
 }
@@ -38,38 +39,46 @@ export function originalCurrent(row, sourceId, chat) {
 export function originalScenes(entries, { chat = [], sourceId, storyId, scopeReason = () => '', limits = SOURCE_LIMITS } = {}) {
     const rows = [], seen = new Set(), blocked = new Set();
     const report = { records: 0, receipts: 0, messages: 0, characters: 0, invalid: 0, corrected: 0, limited: false };
-    // Fail closed if correction coverage cannot be checked inside the local cap.
-    if (entries.length > limits.records) return { rows, report: { ...report, limited: true } };
-    const parents = entries.filter(entry => {
-        const r = M.record(entry);
-        return r?.storyId === storyId && M.active(entry) && !entry.disable && !excludedTypes.has(r.type) && !scopeReason(entry);
-    });
+    const parents = [], corrected = new Set();
     // A corrected record vetoes overlapping original text even if another
     // uncorrected record still carries a receipt for that same passage.
     let checkedMessages = 0, checkedReceipts = 0, checkedCharacters = 0;
     for (const parent of entries) {
-        if (M.record(parent)?.storyId !== storyId || !correctedSource(parent)) continue;
-        for (const source of recordSources(M.record(parent)).filter(source => source.chatId === sourceId)) for (const range of ranges(source)) {
+        const r = M.record(parent);
+        if (r?.storyId !== storyId) continue;
+        const sources = recordSources(r).filter(source => ranges(source).length);
+        if (!sources.length) continue;
+        const current = sources.filter(source => source.chatId === sourceId);
+        if (M.active(parent) && !parent.disable && !excludedTypes.has(r.type) && !scopeReason(parent)) {
+            report.invalid += sources.filter(source => source.chatId !== sourceId).reduce((sum, source) => sum + ranges(source).length, 0);
+            if (current.length) parents.push({ parent, sources: current });
+        }
+        if (!current.length || !correctedSource(parent)) continue;
+        corrected.add(parent);
+        for (const source of current) for (const range of ranges(source)) {
             checkedReceipts++;
             if (checkedReceipts > limits.receipts) return { rows, report: { ...report, limited: true } };
             if (!Array.isArray(range?.messages)) continue;
             checkedMessages += range.messages.length;
             if (checkedMessages > limits.messages) return { rows, report: { ...report, limited: true } };
             checkedCharacters += range.messages.reduce((sum, message) => sum + String(chat[message?.index]?.mes || '').length + String(chat[message?.index]?.name || '').length, 0);
-            if (checkedMessages > limits.messages || checkedReceipts > limits.receipts || checkedCharacters > limits.characters) return { rows, report: { ...report, limited: true } };
-            for (const message of range.messages) if (Number.isInteger(message?.index) && message.hash === M.messageHash(chat[message.index])) blocked.add(message.index);
+            if (checkedCharacters > limits.characters) return { rows, report: { ...report, limited: true } };
+            for (const message of range.messages) if (Number.isInteger(message?.index) && chat[message.index] && message.hash === M.messageHash(chat[message.index])) blocked.add(message.index);
         }
     }
-    outer: for (const parent of parents) {
-        report.records++;
-        for (const source of recordSources(M.record(parent))) for (const range of ranges(source)) {
-            if (report.receipts >= limits.receipts) { report.limited = true; break outer; }
-            report.receipts++;
+    outer: for (const { parent, sources } of parents) {
+        let counted = false;
+        for (const source of sources) for (const range of ranges(source)) {
             if (!Array.isArray(range?.messages)) { report.invalid++; continue; }
             if (range.messages.length > limits.messages) { report.limited = true; continue; }
-            if (source.chatId !== sourceId) { report.invalid++; continue; }
-            const signature = M.hash([source.chatId, range.from, range.to, range.messages]);
+            const signature = M.hash([sourceId, range.from, range.to, range.messages]);
             if (seen.has(signature)) continue;
+            if (!counted) {
+                if (report.records >= limits.records) { report.limited = true; break outer; }
+                report.records++; counted = true;
+            }
+            if (report.receipts >= limits.receipts) { report.limited = true; break outer; }
+            report.receipts++;
             seen.add(signature);
             const size = range.messages.reduce((total, message) => total + String(chat[message?.index]?.mes || '').length + String(chat[message?.index]?.name || '').length, 0);
             if (report.messages + range.messages.length > limits.messages || report.characters + size > limits.characters) {
@@ -77,7 +86,7 @@ export function originalScenes(entries, { chat = [], sourceId, storyId, scopeRea
             }
             report.messages += range.messages.length; report.characters += size;
             if (!verifiedRange(range, source, sourceId, chat)) { report.invalid++; continue; }
-            if (correctedSource(parent) || range.messages.some(message => blocked.has(message.index))) { report.corrected++; continue; }
+            if (corrected.has(parent) || range.messages.some(message => blocked.has(message.index))) { report.corrected++; continue; }
             // Adjacent chunks overlap by two whole messages to retain an exchange
             // near a boundary. Ranking removes overlaps before budget packing.
             for (let start = range.from; start <= range.to; start += Math.max(1, limits.passageMessages - 2)) {

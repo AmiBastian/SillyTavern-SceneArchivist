@@ -23,7 +23,7 @@ const SECTIONS = [
     ['[data-sa-action="rangePreview"]', 'archive-range', 'Choose an exact scene before sending it to the model.', false],
     ['#sa_ledger', 'archive-ledger', 'See what has been processed and redo a saved range.', false],
     ['[data-sa-action="tidy"]', 'archive-tidy', 'Reorder and group entries without an AI rewrite.', false],
-    ['[data-sa-action="repairStale"]', 'archive-repair', 'Rebuild records affected by corrected sources.', true],
+    ['[data-sa-action="repairStale"]', 'archive-repair', 'Rebuild records affected by corrected sources.', false],
     ['#sa-character-memories', 'character-browser', 'Read one character’s memories and review proposed updates.', false],
     ['[data-sa-action="memoriesAll"]', 'character-create', 'Create memories from chat, archive units, or both.', false],
     ['#sa_mem_target', 'character-settings', 'Destinations, source units, batch size and extraction prompt.', true],

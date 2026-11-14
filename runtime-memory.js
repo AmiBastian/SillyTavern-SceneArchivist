@@ -2,7 +2,7 @@ import * as M from './memory-engine.js';
 import { packEvidence } from './memory-retrieval.js';
 
 /** Narrow only copies already activated by native WI, after native recursion. */
-export async function runtimeMemories(w, entries, query, budget) {
+export async function runtimeMemories(w, entries, query, budget, details = w.details, heldExcerpts = w.recallDetails) {
     if (!w.options().preciseDelivery) return entries;
     const ranked = w.memoryIndex.search(entries, query);
     const byParent = new Map();
@@ -21,8 +21,8 @@ export async function runtimeMemories(w, entries, query, budget) {
     }
     const candidates = entries.map(parent => {
         const r = M.record(parent);
-        if (w.details.has(r.id) || ['exact', 'locked', 'detailed'].some(flag => r.protection?.[flag])) return { parent, rows: [] };
-        const held = (w.recallDetails?.get(r.id) || []).filter(row => row.excerpt?.parentHash === M.hash(parent.content));
+        if (details.has(r.id) || ['exact', 'locked', 'detailed'].some(flag => r.protection?.[flag])) return { parent, rows: [] };
+        const held = (heldExcerpts?.get(r.id) || []).filter(row => row.excerpt?.parentHash === M.hash(parent.content));
         return { parent, rows: (held.length ? held : byParent.get(r.id) || []).slice(0, 8) };
     });
     const counts = await w.countEntries(candidates.flatMap(item => item.rows.map(row => row.entry)));

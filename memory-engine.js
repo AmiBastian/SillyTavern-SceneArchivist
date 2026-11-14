@@ -275,6 +275,69 @@ export function leaves(id, entries, seen = new Set()) {
     return children.length ? unique(children.flatMap(c => leaves(c, entries, seen))) : [id];
 }
 
+const equivalentEdits = new Set(['Shorten entry', 'Tidy layout', 'Tidy layout and remove exact duplicates']);
+
+/** Report recaps with changed evidence while keeping the recap and its history available to the author. */
+export function recapReview(entries) {
+    const recaps = entries.filter(entry => record(entry)?.type === 'recap' && active(entry));
+    const reviews = new Map();
+    if (!recaps.length) return reviews;
+    const byId = new Map(entries.filter(record).map(entry => [record(entry).id, entry]));
+    const checked = new Set(), visiting = new Set(), hashes = new Map();
+    const currentHash = entry => {
+        const id = record(entry).id;
+        if (!hashes.has(id)) hashes.set(id, hash(entry.content));
+        return hashes.get(id);
+    };
+    const matches = (source, expected) => {
+        const r = record(source);
+        const current = currentHash(source);
+        if (current === expected) return true;
+        if (current !== r.contentHash || !Array.isArray(r.revisions)) return false;
+        let content = source.content, corrections = r.authorCorrections?.length || 0;
+        for (let i = r.revisions.length - 1; i >= 0; i--) {
+            const revision = r.revisions[i], previous = revision?.metadata?.authorCorrections?.length || 0;
+            if (!revision || previous !== corrections || content !== revision.content && !equivalentEdits.has(revision.reason)) return false;
+            if (hash(revision.content ?? '') === expected) return true;
+            content = revision.content; corrections = previous;
+        }
+        return false;
+    };
+    const correctedAfter = (source, created) => {
+        const r = record(source), since = Date.parse(created);
+        if (!Number.isFinite(since) || !Array.isArray(r.revisions)) return false;
+        let content = source.content;
+        for (let i = r.revisions.length - 1; i >= 0; i--) {
+            const revision = r.revisions[i];
+            if (Date.parse(revision?.at) > since && content !== revision.content && !equivalentEdits.has(revision.reason)) return true;
+            content = revision?.content;
+        }
+        return false;
+    };
+    const review = entry => {
+        const r = record(entry);
+        if (r.type !== 'recap') return '';
+        if (checked.has(r.id)) return reviews.get(r.id) || '';
+        if (visiting.has(r.id)) return 'Circular source links';
+        visiting.add(r.id);
+        let reason = r.status === 'stale' ? r.staleReason || 'Linked evidence needs review' : '';
+        for (const id of unique([...(r.covers || []), ...(r.derivedFrom || [])])) {
+            if (reason) break;
+            const source = byId.get(id), expected = r.derivedHashes?.[id];
+            if (!source || record(source).storyId !== r.storyId || Object.hasOwn(record(source), 'branchDisabledFrom')) reason = 'A linked source is missing from this story';
+            else if (review(source)) reason = 'A linked recap needs review';
+            else if (expected && !matches(source, expected)) reason = 'A linked source changed';
+            else if (!expected && (record(source).contentHash && currentHash(source) !== record(source).contentHash || correctedAfter(source, r.created))) reason = 'A linked source changed';
+        }
+        visiting.delete(r.id);
+        checked.add(r.id);
+        if (reason) reviews.set(r.id, reason);
+        return reason;
+    };
+    for (const entry of recaps) review(entry);
+    return reviews;
+}
+
 /** One hard cap across all managed books. A recap and its covered sources cannot spend the same budget twice. */
 export function allocate(entries, { budget = 6000, query = '', selected = [], details = [], counts = {}, semantic = [], ranked } = {}) {
     const cap = Math.max(0, Number(budget) || 0), picked = new Set(selected), detail = new Set(details), sem = new Set(semantic);
@@ -308,16 +371,15 @@ export function allocate(entries, { budget = 6000, query = '', selected = [], de
     }
     candidates.sort((a, b) => b.score - a.score || (record(b.entry).unit?.number ?? 0) - (record(a.entry).unit?.number ?? 0));
     let used = 0;
-    const accepted = [], coverage = new Set();
-    const requestedLeaves = new Set([...detail].flatMap(id => leaves(id, entries)));
+    const accepted = [], coverage = new Map();
     for (const c of candidates) {
-        const r = record(c.entry), covered = leaves(c.id, entries);
+        const covered = leaves(c.id, entries);
         let reason = '';
-        if (r.type === 'recap' && covered.some(id => requestedLeaves.has(id))) reason = 'details requested instead';
+        if (covered.some(id => coverage.get(id))) reason = 'details requested instead';
         else if (covered.some(id => coverage.has(id))) reason = 'already covered by loaded memory';
         else if (used + c.cost > cap) reason = 'total memory budget';
         if (reason) { omitted.push({ id: c.id, title: title(c.entry), tokens: c.cost, reason, reasons: c.reasons, matchedTerms: c.matchedTerms }); continue; }
-        accepted.push(c); used += c.cost; covered.forEach(id => coverage.add(id));
+        accepted.push(c); used += c.cost; covered.forEach(id => coverage.set(id, detail.has(c.id)));
     }
     return { used, budget: cap, accepted, omitted };
 }
@@ -334,6 +396,7 @@ export function allocateActivated(activated, { budget = 6000, entries = activate
             continue;
         }
         const triggers = [...(reasons.get(r.id) || ['world info'])];
+        if (detail.has(r.id)) triggers.unshift('detail requested');
         const priority = triggers.includes('detail requested') ? 20000 : triggers.includes('recall') ? 15000 :
             r.protection?.pinned ? 12000 : ['opening', 'closing', 'epoch', 'legend'].includes(r.type) ? 10000 :
             r.type === 'thread' ? 8500 : r.type === 'fact' ? 8000 : r.type === 'knowledge' ? 7500 :
@@ -343,16 +406,15 @@ export function allocateActivated(activated, { budget = 6000, entries = activate
     }
     // Stable sorting retains native order for records with equal priority.
     candidates.sort((a, b) => b.score - a.score);
-    const requestedLeaves = new Set([...detail].flatMap(id => leaves(id, entries)));
-    const accepted = [], coverage = new Set(); let used = 0;
+    const accepted = [], coverage = new Map(); let used = 0;
     for (const c of candidates) {
-        const r = record(c.entry), covered = leaves(c.id, entries);
+        const covered = leaves(c.id, entries);
         let reason = '';
-        if (r.type === 'recap' && covered.some(id => requestedLeaves.has(id))) reason = 'details requested instead';
+        if (covered.some(id => coverage.get(id))) reason = 'details requested instead';
         else if (covered.some(id => coverage.has(id))) reason = 'already covered by loaded memory';
         else if (used + c.cost > cap) reason = 'total memory budget';
         if (reason) omitted.push({ id: c.id, title: title(c.entry), tokens: c.cost, reason, reasons: c.reasons });
-        else { accepted.push(c); used += c.cost; covered.forEach(id => coverage.add(id)); }
+        else { accepted.push(c); used += c.cost; covered.forEach(id => coverage.set(id, c.reasons.includes('detail requested'))); }
     }
     return { used, budget: cap, accepted, omitted, native: true, enforced: true };
 }
@@ -385,7 +447,8 @@ export function condensationCandidates(entries, options = {}) {
     const newest = dates.length ? Math.max(...dates) : null;
     const after = Math.max(1, Number(options.afterUnits) || 10), age = Math.max(1, Number(options.afterDays) || 30) * 86400000;
     const pressure = units.reduce((n, e) => n + tokens(e.content), 0) > Math.max(100, Number(options.pressureTokens) || 12000);
-    const covered = new Set(entries.filter(e => record(e)?.type === 'recap' && active(e)).flatMap(e => record(e).covers ?? []));
+    const reviews = recapReview(entries);
+    const covered = new Set(entries.filter(e => record(e)?.type === 'recap' && active(e) && !e.disable && !reviews.has(record(e).id)).flatMap(e => record(e).covers ?? []));
     return units.filter(e => {
         const r = record(e); if (!eligible(e) || covered.has(r.id)) return false;
         const oldUnit = r.unit?.number != null && max - r.unit.number >= after;

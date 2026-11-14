@@ -2,6 +2,7 @@
 // reaches the host. Drafts and completed steps live in the durable job itself.
 import * as M from './memory-engine.js';
 import * as Core from './core.js';
+import { archiveOutputId } from './flow.js';
 import { approvedChanges, entrySettings, proposalKey } from './workflow-tools.js';
 import { same } from './entry-journal.js';
 import { recordSources } from './recovery-tools.js';
@@ -98,8 +99,8 @@ export class BulkRun {
             register: (archive, name, kind) => { ((d.settings.storyBooks ??= {})[archive] ??= {})[name] = kind; },
             saveSettings: () => {}, undoStart: () => {}, snapshot: async () => {}, reload: () => {}, refreshInfo: async () => {},
             confirmText: async text => { if (!d.notices.includes(text)) d.notices.push(text); return true; },
-            afterArchive: async (range, days, hide) => {
-                if (!d.archiveRanges.some(r => r.range.stepId === range.stepId)) d.archiveRanges.push({ range, days, hide });
+            afterArchive: async (range, days, hide, archiveIds) => {
+                if (!d.archiveRanges.some(r => r.range.stepId === range.stepId)) d.archiveRanges.push({ range, days, hide, archiveIds });
             },
             notify: () => {},
         };
@@ -111,14 +112,14 @@ export class BulkRun {
         try { return await fn(); }
         finally { w.h = previous; w.bulkRun = null; }
     }
-    async acceptArchive(text, source, stepId, placement = null) {
+    async acceptArchive(text, source, stepId, placement = null, combined = false) {
         const w = this.w, d = this.data, name = d.settings.lorebook;
         const data = M.copy(d.books[name] || { entries: {} }), before = M.copy(data);
         const { parsed, plan, littleThings: proposed } = await this.real.prepareArchive(text, data, source, placement);
         if (!plan.adds.some(a => a.include && a.content.trim()) && !plan.states.some(a => a.include && a.content.trim())) {
             throw new Error('This archive pass proposed no new entries or state changes. Its range remains pending.');
         }
-        Core.applyPlan(data, plan, parsed, this.real.options(), book => this.real.makeEntry(name, book));
+        const applied = Core.applyPlan(data, plan, parsed, this.real.options(), book => this.real.makeEntry(name, book));
         const changed = M.captureChanges(data, before, Core.classifyEntry, { storyId: w.state().storyId, source, reason: 'Archive write' });
         for (const e of Object.values(data.entries)) if (M.record(e)?.storyId === w.state().storyId) e.sceneArchivistArchive = name;
         if (!this.job.options.automatic && proposed?.length) addLittleThings(data, w.archiveLittleThings(proposed, source), w.state().storyId);
@@ -128,7 +129,13 @@ export class BulkRun {
         d.meta.lastDay = Core.managedSummary(data).lastDay;
         d.meta.at = Date.now(); d.meta.messages = this.real.context().chat?.length ?? 0;
         for (const warning of plan.warnings || []) if (!d.notices.includes(warning)) d.notices.push(warning);
-        return { ids: changed.filter(id => Object.values(data.entries).some(e => M.record(e)?.id === id && M.record(e).type === 'unit')), days: plan.adds.filter(a => a.include).map(a => a.dayNum).filter(Number.isInteger) };
+        const units = Object.values(data.entries).filter(e => M.record(e)?.type === 'unit');
+        const saved = new Set(units.map(e => M.record(e).id));
+        const archiveIds = combined ? Object.fromEntries(applied.outputUnitUids.flatMap((uid, index) => {
+            const entry = data.entries[uid], r = M.record(entry);
+            return r?.type === 'unit' && M.active(entry) ? [[archiveOutputId(index), r.id]] : [];
+        })) : undefined;
+        return { ids: changed.filter(id => saved.has(id)), days: plan.adds.filter(a => a.include).map(a => a.dayNum).filter(Number.isInteger), archiveIds };
     }
     changes() {
         const result = [];

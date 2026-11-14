@@ -73,7 +73,7 @@ export function memorySubject(record, members) {
 }
 
 export function groupMemoryReason(record, group, enabled) {
-    if (!enabled || !group || record?.type !== 'memory') return '';
+    if (!enabled || !group || !['memory', 'knowledge'].includes(record?.type)) return '';
     const subject = memorySubject(record, group.members);
     if (!subject || !group.speaker) return 'No unique character card for this memory';
     return subject.avatar === group.speaker ? '' : 'Belongs to another group character';
@@ -85,13 +85,22 @@ export function soloMemoryScope(context, currentAvatar) {
     const avatar = card?.avatar;
     const members = avatar ? context.characters.filter(Boolean).map(member => ({ avatar: member.avatar, name: member.name,
         aliases: unique([...(member.aliases || []), member.data?.nickname, ...(member === card ? [context.name2] : [])]) })) : [];
+    const exact = new Map(members.map(member => [member.avatar, member]));
     return record => {
         if (!['memory', 'knowledge'].includes(record?.type)) return '';
         if (!avatar) return 'No unique responding character card';
         const subjectAvatar = record.subjectAvatar && (currentAvatar?.(record.subjectAvatar) || record.subjectAvatar);
-        const subject = memorySubject({ ...record, subjectAvatar }, members);
+        const subject = exact.get(subjectAvatar) || memorySubject({ ...record, subjectAvatar }, members);
         if (!subject) return 'No unique character card for this personal record';
         return subject.avatar === avatar ? '' : 'Belongs to another character';
+    };
+}
+
+export function replyMemoryScope(context, group, groupScope, currentAvatar) {
+    if (!group) return soloMemoryScope(context, currentAvatar);
+    return record => {
+        const avatar = record?.subjectAvatar && currentAvatar?.(record.subjectAvatar);
+        return groupMemoryReason(avatar ? { ...record, subjectAvatar: avatar } : record, group, groupScope);
     };
 }
 

@@ -61,7 +61,8 @@ export class RecapSuggestions {
 
     savedRecaps() {
         const { entries, h } = this.w;
-        return entries.filter(entry => entry.world === h.settings().lorebook && M.record(entry)?.type === 'recap' && M.active(entry))
+        const reviews = M.recapReview(entries);
+        return entries.filter(entry => entry.world === h.settings().lorebook && M.record(entry)?.type === 'recap' && M.active(entry) && !reviews.has(M.record(entry).id))
             .map(entry => ({ entry, leaves: new Set(M.leaves(M.record(entry).id, entries)) }));
     }
 

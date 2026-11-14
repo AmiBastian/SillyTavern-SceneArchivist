@@ -1,6 +1,7 @@
 // Scene Archivist: pure logic (no SillyTavern imports), so it can be tested in Node.
 
 import { estimateTokens } from './token-estimate.js';
+import { active, recapReview } from './memory-engine.js';
 
 // The log can count its units as Days, Episodes, Chapters and so on. Headings keep whatever word the log uses.
 export const UNITS = ['Day', 'Episode', 'Chapter', 'Session', 'Act', 'Part', 'Week', 'Scene'];
@@ -360,19 +361,27 @@ function managed(data) {
 export function planChanges(data, parsed, opts) {
     const m = managed(data);
     const hasLog = m.some(x => x.cl.type === 'state' || x.cl.type === 'day' || x.cl.type === 'retro');
-    const plan = { seed: !hasLog, adds: [], states: [], demotions: [], warnings: [...parsed.warnings] };
+    const plan = { seed: !hasLog, adds: [], outputUnits: [], states: [], demotions: [], warnings: [...parsed.warnings] };
     const normalized = text => String(text || '').replace(/\r\n?/g, '\n').trim();
     const sourceKey = source => source?.ranges?.length ? JSON.stringify([source.chatId, source.ranges]) : '';
     const incomingSource = sourceKey(opts?.source);
     const existingCopies = m.filter(x => !incomingSource || sourceKey(x.e.sceneArchivist?.source) === incomingSource);
-    const existingTexts = new Set(existingCopies.map(x => normalized(x.e.content)));
-    const seenOutput = new Set();
-    for (const en of parsed.entries) {
+    const existingTexts = new Map(existingCopies.map(x => [normalized(x.e.content), { uid: x.e.uid }]));
+    const seenOutput = new Map();
+    for (const [outputIndex, en] of parsed.entries.entries()) {
         const text = normalized(en.content);
-        if (existingTexts.has(text) || seenOutput.has(text)) { plan.warnings.push('An exact copy of "' + en.heading.slice(0, 60) + '" is already filed for this source or repeated in this response.'); continue; }
-        seenOutput.add(text);
+        const duplicate = existingTexts.get(text) || seenOutput.get(text);
+        if (duplicate) {
+            plan.outputUnits.push(duplicate);
+            plan.warnings.push('An exact copy of "' + en.heading.slice(0, 60) + '" is already filed for this source or repeated in this response.');
+            continue;
+        }
         const constant = en.kind !== 'retro';
-        plan.adds.push({ include: true, kind: en.kind, heading: en.heading, content: en.content, dayNum: en.dayNum, constant, label: comment(en.kind, en.heading, constant), keys: [] });
+        const addition = { include: true, kind: en.kind, heading: en.heading, content: en.content, dayNum: en.dayNum, constant,
+            label: comment(en.kind, en.heading, constant), keys: [], outputIndex };
+        seenOutput.set(text, addition);
+        plan.adds.push(addition);
+        plan.outputUnits.push(addition);
     }
     for (const name of STATE_NAMES) {
         if (!(name in parsed.states)) continue;
@@ -465,11 +474,11 @@ export function applyPlan(data, plan, parsed, opts, makeEntry) {
         }
     }
     // new day-type entries
-    const created = [];
+    const created = new Map();
     for (const a of plan.adds) {
         if (!a.include) continue;
         const e = addEntry(a.content, a.label, a.keys, a.constant);
-        created.push({ e, a });
+        created.set(a, e.uid);
         report.added.push(a.label);
     }
     // demotions
@@ -485,7 +494,8 @@ export function applyPlan(data, plan, parsed, opts, makeEntry) {
         if (!e.key?.length) e.key = d.keys ?? [];
         report.demoted.push(e.comment);
     }
-    reorder(data, created.map(c => c.e.uid), opts);
+    reorder(data, [...created.values()], opts);
+    report.outputUnitUids = (plan.outputUnits || []).map(unit => unit.uid ?? created.get(unit));
     return report;
 }
 
@@ -549,8 +559,9 @@ export function reorder(data, newUids, opts) {
 }
 
 /** Text of what the model currently sees as always-on (for the optional "append log to prompt" fallback). */
-export function currentLogText(data) {
-    const list = managed(data).filter(x => x.e.constant && !x.e.disable && (!x.e.sceneArchivist || !['resolved', 'superseded'].includes(x.e.sceneArchivist.status)));
+export function currentLogText(data, entries = Object.values(data?.entries || {})) {
+    const reviews = recapReview(entries);
+    const list = managed(data).filter(({ e }) => e.constant && !e.disable && (!e.sceneArchivist || active(e) && !reviews.has(e.sceneArchivist.id)));
     const covered = new Set(list.filter(x => x.cl.type === 'recap').flatMap(x => x.e.sceneArchivist.covers || []));
     return list.filter(x => !covered.has(x.e.sceneArchivist?.id) && !['opening', 'closing', 'tracker'].includes(x.cl.type))
         .map(x => x.e.content.trim()).join('\n\n');
@@ -568,10 +579,10 @@ export function managedSummary(data) {
 const strip = (s) => String(s ?? '').replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF\uFE0F|]/gu, '').replace(/\s+/g, ' ').trim();
 
 /** Keyed (not always-on) log entries, numbered for the model. Entries that are always on are already in the prompt. */
-export function buildRecallIndex(data, { limit = 120, recentText = '' } = {}) {
+export function buildRecallIndex(data, { limit = 120, recentText = '', excluded = () => false } = {}) {
     let out = [];
     for (const { e, cl } of managed(data)) {
-        if (!['day', 'retro', 'skip', 'memory'].includes(cl.type) || e.constant || e.disable) continue;
+        if (!['day', 'retro', 'skip', 'memory'].includes(cl.type) || e.constant || e.disable || e.sceneArchivist && !active(e) || excluded(e)) continue;
         const bullet = String(e.content ?? '').split('\n').find(l => /^\s*[-*] /.test(l)) ?? '';
         out.push({
             id: 0, uid: e.uid, pos: out.length,

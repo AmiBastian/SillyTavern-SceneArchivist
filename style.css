@@ -6,6 +6,22 @@
 }
 .sa-panel :is(.sa-brand-mark, .sa-tabs [aria-hidden="true"]) { font-family: var(--sa-emoji-fonts), sans-serif; }
 .sa-panel .menu_button, .sa-review .menu_button { font-family: inherit; }
+.sa-composer-scene {
+  display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px 8px;
+  padding: 3px 8px; color: var(--SmartThemeBodyColor, inherit);
+  background: var(--SmartThemeBlurTintColor, transparent);
+  border-block-start: 1px solid var(--SmartThemeBorderColor, transparent);
+}
+.sa-composer-scene[hidden], .sa-composer-scene [hidden] { display: none !important; }
+.sa-composer-scene .menu_button { min-height: 28px; margin: 0; font: inherit; font-size: .82em; }
+.sa-open-threads > summary { cursor: pointer; font-weight: 600; }
+.sa-open-threads .sa-result p { margin-block: 3px; overflow-wrap: anywhere; }
+.sa-reply-preview .sa-result { overflow-wrap: anywhere; }
+.sa-reply-preview [data-sa-preview-section] { margin-block: 10px; }
+.sa-prompt-trace .sa-preview-trigger { margin-block-end: 8px; }
+@media (pointer: coarse) {
+  .sa-composer-scene .menu_button { min-height: 34px; }
+}
 .sa-panel {
   --sa-accent: #c9b4ef;
   --sa-accent-ink: #241632;

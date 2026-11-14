@@ -1,5 +1,5 @@
 import * as M from './memory-engine.js';
-import { flashbackReason, littleThings, noteAudience, noteRecall, packLittleThings, recallFrame, recordRecall } from './little-things.js';
+import { flashbackReason, littleThings, noteAudience, noteRecall, packLittleThings, recallFrame, recordRecall, setFlashback } from './little-things.js';
 
 export class SceneRecall {
     constructor(workbench) {
@@ -35,11 +35,24 @@ export class SceneRecall {
         this.requested.add(id);
     }
 
-    begin(type, enabled) {
+    begin(type, enabled, pending = '') {
         const w = this.w, archive = w.h.settings().lorebook;
         this.clearPrompt();
         this.setArchive(archive);
-        this.run = enabled ? { type, archive, identity: w.identity(), epoch: w.generationEpoch } : null;
+        this.run = enabled ? { type, archive, identity: w.identity(), epoch: w.generationEpoch, packed: { items: [], tokens: 0 }, records: [] } : null;
+        if (this.run && w.options().sceneRecall) this.run.frame = this.frame(type, pending);
+    }
+
+    frame(type = 'normal', pending = '', names = []) {
+        const w = this.w, { chat = [], name1 } = w.h.context();
+        const transcript = pending ? [...chat, { mes: pending, name: name1, is_user: true }] : chat;
+        return recallFrame(transcript, type, names, w.h.meta().sceneOpeningFlashback);
+    }
+
+    setFlashback(date) {
+        const w = this.w;
+        setFlashback(w.h.context().chat || [], w.h.meta(), date);
+        this.carry.clear();
     }
 
     current(run) {
@@ -48,41 +61,60 @@ export class SceneRecall {
             run.archive === w.h.settings().lorebook && !w.scanSuppressed && !w.h.isBusy();
     }
 
-    async prepare(entries, group) {
+    async prepare(entries, group, excluded) {
         const w = this.w, run = this.run;
-        if (!this.current(run) || run.finished || !w.h.scanSupported || !w.h.setLittleThingsPrompt) return;
-        const automatic = w.options().sceneRecall;
-        if (!automatic && !this.requested.size) return;
-        const context = w.h.context(), chat = context.chat || [];
-        const card = group ? group.members.find(member => member.avatar === group.speaker) :
-            context.characters?.[context.characterId];
-        const names = M.unique(group ? [card?.name, ...(card?.aliases || [])] : [context.name2, card?.name, card?.data?.nickname]);
+        if (!this.current(run) || run.finished) return;
+        const scene = this.describe(run.type, group);
+        run.frame = scene.frame;
+        if (!w.h.scanSupported || !w.h.setLittleThingsPrompt) return;
         // An unresolved branch may still point at the parent's active archive.
         if (w.state().branchIntent || w.state().originChat && w.state().originChat !== w.identity()) return;
-        const frame = recallFrame(chat, run.type, names);
         const book = await w.h.recallBook(run.archive);
         if (!this.current(run) || run.finished) return;
-        const speaker = { names, group, avatar: card?.avatar, currentAvatar: w.h.currentAvatar };
-        const ranked = noteRecall(littleThings(book), { frame, chat, speaker,
-            sourceId: w.sourceId(), carry: this.carry, requested: this.requested });
+        const { packed, records } = await this.plan(entries, scene, book, excluded, run.choices);
+        if (!this.current(run) || run.finished) return;
+        run.packed = packed;
+        run.records = records;
+        w.h.setLittleThingsPrompt(packed.text);
+    }
+
+    describe(type, group, pending = '') {
+        const { h } = this.w, context = h.context();
+        const card = group ? group.members.find(member => member.avatar === group.speaker) : context.characters?.[context.characterId];
+        const names = M.unique(group ? [card?.name, ...(card?.aliases || [])] : [context.name2, card?.name, card?.data?.nickname]);
+        return { frame: this.frame(type, pending, names), chat: context.chat || [], speaker: { names, group, avatar: card?.avatar, currentAvatar: h.currentAvatar } };
+    }
+
+    async plan(entries, { frame, chat, speaker }, book, excluded, choices = new Map()) {
+        const w = this.w, automatic = w.options().sceneRecall;
+        const requested = new Set(this.archive === w.h.settings().lorebook ? this.requested : []);
+        const notes = littleThings(book);
+        for (const note of notes) if (choices.get('little:' + note.id) === 'load') requested.add(note.id);
+        const carry = this.archive === w.h.settings().lorebook ? this.carry : new Map();
+        if (!automatic && !requested.size) return { packed: { text: '', items: [], tokens: 0 }, records: [], ranked: [] };
+        const ranked = noteRecall(notes.filter(note => choices.get('little:' + note.id) !== 'skip'), { frame, chat, speaker, sourceId: w.sourceId(), carry, requested });
         const budget = Math.min(280, Math.floor(Math.max(0, Number(w.options().budget) || 0) * 0.2));
         const count = async value => {
             try { return (Number(await w.h.tokenCount?.(value)) || M.tokens(value)) + 4; }
             catch { return M.tokens(value) + 4; }
         };
-        const packed = await packLittleThings(automatic ? ranked : ranked.filter(item => this.requested.has(item.note.id)), budget, count);
-        if (!this.current(run) || run.finished) return;
-        run.frame = frame;
-        run.packed = packed;
-        run.records = automatic ? recordRecall(entries.filter(e => {
-            if (w.memoryScopeReason(e, group)) return false;
+        const eligible = automatic ? ranked : ranked.filter(item => requested.has(item.note.id));
+        const cutoff = automatic && frame.flashback ? `The scene is a flashback. Use story knowledge up to ${frame.flashback}.` : '';
+        const packed = await packLittleThings(eligible, budget, count, cutoff);
+        const records = automatic ? recordRecall(entries.filter(e => {
+            if (excluded(e)) return false;
             const r = M.record(e);
             return r.type !== 'knowledge' || !!r.subject && noteAudience({ knows: [r.subject], knownAvatar: r.subjectAvatar }, speaker);
-        }), frame, chat, this.carry) : [];
-        w.h.setLittleThingsPrompt(packed.text);
+        }), frame, chat, carry) : [];
+        return { packed, records, ranked: eligible };
     }
 
-    reason(entry) { return this.w.options().sceneRecall && this.run?.frame ? flashbackReason(entry, this.run.frame) : ''; }
+    restriction({ live = false } = {}) {
+        if (!this.w.options().sceneRecall) return () => '';
+        const run = this.run;
+        const frame = !live && run && !run.finished && run.frame || this.frame();
+        return frame.flashback ? entry => flashbackReason(entry, frame) : () => '';
+    }
 
     selection() { return this.run?.packed || { items: [], tokens: 0 }; }
     recordReasons() { return new Map((this.run?.records || []).map(item => [M.record(item.entry).id, item.reason])); }

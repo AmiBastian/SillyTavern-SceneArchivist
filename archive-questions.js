@@ -44,11 +44,13 @@ export class ArchiveQuestions {
         w.h.assert();
         if (current.identity !== run.identity || current.archive !== run.archive || current.storyId !== run.storyId
             || current.sourceId !== run.sourceId || checkEpoch && current.epoch !== run.epoch) throw new Error('The chat or archive changed during recall. Ask again in the current chat.');
+        const reviews = rows.some(row => M.record(row.parent).type === 'recap') ? M.recapReview(w.entries) : new Map();
+        const time = w.sceneRecall?.restriction({ live: true });
         for (const row of rows) {
             const parent = w.find(M.record(row.parent).id);
             if (!parent || !M.active(parent) || parent.disable || M.record(parent).storyId !== run.storyId
-                || M.hash(parent.content) !== row.parentHash || row.original && (correctedSource(parent)
-                    || w.sceneRecall?.reason(parent) || !originalCurrent({ ...row, parent }, run.sourceId, w.h.context().chat || []))) {
+                || reviews.has(M.record(parent).id) || M.hash(parent.content) !== row.parentHash || row.original && (correctedSource(parent)
+                    || time?.(parent) || !originalCurrent({ ...row, parent }, run.sourceId, w.h.context().chat || []))) {
                 throw new Error('The recalled evidence changed. Ask again before using its source link.');
             }
         }
@@ -56,15 +58,17 @@ export class ArchiveQuestions {
 
     saved(question, queries = []) {
         const w = this.w;
+        const reviews = M.recapReview(w.entries);
         return w.memoryIndex.searchMany(w.entries, question, queries, entry =>
-            M.record(entry).storyId !== w.state().storyId || excluded.has(M.record(entry).type)).slice(0, MAX_ASK_CANDIDATES);
+            M.record(entry).storyId !== w.state().storyId || excluded.has(M.record(entry).type) || reviews.has(M.record(entry).id)).slice(0, MAX_ASK_CANDIDATES);
     }
 
     originals() {
         const w = this.w, state = w.state();
         if (state.branchIntent || state.originChat && state.originChat !== w.identity()) return { rows: [], report: { unavailable: true } };
+        const time = w.sceneRecall?.restriction({ live: true }), reviews = M.recapReview(w.entries);
         return originalScenes(w.entries, { chat: w.h.context().chat || [], sourceId: w.sourceId(), storyId: state.storyId,
-            scopeReason: entry => w.sceneRecall?.reason(entry) });
+            scopeReason: entry => reviews.has(M.record(entry).id) || time?.(entry) });
     }
 
     async pack(rows, question, run) {

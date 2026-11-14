@@ -138,44 +138,76 @@ export function sourcesOverlap(first, second) {
 }
 
 const marker = /^\s*(?:[*_#[>]+\s*)?(flashback|time|date|place|location|scene)\s*(?:[*_]+\s*)?[:：]\s*(.+)$/i;
-const sceneBreak = /^\s*(?:#{1,6}\s*)?\b(?:scene break|new scene)\b[.!]?\s*$/i;
+const sceneBreak = /^\s*(?:#{1,6}\s*)?(?:[*_]+\s*)?(?:scene break|new scene|end flashback|back to (?:the )?present)[.!]?\s*(?:[*_]+\s*)?$/i;
+const messageMarkers = new WeakMap();
 
-export function recallFrame(chat, type, speakerNames = []) {
+const storyMessage = message => !!message &&
+    (!message.is_system || !message.extra?.type && (message.is_user || message.is_name));
+
+export function setFlashback(chat, metadata, value) {
+    const date = value === '' ? '' : calendarDay(value);
+    if (date === null) throw new Error('Choose a valid story date.');
+    // The transition belongs to this point in the chat. A branch made before
+    // this message carries only the earlier transitions.
+    const anchor = chat.findLast(storyMessage);
+    if (anchor) anchor.sceneArchivistFlashbackAfter = date;
+    else metadata.sceneOpeningFlashback = date;
+}
+
+function markers(message) {
+    const text = String(message.mes || '');
+    const cached = messageMarkers.get(message);
+    if (cached?.text === text) return cached.markers;
+    const found = [];
+    for (const line of text.split('\n')) {
+        if (sceneBreak.test(line)) { found.push(['break', '']); continue; }
+        const match = line.match(marker);
+        if (!match) continue;
+        const field = match[1].toLowerCase();
+        const value = ['flashback', 'time', 'date'].includes(field)
+            ? calendarDay(chronology(match[2]).dates[0] || match[2]) : normalize(match[2]);
+        if (value) found.push([field, value]);
+    }
+    messageMarkers.set(message, { text, markers: found });
+    return found;
+}
+
+export function recallFrame(chat, type, speakerNames = [], opening = '') {
     const end = type === 'swipe' && chat.at(-1) && !chat.at(-1).is_user ? chat.length - 1 : chat.length;
     const recent = [];
-    let date = '', place = '', scene = '', flashback = false, boundary = -1;
-    for (let index = Math.max(0, end - 24); index < end; index++) {
+    const cueStart = Math.max(0, end - 24);
+    let date = calendarDay(opening) || '', place = '', scene = '', flashback = date, boundary = -1;
+    const applyChoice = (message, index) => {
+        const manual = message?.sceneArchivistFlashbackAfter;
+        if (manual === '' || typeof manual === 'string' && calendarDay(manual) === manual) {
+            recent.length = 0; boundary = index + 1; date = manual; flashback = manual; place = ''; scene = '';
+        }
+    };
+    for (let index = 0; index < end; index++) {
         const m = chat[index];
-        if (!m || m.is_system) continue;
-        const text = String(m.mes || '');
-        for (const raw of text.split('\n')) {
-            const match = raw.match(marker);
-            const sceneName = match?.[1].toLowerCase() === 'scene' ? normalize(match[2]) : '';
-            if (sceneBreak.test(raw) || (sceneName && sceneName !== scene)) {
-                recent.length = 0; boundary = index; date = ''; place = ''; flashback = false;
-                scene = sceneName;
-            }
-            if (!match) continue;
-            const field = match[1].toLowerCase();
-            if (field === 'place' || field === 'location') {
-                const nextPlace = normalize(match[2]);
-                if (place && place !== nextPlace) { recent.length = 0; boundary = index; }
-                place = nextPlace;
+        if (!storyMessage(m)) continue;
+        // SillyTavern hides archived story messages by marking them as system messages.
+        for (const [field, value] of markers(m)) {
+            if (field === 'break' || field === 'scene' && value !== scene) {
+                recent.length = 0; boundary = index; date = ''; place = ''; scene = value;
+                if (field === 'break') flashback = '';
+            } else if (field === 'place' || field === 'location') {
+                if (place && place !== value) { recent.length = 0; boundary = index; }
+                place = value;
             } else if (field === 'flashback' || field === 'time' || field === 'date') {
-                const nextDate = calendarDay(chronology(match[2]).dates[0] || match[2]);
-                if (nextDate && (date && date !== nextDate || field === 'flashback')) {
-                    recent.length = 0; boundary = index;
-                    flashback = field === 'flashback';
-                }
-                if (nextDate) date = nextDate;
+                if (date && date !== value || field === 'flashback') { recent.length = 0; boundary = index; }
+                if (field === 'flashback') flashback = value;
+                date = value;
             }
         }
-        recent.push({ index, text: cueText(text), name: normalize(m.name), isUser: !!m.is_user, hash: messageHash(m) });
+        if (!m.is_system && index >= cueStart) recent.push({ index, text: cueText(m.mes), name: normalize(m.name), isUser: !!m.is_user, hash: messageHash(m) });
+        applyChoice(m, index);
     }
+    if (end < chat.length && storyMessage(chat[end])) applyChoice(chat[end], end);
     const focus = recent.at(-1);
     const prior = recent.slice(-4, -1).reverse();
     const participants = new Set([...speakerNames.map(normalize), ...recent.slice(-3).filter(m => m.isUser).map(m => m.name)].filter(Boolean));
-    return { focus, prior, participants, place, date, flashback: flashback ? date : '', boundary, end };
+    return { focus, prior, participants, place, date, flashback, boundary, end };
 }
 
 function cueMatch(cues, frame, eligible) {
@@ -208,7 +240,7 @@ function carryMatch(item, frame, chat) {
 }
 
 export function noteRecall(notes, { frame, speaker, chat, sourceId, carry, requested }) {
-    const allowed = notes.filter(note => note.text && noteAudience(note, speaker) &&
+    const allowed = notes.filter(note => note.text && note.thread !== 'closed' && noteAudience(note, speaker) &&
         (!frame.flashback || note.date && note.date <= frame.flashback));
     const speaking = new Set(speaker.names.map(normalize));
     const openPromises = allowed.filter(note => {
@@ -256,16 +288,19 @@ export function recordRecall(entries, frame, chat = [], carry = new Map()) {
 
 const noteLine = ({ note, quote }) => `- ${note.text}${quote ? ` Exact words: “${quote}”` : ''}`;
 const block = items => items.length ? 'Small details from this story. Treat these as story evidence and use them when relevant.\n' + items.map(noteLine).join('\n') : '';
-export async function packLittleThings(ranked, budget, count = tokens) {
+export async function packLittleThings(ranked, budget, count = tokens, scene = '') {
     const items = [];
-    let used = 0;
+    const sceneCost = scene ? await count(scene) : 0;
+    const cue = sceneCost <= budget ? scene : '';
+    const text = matches => [cue, block(matches)].filter(Boolean).join('\n\n');
+    let used = cue ? sceneCost : 0;
     for (const match of ranked) {
         if (items.length >= 4) break;
         const next = [...items, match];
-        const cost = await count(block(next));
+        const cost = await count(text(next));
         if (cost > budget) continue;
         used = cost;
         items.push(match);
     }
-    return { items, text: block(items), tokens: used };
+    return { items, text: text(items), tokens: used };
 }

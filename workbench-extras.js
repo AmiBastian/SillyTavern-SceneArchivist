@@ -3,6 +3,8 @@ import * as M from './memory-engine.js';
 import * as Flow from './flow.js';
 import { anchorIndex, isSkipped } from './chat-workflows.js';
 import { PromptInspection, registerMemoryTools } from './prompt-inspection.js';
+import { recordSources, protectedRecord } from './recovery-tools.js';
+import { setLittleThings, verifiedNoteSource } from './little-things.js';
 
 const el = (tag, text = '', className = '') => {
     const node = document.createElement(tag);
@@ -50,7 +52,14 @@ export class WorkbenchExtras {
         const total = Core.pendingMessages(chat).filter(message => !isSkipped(w.h.meta().rangeControl, chat[message.idx])).length;
         const archive = w.h.settings().lorebook, job = w.state().job;
         root.querySelector('#sa-story-name').textContent = archive || 'Start with one scene';
-        stats.replaceChildren(el('p', archive ? `${total - pending} of ${total} messages archived · ${pending} waiting` : 'Pick or create an archive to get started.', 'sa-hint'));
+        const progressLine = el('p', archive ? `${total - pending} of ${total} messages archived` : 'Pick or create an archive to get started.', 'sa-hint');
+        if (archive && pending) {
+            const jump = button(`${pending} waiting · Jump to next unarchived`, () =>
+                void this.jumpUnarchived().catch(error => w.h.notify(error.message, 'warning')));
+            jump.className = 'sa-text-button';
+            progressLine.append(' · ', jump);
+        }
+        stats.replaceChildren(progressLine);
         const progress = el('progress');
         progress.setAttribute('aria-label', 'Archive coverage'); progress.max = Math.max(total, 1); progress.value = Math.max(total - pending, 0);
         stats.append(progress);
@@ -65,7 +74,91 @@ export class WorkbenchExtras {
         root.querySelector('[data-sa-action=storyAttach]').hidden = !archive || w.h.isActive();
         const scope = root.querySelector('#sa-profile-scope');
         if (scope) scope.textContent = w.h.profileState?.().label || '🌐 Global workflow';
+        this.renderThreads();
         this.prompt.render();
+    }
+
+    async jumpUnarchived() {
+        const w = this.w, next = Flow.uncoveredArchiveMessages(w.h.context().chat || [], w.h.meta())[0];
+        if (!next) return w.h.notify('All eligible messages are archived.', 'info');
+        await w.h.jumpToMessage(next.idx, w.root);
+    }
+
+    renderThreads() {
+        const w = this.w, target = w.root?.querySelector('#sa-story-threads');
+        if (!target) return;
+        const run = action => () => void action().catch(error => w.h.notify(error.message, 'warning'));
+        const chat = w.h.context().chat || [], sourceId = w.sourceId(), storyId = w.state().storyId;
+        if (this.threadChat !== chat) { this.threadPage = 1; this.threadChat = chat; }
+        const storyRecords = w.entries.filter(entry => M.record(entry)?.storyId === storyId);
+        const byId = new Map(storyRecords.map(entry => [M.record(entry).id, entry]));
+        const threads = storyRecords.filter(entry => M.record(entry).type === 'thread' && M.active(entry));
+        const summary = storyRecords.find(entry => M.record(entry).type === 'state' && M.active(entry) && Core.classifyEntry(entry)?.name === 'Open Threads');
+        const summaryText = String(summary?.content || '').trim().split('\n').slice(1).join('\n').trim();
+        const rows = threads.map(entry => {
+            const r = M.record(entry);
+            const sources = [...recordSources(r), ...(r.derivedFrom || []).flatMap(id => recordSources(M.record(byId.get(id))))];
+            return { id: r.id, text: r.body || String(entry.content).split('\n').find(line => /^- /.test(line))?.slice(2) || M.title(entry),
+                due: r.due, names: M.unique([r.subject, ...(r.people || [])]), sources, hash: M.hash(entry.content),
+                canResolve: !protectedRecord(entry), pinned: r.protection?.pinned };
+        });
+        for (const note of w.littleThings().filter(note => note.thread === 'open')) {
+            const sources = [note.source, ...recordSources(M.record(byId.get(note.recordId)))];
+            rows.push({ id: note.id, text: note.text, names: note.participants, sources,
+                recordId: note.recordId, canResolve: true, note: true, hash: M.hash(note) });
+        }
+        rows.sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || Number(!!b.due) - Number(!!a.due));
+        w.root.querySelector('#sa-story-thread-count').textContent = rows.length ? `· ${rows.length}` : '';
+        const show = (this.threadPage || 1) * 20;
+        const items = rows.slice(0, show).map(item => {
+            const row = el('article', '', 'sa-result');
+            row.append(el('p', item.text, 'sa-prose'));
+            const details = [...item.names, item.due && `Due ${item.due}`, !item.canResolve && 'Protected'].filter(Boolean);
+            if (details.length) row.append(el('p', details.join(' · '), 'sa-hint'));
+            const actions = el('div', '', 'sa-row');
+            const source = item.sources.find(source => verifiedNoteSource(source, sourceId, chat));
+            if (source) actions.append(button('Jump to source', run(() => w.library.jump(source, w.root))));
+            else if (!item.note || byId.has(item.recordId)) actions.append(button('View sources', run(() => w.showSources(item.recordId || item.id))));
+            if (item.canResolve) actions.append(button('Resolve', run(() => this.resolveThread(item))));
+            if (actions.childNodes.length) row.append(actions);
+            return row;
+        });
+        if (rows.length > show) items.push(button('Show more threads', () => { this.threadPage = show / 20 + 1; this.renderThreads(); }));
+        if (summaryText) {
+            const summaryId = M.record(summary).id, panel = el('details', '', 'sa-inline-tools');
+            panel.open = target.querySelector('.sa-story-thread-summary')?.open ?? !rows.length;
+            panel.classList.add('sa-story-thread-summary');
+            const actions = el('div', '', 'sa-row');
+            actions.append(button('View sources', run(() => w.showSources(summaryId))), button('Inspect summary', run(() => w.inspect(summaryId))));
+            panel.append(el('summary', 'Saved archive summary'), el('p', summaryText, 'sa-prose'), actions);
+            items.push(panel);
+        }
+        if (!items.length) items.push(el('p', 'No open threads saved.', 'sa-hint'));
+        target.replaceChildren(...items);
+    }
+
+    async resolveThread(item) {
+        const w = this.w, origin = w.identity(), archive = w.h.settings().lorebook;
+        if (!(await w.h.confirmText('Mark this thread resolved?\n\n' + item.text, { okButton: 'Mark resolved' }))) return;
+        if (origin !== w.identity() || archive !== w.h.settings().lorebook) return;
+        await w.withLock(async () => {
+            await w.loadBooks();
+            if (archive !== w.h.settings().lorebook) throw new Error('The story’s archive changed. Open the thread again.');
+            const books = M.copy(w.books), bases = w.bases();
+            if (item.note) {
+                const book = books[w.h.settings().lorebook], notes = w.littleThings();
+                const note = notes.find(note => note.id === item.id);
+                if (note?.thread !== 'open' || M.hash(note) !== item.hash) throw new Error('This thread changed. Review the new version first.');
+                setLittleThings(book, notes.map(note => note.id === item.id ? { ...note, thread: 'closed' } : note), w.state().storyId);
+            } else {
+                const { entry } = w.entryIn(books, item.id), r = M.record(entry);
+                if (r.type !== 'thread' || r.storyId !== w.state().storyId || !M.active(entry) || protectedRecord(entry)
+                    || M.hash(entry.content) !== item.hash) throw new Error('This thread changed. Review the new version first.');
+                M.revise(entry, entry.content, 'Resolved story thread', { status: 'resolved' });
+            }
+            await w.write(books, bases, 'Resolve story thread');
+        });
+        w.h.notify('Thread resolved.', 'success');
     }
 
     renderChip(job) {
@@ -399,6 +492,7 @@ export class WorkbenchExtras {
             case 'estimateMemories': await w.startFlow('memories', null, null, true); break;
             case 'showPromptTrace': await this.prompt.show(); break;
             case 'dockPromptTrace': await this.prompt.show(null, true); break;
+            case 'previewReply': await this.prompt.preview(); break;
             case 'setupHealth': await this.setup(); break;
             case 'profiles': await this.profiles(); break;
             case 'characterTimeline': await this.timeline(); break;

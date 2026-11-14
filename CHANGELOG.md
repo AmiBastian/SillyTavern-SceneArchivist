@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.4 · November 13, 2026
+
+- Start a dated flashback or return to the present from beside the chat composer.
+- Open **Preview next reply** from Memory Trail or Story. Review local matches and budget decisions, then load or skip a record or detail for one reply.
+- See saved promises, clues, and deadlines in **Story → Open threads**, with source links and a reviewed Resolve action.
+- Jump to the first eligible unarchived message from the waiting count on Story.
+- Mark recaps **Needs review** when linked source text changes or goes missing. Recall and Ask use the current sources, and **Preview repairs** can rebuild the recap in dependency order.
+- Keep flashback cutoffs through long scenes. Apply speaker and time limits before AI Recall, native World Info delivery, and on-demand recall.
+- Report when full detail cannot fit and keep eligible recaps available as fallback.
+- Count current-chat receipts toward original-scene search limits so unrelated archive records leave room for Ask’s source search.
+- Save verified links from individual memories to entries created in the same one-request run.
+- Rewrote the guide around a first archive, recaptured the screenshots on desktop and mobile, and recorded a walkthrough from setup to Memory Trail.
+
 ## 2.1.3 · November 12, 2026
 
 - Recap suggestions accept an optional focus, show existing recap coverage, and stay available after reload. Changed or protected sources are flagged before creating a recap.

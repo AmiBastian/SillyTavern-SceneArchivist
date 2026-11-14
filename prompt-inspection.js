@@ -1,5 +1,5 @@
 import * as M from './memory-engine.js';
-import { sharedPrefix, soloMemoryScope } from './chat-workflows.js';
+import { sharedPrefix, replyMemoryScope } from './chat-workflows.js';
 import { escape as html } from './workflow-tools.js';
 import { addReviewHandle } from './review-window.js';
 import { MemoryIndex, toolEvidence } from './memory-retrieval.js';
@@ -8,6 +8,13 @@ import { showForgotten } from './release-tools.js';
 const traceKey = 'sceneArchivistPrompt';
 const maxReplies = 24;
 const maxItems = 40;
+
+const control = (label, run) => {
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'menu_button'; button.textContent = label;
+    button.addEventListener('click', run);
+    return button;
+};
 
 export function placePromptLayers(entry) {
     if (entry.constant || M.record(entry)?.protection?.pinned) {
@@ -105,6 +112,7 @@ export class PromptInspection {
         const swipe = message.swipe_info?.[message.swipe_id ?? 0];
         if (swipe) (swipe.extra ??= {})[traceKey] = trace;
         this.lastTrace = trace;
+        w.consumeReplyChoices?.();
         for (const old of chat.slice(0, Math.max(0, chat.length - maxReplies))) {
             if (old.extra) delete old.extra[traceKey];
             for (const alternate of old.swipe_info || []) if (alternate?.extra) delete alternate.extra[traceKey];
@@ -140,6 +148,107 @@ export class PromptInspection {
         return room >= 300 ? { left: `${left}px`, width: `${Math.min(380, room)}px` } : null;
     }
 
+    async preview() {
+        const w = this.w, origin = w.identity(), archive = w.h.settings().lorebook, chat = w.h.context().chat;
+        const group = w.h.groupSpeaker?.();
+        const speakers = group?.members.filter(member => !group.enabled || group.enabled.includes(member.avatar)) || [];
+        const composer = document.querySelector('#send_textarea');
+        const root = document.createElement('div');
+        root.className = 'sa-review sa-prompt-trace sa-reply-preview';
+        root.innerHTML = '<header class="sa-trail-head"><div class="sa-trail-title"><h3>Preview next reply</h3></div></header><p class="sa-hint">Local estimate from the draft and recent chat. AI Recall, vectors, and some World Info rules can change what loads when you send.</p>';
+        const status = document.createElement('p');
+        status.className = 'sa-hint'; status.setAttribute('role', 'status');
+        const results = document.createElement('div'), refresh = control('Refresh preview', () => void draw());
+        const speaker = document.createElement('select');
+        speaker.className = 'text_pole';
+        if (group) {
+            const label = document.createElement('label');
+            label.className = 'sa-field'; label.textContent = 'Speaking character for this preview';
+            speakers.forEach(member => speaker.add(new Option(member.name || member.avatar, member.avatar)));
+            if (speakers.some(member => member.avatar === group.speaker)) speaker.value = group.speaker;
+            speaker.addEventListener('change', () => void draw());
+            label.append(speaker); root.append(label);
+        }
+        root.append(refresh, status, results);
+        let revision = 0, closed = false, limits = { loaded: maxItems, skipped: maxItems };
+        const current = () => origin === w.identity() && archive === w.h.settings().lorebook && chat === w.h.context().chat;
+        const draw = async () => {
+            const turn = ++revision;
+            const focused = document.activeElement?.dataset?.saReplyChoice;
+            refresh.disabled = true; status.textContent = 'Checking the memory budget…';
+            results.querySelectorAll('button').forEach(button => { button.disabled = true; });
+            try {
+                if (!current()) throw new Error('The chat changed. Open a new preview.');
+                if (group && !speaker.value) throw new Error('Enable a group member to preview their reply.');
+                const selected = group ? { ...group, speaker: speaker.value } : null;
+                const estimate = await w.previewReply(composer?.value || '', selected, w.h.replyPreviewContext(selected));
+                if (closed || turn !== revision) return;
+                const { accepted, omitted, little, otherNotes, budget, used, flashback, choices, availableChoices } = estimate;
+                status.textContent = `${accepted.length + little.items.length} expected · ${used.toLocaleString()} of ${budget.toLocaleString()} memory tokens${flashback ? ' · Flashback ' + flashback : ''}`;
+                const choose = (kind, id, action) => {
+                    try {
+                        if (!current()) throw new Error('The chat changed. Open a new preview.');
+                        w.setReplyChoice(kind, id, action);
+                        void draw();
+                    } catch (error) { w.h.notify(error.message, 'warning'); }
+                };
+                const row = ({ kind, id, title, reason, tokens, blocked }) => {
+                    const item = document.createElement('article');
+                    item.className = 'sa-result';
+                    item.innerHTML = `<b>${html(title)}</b><p class="sa-hint">${tokens != null ? '~' + tokens + ' tokens · ' : ''}${html(reason)}</p>`;
+                    const actions = document.createElement('div'); actions.className = 'sa-row sa-trail-actions';
+                    const key = kind + ':' + id, choice = choices.get(key);
+                    if (w.h.scanSupported && (choice || availableChoices.has(key) && !blocked)) {
+                        const add = (label, mode) => {
+                            const button = control(label, () => choose(kind, id, mode));
+                            button.dataset.saReplyChoice = key + ':' + (mode || 'clear');
+                            actions.append(button);
+                        };
+                        if (choice) add(choice === 'load' ? 'Clear Load once' : 'Clear Skip once', '');
+                        else { add('Load once', 'load'); add('Skip once', 'skip'); }
+                    }
+                    if (kind === 'record' && w.find(id)) actions.append(control('View sources', () => {
+                        if (current()) void w.showSources(id).catch(error => w.h.notify(error.message, 'warning'));
+                    }));
+                    item.append(actions);
+                    return item;
+                };
+                const section = (label, rows, key, open) => {
+                    const panel = document.createElement('details'), summary = document.createElement('summary');
+                    panel.dataset.saPreviewSection = key;
+                    panel.open = results.querySelector(`[data-sa-preview-section="${key}"]`)?.open ?? open;
+                    summary.textContent = `${label} · ${rows.length}`; panel.append(summary);
+                    if (!rows.length) panel.insertAdjacentHTML('beforeend', '<p class="sa-hint">None.</p>');
+                    panel.append(...rows.slice(0, limits[key]).map(row));
+                    if (rows.length > limits[key]) panel.append(control('Show more', () => {
+                        limits[key] += maxItems;
+                        const next = section(label, rows, key, true);
+                        panel.replaceWith(next);
+                        next.querySelector('summary').focus();
+                    }));
+                    return panel;
+                };
+                const notes = items => items.map(item => ({ kind: 'little', id: item.note.id, title: item.note.text, reason: item.reason, blocked: item.blocked }));
+                const loaded = [...accepted.map(item => ({
+                    kind: 'record', id: item.id, title: M.title(item.entry), tokens: item.cost, reason: item.reasons.join(', '),
+                })), ...notes(little.items)];
+                const skipped = [...omitted.map(item => ({ kind: 'record', ...item })), ...notes(otherNotes)];
+                skipped.sort((a, b) => Number(choices.has(b.kind + ':' + b.id)) - Number(choices.has(a.kind + ':' + a.id)));
+                results.replaceChildren(section('Expected to load', loaded, 'loaded', true), section('Other records', skipped, 'skipped', false));
+                if (focused) ([...results.querySelectorAll('[data-sa-reply-choice]')].find(button => button.dataset.saReplyChoice === focused)
+                    || [...results.querySelectorAll('[data-sa-reply-choice]')].find(button => button.dataset.saReplyChoice === focused.replace(/:(?:load|skip)$/, ':clear'))
+                    || refresh).focus();
+            } catch (error) {
+                if (closed || turn !== revision) return;
+                status.textContent = error.message;
+                results.replaceChildren();
+            } finally { if (turn === revision) refresh.disabled = false; }
+        };
+        const shown = w.h.show(root);
+        void draw();
+        try { await shown; } finally { closed = true; revision++; }
+    }
+
     async show(index = null, docked = false) {
         const w = this.w;
         this.closeDock(false);
@@ -157,6 +266,13 @@ export class PromptInspection {
         const root = document.createElement('div');
         root.className = 'sa-review sa-prompt-trace';
         if (!docked) root.append(header);
+        const origin = w.identity();
+        const openPreview = control('Preview next reply', () => {
+            if (origin !== w.identity()) return;
+            void this.preview().catch(error => w.h.notify(error.message, 'warning'));
+        });
+        openPreview.classList.add('sa-preview-trigger');
+        root.append(openPreview);
         if (!trace) {
             root.insertAdjacentHTML('beforeend', '<p class="sa-hint">No trace for this swipe. Generate a reply with an attached archive to start recording.</p>');
         } else {
@@ -350,9 +466,9 @@ export function registerMemoryTools(w) {
         if (origin !== w.identity() || !!group !== !!currentGroup || group?.speaker !== currentGroup?.speaker
             || !group && soloAvatar !== current.characters?.[current.characterId]?.avatar
             || epoch !== w.generationEpoch || !available()) return 'The chat or speaker changed.';
-        const soloScope = group ? null : soloMemoryScope(current, w.h.currentAvatar);
-        const rows = toolLookup(w.entries, entry => w.memoryScopeReason(entry, group) || w.sceneRecall?.reason(entry)
-            || soloScope?.(M.record(entry)), options, index);
+        const scope = replyMemoryScope(current, group, w.options().groupMemoryScope, w.h.currentAvatar);
+        const time = w.sceneRecall?.restriction(), reviews = M.recapReview(w.entries);
+        const rows = toolLookup(w.entries, entry => scope(M.record(entry)) || time?.(entry) || w.replySkipReason?.(M.record(entry).id) || reviews.has(M.record(entry).id), options, index);
         return toolEvidence(rows);
     };
     context.registerFunctionTool({

@@ -2,11 +2,13 @@
 // The log lives in lorebook entries delivered through a World Info outlet ({{outlet::scene_log}} in your preset).
 
 import { extension_settings, getContext } from '../../../extensions.js';
+import * as Host from '../../../../script.js';
 import { saveSettingsDebounced, generateQuietPrompt, generateRaw, chat_metadata, saveMetadata, main_api, characters, this_chid, eventSource, event_types, getCurrentChatId, getRequestHeaders, getMaxContextTokens, getMaxResponseTokens, showMoreMessages, Generate } from '../../../../script.js';
 import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { callGenericPopup, Popup, POPUP_TYPE, POPUP_RESULT } from '../../../popup.js';
 import { getCharaFilename, getStringHash, getSanitizedFilename } from '../../../utils.js';
 import { hideChatMessageRange } from '../../../chats.js';
+import * as WorldInfo from '../../../world-info.js';
 import { selected_world_info, METADATA_KEY, createWorldInfoEntry, worldInfoCache, updateWorldInfoList, reloadEditor, world_info, world_info_budget, world_info_budget_cap, world_info_recursive, world_info_max_recursion_steps } from '../../../world-info.js';
 import { oai_settings } from '../../../openai.js';
 import { getTokenCountAsync } from '../../../tokenizers.js';
@@ -412,7 +414,7 @@ async function fillKeys(plan, data, supplied = null) {
     const heur = items.map(i => Core.suggestKeys(i.content, corpus.filter(c => c !== i.content), { avoid }));
     let ai = null;
     if (supplied) {
-        ai = plan.adds.map((item, index) => Array.isArray(supplied[index]) ? supplied[index] : []);
+        ai = items.map(({ ref }) => Array.isArray(supplied[ref.outputIndex]) ? supplied[ref.outputIndex] : []);
     } else if (s.keyMode === 'ai') {
         try {
             const kp = Core.buildKeywordPrompt(items, avoid);
@@ -1112,7 +1114,7 @@ async function onEntriesLoaded(groups) {
         const data = await readFresh(book);
         if (settings().lorebook !== archive) return;
         for (const e of Object.values(storyMemoryData(data ?? {}, book).entries ?? {})) {
-            if ((!Memory.record(e) && Core.classifyEntry(e)?.type !== 'memory') || e.disable || seen.has(`${book}::${e.uid}`)) continue;
+            if ((!Memory.record(e) && Core.classifyEntry(e)?.type !== 'memory') || seen.has(`${book}::${e.uid}`)) continue;
             groups.chatLore.push({ ...e, world: book });
             seen.add(`${book}::${e.uid}`);
         }
@@ -1164,10 +1166,31 @@ function currentAvatar(avatar) {
 function groupSpeaker() {
     const ctx = getContext(), group = groupFor(ctx);
     if (!group) return null;
-    return { speaker: characters[this_chid]?.avatar || '', members: (group.members || []).map(avatar => {
+    const members = group.members || [];
+    return { speaker: characters[this_chid]?.avatar || '', enabled: members.filter(avatar => !group.disabled_members?.includes(avatar)), members: members.map(avatar => {
         const card = ctx.characters.find(character => character?.avatar === avatar);
         return { avatar, name: card?.name || '', aliases: card?.data?.nickname ? [card.data.nickname] : [] };
     }) };
+}
+
+function replyPreviewContext(group) {
+    const ctx = getContext(), chosen = group ? ctx.characters.findIndex(card => card?.avatar === group.speaker) : this_chid;
+    const card = ctx.characters?.[chosen], s = settings(), archive = s.lorebook;
+    const fields = ctx.getCharacterCardFields?.({ chid: chosen }) || {};
+    const native = WorldInfo.getWorldInfoSettings?.() || WorldInfo;
+    const worlds = new Set([...selected_world_info, chat_metadata[METADATA_KEY], power_user.persona_description_lorebook,
+        card?.data?.extensions?.world, ...(world_info.charLore?.find(entry => entry.name === getCharaFilename(chosen))?.extraBooks || []),
+        memoryBookName(), ...Object.keys(s.storyBooks?.[archive] || {})].filter(Boolean));
+    return {
+        worlds, card: card?.avatar ? getCharaFilename(chosen) : null, tags: ctx.tagMap?.[card?.avatar],
+        character: card?.name || ctx.name2, user: ctx.name1, parseRegex: WorldInfo.parseRegexFromString,
+        depth: native.world_info_depth, includeNames: native.world_info_include_names,
+        caseSensitive: native.world_info_case_sensitive, wholeWords: native.world_info_match_whole_words,
+        timed: chat_metadata.timedWorldInfo,
+        fields: { matchPersonaDescription: fields.persona, matchCharacterDescription: fields.description,
+            matchCharacterPersonality: fields.personality, matchCharacterDepthPrompt: fields.charDepthPrompt,
+            matchScenario: fields.scenario, matchCreatorNotes: fields.creatorNotes },
+    };
 }
 
 async function refreshChatUi() {
@@ -1252,7 +1275,8 @@ async function runRecall() {
     const data = await readFresh(s.lorebook);
     if (!data) return null;
     const recent = recentMessages(Number(s.recallMessages) || 4);
-    const index = Core.buildRecallIndex(data, { limit: 120, recentText: recent });
+    const excluded = workbench?.replyExclusion(Object.values(data.entries || {}));
+    const index = Core.buildRecallIndex(data, { limit: 120, recentText: recent, excluded });
     if (!index.length || !recent) return { picked: [] };
     const max = Math.max(1, Number(s.recallMax) || 4);
     const rp = Core.buildRecallPrompt(index, recent, max);
@@ -1424,10 +1448,17 @@ async function jumpToChatMessage(index, root) {
     if (origin !== getContext().chat || identity !== getCurrentChatId() || origin[index] !== message) return;
     const target = document.querySelector(`#chat .mes[mesid="${index}"]`);
     if (!target) throw new Error('Load the earlier messages in this chat to jump there.');
-    root.closest('dialog')?.querySelector('.popup-button-ok')?.click();
-    for (const panel of document.querySelectorAll('dialog[open] :is(.sa-timeline, .sa-popwrap)')) {
-        panel.closest('dialog')?.querySelector('.popup-button-ok')?.click();
+    const dialogs = new Set([root?.closest('dialog[open]'), ...[...document.querySelectorAll('dialog[open] :is(.sa-timeline, .sa-popwrap)')]
+        .map(panel => panel.closest('dialog[open]'))]);
+    for (const dialog of dialogs) {
+        const close = dialog?.querySelector('.popup-button-ok');
+        if (close && dialog.open) {
+            const closed = new Promise(resolve => dialog.addEventListener('close', resolve, { once: true }));
+            close.click();
+            await closed;
+        }
     }
+    if (origin !== getContext().chat || identity !== getCurrentChatId() || origin[index] !== message) return;
     target.scrollIntoView({ block: 'center', behavior: 'auto' });
     target.classList.add('sa-chat-jump');
     setTimeout(() => target.classList.remove('sa-chat-jump'), 2400);
@@ -1551,7 +1582,7 @@ jQuery(async () => {
         if (dock) $('#extensions_settings2').append(settingsHtml());
         else $('body').append(`<div id="sa_holder" style="display:none">${panelHtml()}</div>`);
         workbench = new Workbench({
-            settings, meta, groupSpeaker, currentAvatar, listChatFiles, checkSetup, profileState, bindProfile, memoryPeers, attachArchive: attachToChat,
+            settings, meta, groupSpeaker, replyPreviewContext, currentAvatar, listChatFiles, checkSetup, profileState, bindProfile, memoryPeers, attachArchive: attachToChat,
             wasRenamed: (from, to) => Date.now() - (recentRenames.get(JSON.stringify([chatOwner(getContext()), chatName(from), chatName(to)])) || 0) < 60000,
             tokenizerKey: () => JSON.stringify([main_api, getContext().getCurrentModel?.(), power_user.tokenizer, oai_settings.chat_completion_source]),
             openPanel: openPanelPopup, jumpToMessage: jumpToChatMessage, context: () => ({ ...getContext(), chatId: getCurrentChatId(), characterId: this_chid }),
@@ -1560,7 +1591,7 @@ jQuery(async () => {
             createBook: async name => { if (!getContext().getWorldInfoNames().includes(name) && !(await createBookConfirmed(name))) throw new Error('Could not create ' + name); await updateWorldInfoList(); },
             makeEntry: (name, data) => createWorldInfoEntry(name, data), register: registerStoryBook,
             memoryBook: memoryBookName, memoryBookFor, own: storyMemoryData, options: coreOpts,
-            assert: assertCurrentChat, isBusy: () => busy, isActive: () => !!settings().lorebook && !!isLorebookActive(settings().lorebook),
+            assert: assertCurrentChat, isBusy: () => busy, isGenerating: Host.isGenerating, isActive: () => !!settings().lorebook && !!isLorebookActive(settings().lorebook),
             begin: () => { if (busy) return false; busy = true; operationChat = getContext().chat; operationRevision = chatRevision; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', true); return true; },
             end: () => { pendingUndo = null; busy = false; operationChat = null; $('.sa-run,.sa-mem-run,.sa-cond-run').prop('disabled', false); },
             confirmRecovered: async (name, actual) => { if (pendingUndo) { Journal.confirmWrite(pendingUndo.journal, name, actual); await persistMeta(); } },

@@ -79,17 +79,20 @@ export function entrySettings(e) {
         memoryReceipt: r?.memoryReceipt, learnedAt: r?.learnedAt, covers: r?.covers, derivedFrom: r?.derivedFrom };
 }
 
-export function repairOrder(entries, roots) {
+export function repairOrder(entries, roots, recapReviews = M.recapReview(entries)) {
     const all = new Map(entries.filter(M.record).map(e => [M.record(e).id, e])), affected = new Set(roots), selected = new Set();
     let more = true;
     while (more) { more = false; for (const [id, e] of all) if (!affected.has(id) && [...(M.record(e).derivedFrom || []), ...(M.record(e).covers || [])].some(x => affected.has(x))) { affected.add(id); more = true; } }
-    for (const id of affected) if (all.has(id) && ['current', 'stale'].includes(M.record(all.get(id)).status) && (M.record(all.get(id)).status === 'stale' || !roots.includes(id))) selected.add(id);
+    for (const id of affected) if (all.has(id) && ['current', 'stale'].includes(M.record(all.get(id)).status) && (M.record(all.get(id)).status === 'stale' || recapReviews.has(id) || !roots.includes(id))) selected.add(id);
     const ordered = [], visiting = new Set(), visited = new Set();
     const visit = id => {
         if (visited.has(id)) return;
         if (visiting.has(id)) throw new Error('These records contain a circular dependency. Correct their sources before rebuilding.');
         visiting.add(id); const r = M.record(all.get(id));
-        for (const dep of [...(r.derivedFrom || []), ...(r.covers || [])]) if (selected.has(dep)) visit(dep);
+        for (const dep of [...(r.derivedFrom || []), ...(r.covers || [])]) {
+            if (recapReviews.has(dep)) selected.add(dep);
+            if (selected.has(dep)) visit(dep);
+        }
         visiting.delete(id); visited.add(id); ordered.push(all.get(id));
     };
     for (const id of selected) visit(id);

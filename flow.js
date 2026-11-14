@@ -44,6 +44,8 @@ export function archiveAnswer(raw) {
     return { raw: obj.archive, keywords: Array.isArray(obj.keywords) ? obj.keywords : [], littleThings: obj.littleThings };
 }
 
+export const archiveOutputId = index => `new-archive-${index + 1}`;
+
 export function trackerAnswer(raw, trackers) {
     const result = M.parseJSON(raw)?.trackers;
     if (!Array.isArray(result) || result.length !== trackers.length) throw new Error('The response must contain every enabled tracker exactly once.');
