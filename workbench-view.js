@@ -187,10 +187,12 @@ function mountStoryTools(w) {
         <div class="sa-row">${button('storyThorough', '📚 Archive thoroughly')}${button('storyRange', '🎯 Choose range')}${button('storyAttach', '🔗 Attach archive to this chat', 'hidden')}${button('estimateThorough', '📊 Estimate this run')}</div>
         <p class="sa-hint">Summaries, character memories and enabled trackers, with one review. The lore can be dramatic. The buttons can behave.</p>
     </section>`;
-    w.panes.story.insertAdjacentHTML('beforeend', `<details class="sa-story-secondary sa-open-threads"><summary>🧵 Open threads <span id="sa-story-thread-count" class="sa-hint"></span></summary><div id="sa-story-threads"></div></details>
-        <section class="sa-story-secondary"><h3>🗂️ Recently saved</h3><ul id="sa-story-recent"></ul></section>
-        <section class="sa-story-secondary"><h3>Get started or troubleshoot</h3><div class="sa-row">${button('workflowPreset', 'Choose a workflow')}${button('setupHealth', 'Check setup')}${button('forgotten', 'Why was this forgotten?')}${button('safeDiagnostics', 'Export reviewed diagnostics')}${button('groundingCheck', 'Test helper grounding, up to 5 requests')}</div></section>
-        <section class="sa-story-secondary"><h3>🔎 Memory Trail</h3><p id="sa-story-trace" class="sa-hint"></p><div class="sa-row">${button('dockPromptTrace', '🔎 Open trail beside chat')}${button('previewReply', 'Preview next reply')}</div></section>`);
+    w.panes.story.insertAdjacentHTML('beforeend', `<div class="sa-story-cards">
+        ${card('🧵 Open threads <span id="sa-story-thread-count" class="sa-hint"></span>', '<div id="sa-story-threads"></div>', false)}
+        ${card('🗂️ Recently saved', '<ul id="sa-story-recent"></ul>', false)}
+        ${card('Get started or troubleshoot', `<div class="sa-row">${button('workflowPreset', 'Choose a workflow')}${button('setupHealth', 'Check setup')}${button('forgotten', 'Why was this forgotten?')}${button('safeDiagnostics', 'Export reviewed diagnostics')}${button('groundingCheck', 'Test helper grounding, up to 5 requests')}</div>`, false)}
+        ${card('🔎 Memory Trail', `<p id="sa-story-trace" class="sa-hint"></p><div class="sa-row">${button('dockPromptTrace', '🔎 Open trail beside chat')}${button('previewReply', 'Preview next reply')}</div>`, false)}
+    </div>`);
     const range = w.root.querySelector('#sa-range-preview');
     range.insertAdjacentHTML('beforebegin', '<p id="sa-range-anchor-note" class="sa-hint" hidden></p>');
     range.insertAdjacentHTML('afterend', `<div class="sa-row">${button('rangeClear', '🧽 Clear picks')}${button('estimateRange', '📊 Estimate this range')}${button('sharedFiling', '📂 Shared filing options', 'hidden')}</div>

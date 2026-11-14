@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.5 · November 14, 2026
+
+- Put the flashback calendar inside a compact, theme-aware popup. Start from the clock by the chat box, then pick a day or type the story date.
+- Make the four secondary Story sections collapsible. Open threads keeps its count visible when closed.
+- Update the screenshots and walkthroughs for the calendar and Story sections.
+
 ## 2.1.4 · November 13, 2026
 
 - Start a dated flashback or return to the present from beside the chat composer.

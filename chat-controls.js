@@ -1,5 +1,6 @@
 import { anchorMessage, isSkipped, rangeControl, resolveEndpoints, setEndpoint, toggleSkipped } from './chat-workflows.js';
 import { archivedRanges } from './core.js';
+import { flashbackPicker } from './flashback-picker.js';
 import { messageHash } from './memory-engine.js';
 
 const actionButton = (label, action) => {
@@ -205,44 +206,51 @@ export class ChatControls {
     mountSceneControls() {
         const composer = document.querySelector('#send_form');
         if (!composer) return;
+        const run = action => void action().catch(error => this.w.h.notify(error.message, 'warning'));
+        this.flashbackStart = actionButton('', () => run(() => this.chooseFlashback()));
+        this.flashbackStart.className = 'sa-flashback-start fa-solid fa-clock-rotate-left';
+        this.flashbackStart.title = 'Start flashback';
+        this.flashbackStart.setAttribute('aria-label', 'Start flashback');
+        this.flashbackStart.setAttribute('aria-haspopup', 'dialog');
+        const toolbar = composer.querySelector('#leftSendForm') || composer;
+        toolbar.append(this.flashbackStart);
         this.sceneControls = document.createElement('div');
         this.sceneControls.className = 'sa-composer-scene';
         this.sceneControls.hidden = true;
-        this.sceneControls.innerHTML = '<span class="sa-hint" role="status" hidden></span><button type="button" class="menu_button">🕰️ Start flashback</button><button type="button" class="menu_button" hidden>Back to present</button>';
-        const [start, end] = this.sceneControls.querySelectorAll('button');
-        const run = action => void action().catch(error => this.w.h.notify(error.message, 'warning'));
-        start.addEventListener('click', () => run(() => this.chooseFlashback()));
+        this.sceneControls.innerHTML = `<span role="status"></span>
+            <button type="button" class="menu_button" aria-haspopup="dialog">Change date</button>
+            <button type="button" class="menu_button">Back to present</button>`;
+        const [change, end] = this.sceneControls.querySelectorAll('button');
+        change.addEventListener('click', () => run(() => this.chooseFlashback()));
         end.addEventListener('click', () => run(() => this.changeFlashback('')));
-        composer.before(this.sceneControls);
+        composer.prepend(this.sceneControls);
         this.renderScene();
     }
 
     renderScene() {
         const w = this.w, controls = this.sceneControls;
         if (!controls) return;
-        controls.hidden = !w.options().sceneRecall || !w.h.isActive() || !w.h.context().chatId;
-        if (controls.hidden) return;
-        const date = w.sceneRecall.frame().flashback;
+        const available = w.options().sceneRecall && w.h.isActive() && !!w.h.context().chatId;
+        const date = available ? w.sceneRecall.frame().flashback : '';
+        this.flashbackStart.hidden = !available || !!date;
+        controls.hidden = !date;
         const status = controls.querySelector('[role="status"]');
-        const [start, end] = controls.querySelectorAll('button');
-        status.textContent = date ? '🕰️ Flashback · ' + new Date(date + 'T00:00:00Z').toLocaleDateString(undefined, {
-            timeZone: 'UTC', year: 'numeric', month: 'short', day: 'numeric',
+        const label = date ? '🕰️ Flashback · ' + new Date(date + 'T00:00:00Z').toLocaleDateString(undefined, {
+            timeZone: 'UTC', calendar: 'gregory', year: 'numeric', month: 'short', day: 'numeric',
         }) : '';
-        status.hidden = end.hidden = !date;
-        start.textContent = date ? 'Change date' : '🕰️ Start flashback';
+        if (status.textContent !== label) status.textContent = label;
     }
 
     async chooseFlashback() {
         const w = this.w, chat = this.chat(), origin = w.identity();
         const frame = w.sceneRecall.frame();
-        const root = document.createElement('div');
-        root.className = 'sa-review';
-        root.innerHTML = `<h3>${frame.flashback ? 'Change flashback date' : 'Start flashback'}</h3><label class="sa-field"><span>Story date</span><input class="text_pole" type="date" required></label>`;
-        const input = root.querySelector('input');
-        input.value = frame.flashback || frame.date;
-        if (await w.h.confirm(root, { okButton: 'Set flashback date', large: false, canConfirm: () => input.reportValidity() })) {
+        const picker = flashbackPicker(frame.flashback ? 'Change flashback date' : 'Start flashback', frame.flashback || frame.date);
+        if (await w.h.confirm(picker.root, {
+            okButton: 'Set flashback date', wide: false, large: false, canConfirm: picker.validate,
+            onOpen: popup => popup.dlg.setAttribute('aria-labelledby', 'sa-flashback-title'),
+        })) {
             if (origin !== w.identity() || chat !== this.chat()) return;
-            await this.changeFlashback(input.value);
+            await this.changeFlashback(picker.date());
         }
     }
 
@@ -253,6 +261,7 @@ export class ChatControls {
         w.sceneRecall.setFlashback(date);
         this.renderScene();
         await w.persist();
-        this.sceneControls?.querySelector(date ? 'button:last-child' : 'button:first-of-type')?.focus();
+        const next = date ? this.sceneControls?.querySelector('button:last-child') : this.flashbackStart;
+        next?.focus();
     }
 }
