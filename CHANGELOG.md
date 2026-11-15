@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.8 · November 15, 2026
+
+- Check a recap for all missing required dates, times, and quotations in one pass. Use the retained draft and relevant sources for a focused correction when they fit.
+- Keep an incomplete recap available under **Edit recap draft** so you can restore the details yourself and continue to review.
+
 ## 2.1.7 · November 15, 2026
 
 - Create one titled recap for the selection, with a separate writing prompt and a title you can edit in review. Save the recap inside the log after the opening and legend, with links to the original entries in **Sources**.

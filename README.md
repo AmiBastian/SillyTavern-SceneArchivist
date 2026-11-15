@@ -1,4 +1,4 @@
-# Scene Archivist 2.1.7
+# Scene Archivist 2.1.8
 
 Your character can remember a grudge from childhood but somehow the brass key you gave them four messages ago is gone. Of course it is.
 
@@ -205,7 +205,7 @@ Reviewed archive and condensation runs can offer suggestions. Approve the ones y
 | A shorter character memory list | Use **Tools → Maintain → Character memories → Condense character memories**. **Organize saved memories** is a separate reviewed rewrite. |
 | A shorter diary | Use **Characters → Character diaries → Condense diary**. |
 
-The **Token target** is flexible. Use **0** to let the model aim for the shortest faithful wording. The review checks dates, times, quotations, and required structure. Read the comparison for subtler things such as motives, promises, and who did what. If a required detail drops out, Scene Archivist retries with specific feedback. If the retry fails, edit the writing prompt for that mode and choose **Retry failed stage**.
+The **Token target** is flexible. Use **0** to let the model aim for the shortest faithful wording. The review checks dates, times, quotations, and required structure. Read the comparison for subtler things such as motives, promises, and who did what. If a recap is missing required details, Scene Archivist sends them together in one correction request, using the draft and relevant sources when they fit the model's context. If details are still missing, choose **Edit recap draft** in the job panel to see the full list, read those originals, and correct the draft. **Check corrected draft** runs validation before opening the normal recap review. You can also use **Retry failed stage** for another model attempt.
 
 Use **Recap writing prompt** for the combined recap's title, sections, and style. Use **Archive condense prompt** for individual entries. If you had customized the shared prompt, its wording is copied into the recap prompt on upgrade. Character memories have separate prompt controls under **Maintain → Character memories**.
 

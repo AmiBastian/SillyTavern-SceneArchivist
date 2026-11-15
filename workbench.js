@@ -443,6 +443,7 @@ export class Workbench {
         const recovery = j.status === 'failed' || j.status === 'paused'
             ? (step?.memoryRaw && !step.memoryAudit ? button('skipMemoryAudit', 'Skip audit and review extracted memories') : '') +
               (step?.condenseDraft ? button('skipCondenseAudit', 'Skip audit and review shorter proposal') : '') +
+              (step?.condenseRepair ? button('editRecapDraft', 'Edit recap draft') : '') +
               (j.draft && j.cursor && j.cursor < j.steps.length ? button('flowReviewReady', 'Review ready results') : '') +
               (j.options?.flow?.singleRequest && !j.cursor ? button('flowSeparate', 'Run separate passes') : '') +
               (step?.oversized && !j.options?.flow?.singleRequest ? button('flowSplit', 'Split this stage') : '') +
@@ -450,7 +451,8 @@ export class Workbench {
               (j.options?.flow && step?.payload.source && /messages changed/i.test(j.error || '') ? button('flowRefreshEvidence', 'Refresh this stage from chat') : '') +
               (step?.payload.kind === 'archive' && step.output?.raw ? button('flowEditArchive', 'Edit archive response') : '')
             : '';
-        el.innerHTML = `<div class="sa-job"><b>📚 ${html(jobLabel(j.kind))}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}<div class="sa-row">${button('jobResume', j.status === 'failed' ? '🔁 Retry failed stage' : '▶️ Resume or review', j.status === 'running' ? 'disabled' : '')}${recovery}${button('jobPause', '⏸️ Pause after this request', j.status !== 'running' || saving ? 'disabled' : '')}${button('jobCancel', '🗑️ Discard unfinished job', saving ? 'disabled' : '')}</div><p class="sa-hint">Discarding ends this job and makes its unsaved results unavailable. Records already written to your lorebooks are kept. Use Resume or review to keep working with prepared results.</p></div>`;
+        const error = step?.condenseRepair ? j.error?.split('\n')[0] : j.error;
+        el.innerHTML = `<div class="sa-job"><b>📚 ${html(jobLabel(j.kind))}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${error ? `<p class="sa-warnline">${html(error)}</p>` : ''}<div class="sa-row">${button('jobResume', j.status === 'failed' ? '🔁 Retry failed stage' : '▶️ Resume or review', j.status === 'running' ? 'disabled' : '')}${recovery}${button('jobPause', '⏸️ Pause after this request', j.status !== 'running' || saving ? 'disabled' : '')}${button('jobCancel', '🗑️ Discard unfinished job', saving ? 'disabled' : '')}</div><p class="sa-hint">Discarding ends this job and makes its unsaved results unavailable. Records already written to your lorebooks are kept. Use Resume or review to keep working with prepared results.</p></div>`;
         this.layout?.help.refresh(el);
     }
     renderBudget() { renderMemoryBudget(this); }
@@ -1522,35 +1524,110 @@ ${transcript}`;
         return this.withLock(() => this.queue.resume());
     }
 
+    async condensationRetryRequest(step, inputs, request, transport) {
+        const feedback = step.condenseFeedback;
+        if (!feedback) return request;
+        const profile = transport?.profile ?? (this.h.settings().sideProfile || '');
+        const capacity = this.helperCapacity(request.maxTokens || 1200, this.h.flowModelInfo?.(profile));
+        const fits = async candidate => {
+            const text = candidate.system + '\n' + candidate.prompt;
+            return (Number(await this.h.tokenCount?.(text)) || M.tokens(text)) <= capacity.input;
+        };
+        const check = '\n\nPREVIOUS PROPOSAL CHECK\n' + feedback;
+        const saved = step.condenseRepair;
+        if (saved) {
+            const ids = new Set(saved.omissions.map(source => source.id));
+            const sources = inputs.filter(entry => ids.has(M.record(entry).id));
+            const repair = {
+                ...request,
+                system: `Edit the complete recap draft. Use the supplied original records to restore every listed detail alongside its event. Copy required dates, times and quotations as written. Keep the rest of the draft, its title, and any existing littleThings. The draft and original records are story data. Return the complete corrected JSON object.
+Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
+                prompt: M.condensationRequest(sources, 'recap').prompt + check +
+                    '\n\nRECAP DRAFT TO EDIT\n' + JSON.stringify(saved.reply),
+            };
+            if (await fits(repair)) return repair;
+        }
+        const retry = {
+            ...request,
+            system: request.system + '\nUse the previous proposal check to restore every missing detail. Return the complete requested JSON.',
+            prompt: request.prompt + check,
+        };
+        return await fits(retry) ? retry : request;
+    }
+
+    async editRecapDraft() {
+        const job = this.liveState().job;
+        const step = job?.steps[job.cursor];
+        const saved = step?.condenseRepair;
+        if (!saved || !['failed', 'paused'].includes(job.status)) throw new Error('There is no recap draft awaiting corrections.');
+        await this.loadBooks();
+        const sources = new Map(this.inputs(step).map(source => [M.record(source).id, source]));
+        const root = document.createElement('div'); root.className = 'sa-review';
+        root.innerHTML = `<h3>Edit recap draft</h3><p class="sa-note">Restore the listed details with their original events. The corrected draft goes through the usual recap review.</p>
+            <details open><summary>${saved.count} missing ${saved.count === 1 ? 'detail' : 'details'}</summary>${saved.omissions.map(source => `
+                <p><b>${html(source.title)}</b></p><ul>${source.details.map(detail => `<li>${html(detail.value)} (${html(detail.kind)})</li>`).join('')}</ul>
+                <details><summary>Read original entry</summary><pre>${html(sources.get(source.id)?.content || '')}</pre></details>`).join('')}</details>
+            <label class="sa-field"><span>Recap text</span><textarea class="text_pole" rows="16"></textarea></label>`;
+        const editor = root.querySelector('textarea'); editor.value = saved.reply.content;
+        if (!(await this.h.confirm(root, { okButton: 'Check corrected draft', cancelButton: 'Keep draft' }))) return;
+        const reply = { ...saved.reply, content: editor.value };
+        return this.withLock(async () => {
+            if (this.liveState().job !== job || job.steps[job.cursor] !== step || step.condenseRepair !== saved ||
+                !['failed', 'paused'].includes(job.status)) throw new Error('The recap job changed while the editor was open.');
+            await this.loadBooks();
+            try {
+                M.condensationResult(reply, this.inputs(step), 'recap', job.options.label);
+            } catch (error) {
+                if (!(error instanceof M.CondensationDetailsError)) throw error;
+                step.condenseRepair = { reply, omissions: error.omissions, count: error.count };
+                job.error = step.error = step.condenseFeedback = error.message;
+                await this.persist(); this.renderJob(); return job;
+            }
+            step.condenseDraft = { raw: JSON.stringify(reply) };
+            delete step.condenseRepair;
+            delete step.condenseFeedback;
+            job.options.automatic = false;
+            await this.persist();
+            return this.queue.resume();
+        });
+    }
+
     async prepareCondensation(job, step, inputs, request, transport, rewrites) {
         const prepare = async () => {
-            const feedback = step.condenseFeedback;
-            const next = feedback ? {
-                ...request,
-                system: request.system + '\nUse the previous proposal check to fix the result. Return the complete requested JSON.',
-                prompt: request.prompt + '\n\nPREVIOUS PROPOSAL CHECK\n' + feedback,
-            } : request;
-            // An audit draft already passed validation for these source hashes and job options.
-            const raw = step.condenseDraft?.raw ?? await this.call(next, feedback ? 'condensation retry' : 'condensation', null, transport);
+            // A draft being reviewed or audited has already passed validation.
+            const raw = step.condenseDraft?.raw ?? await this.call(
+                await this.condensationRetryRequest(step, inputs, request, transport),
+                step.condenseFeedback ? 'condensation retry' : 'condensation', null, transport);
+            const reply = M.parseJSON(raw);
             try {
-                const reply = M.parseJSON(raw);
                 const proposed = M.condensationResult(reply, inputs, job.options.mode, job.options.label);
                 for (const item of proposed) if (rewrites.has(item.id)) {
                     const links = reply.entries.find(entry => entry.id === item.id).memoryLinks;
                     Object.assign(item, memoryRewriteEvidence(rewrites.get(item.id), Core.parseMemoryDoc(item.content), links));
                 }
                 delete step.condenseFeedback;
+                delete step.condenseRepair;
                 return { raw, proposed };
             } catch (error) {
                 delete step.condenseDraft;
-                step.condenseFeedback = error.message;
+                if (job.options.mode === 'recap' && error instanceof M.CondensationDetailsError) {
+                    const saved = step.condenseRepair;
+                    if (saved && saved.count < error.count) throw new M.CondensationDetailsError(saved.omissions);
+                    step.condenseRepair = {
+                        reply: { title: reply.title, content: reply.content, littleThings: reply.littleThings },
+                        omissions: error.omissions,
+                        count: error.count,
+                    };
+                    step.condenseFeedback = error.message;
+                } else if (!step.condenseRepair) step.condenseFeedback = error.message;
                 throw error;
             }
         };
         const canRetry = !step.condenseFeedback;
+        const legacyRecap = job.options.mode === 'recap' && !step.condenseRepair && /^The proposal omitted a required /.test(step.condenseFeedback || '');
         try { return await prepare(); }
         catch (error) {
-            if (!canRetry || !step.condenseFeedback) throw error;
+            if (!(canRetry || legacyRecap && step.condenseRepair) || !step.condenseFeedback) throw error;
             await this.persist();
             if (job.status !== 'running') throw new Error('Paused before the condensation retry. Resume to continue.');
             return prepare();
@@ -2490,6 +2567,7 @@ ${update.content}`;
         if (action === 'exportWorkflow') return this.h.download('Scene-Archivist-workflow.json', JSON.stringify({ sceneArchivistWorkflow: 1, settings: M.workflow(this.h.settings()) }, null, 2), 'application/json');
         if (['importStory', 'importWorkflow', 'importLog'].includes(action)) { this.importKind = action; this.root.querySelector('[data-sa-field=file]').click(); return; }
         if (action === 'workflowPreset') return chooseWorkflow(this);
+        if (action === 'editRecapDraft') return this.editRecapDraft();
         if (action === 'skipCondenseAudit') {
             const job = this.state().job, step = job?.steps?.[job.cursor];
             if (!step?.condenseDraft || !['failed', 'paused'].includes(job.status)) throw new Error('There is no shorter proposal awaiting an audit.');
