@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.6 · November 15, 2026
+
+- Make interrupted jobs resumable when the chat reopens. Finish approved saves with the prepared results and keep Undo records for all completed writes.
+
 ## 2.1.5 · November 14, 2026
 
 - Put the flashback calendar inside a compact, theme-aware popup. Start from the clock by the chat box, then pick a day or type the story date.

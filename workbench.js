@@ -89,6 +89,15 @@ export class Workbench {
     async inBulk(job, fn) { return job.options.bulk ? new BulkRun(this, job).run(fn) : fn(); }
     identity() { return String(this.h.context().chatId || this.h.context().chatMetadata?.chat_id || this.h.meta().workbench?.storyId || ''); }
     async persist() { this.baseHost.assert(); await this.baseHost.saveMeta(); }
+    async recoverInterruptedJob() {
+        const job = this.liveState().job;
+        if (job?.status !== 'running' || this.queue.running || this.baseHost.isBusy()) return;
+        job.error = job.phase === 'saving' || job.approval
+            ? 'Saving was interrupted. Resume or review to finish the approved changes.'
+            : 'This job was interrupted. Resume or review to continue.';
+        await this.queue.pause();
+    }
+    isSavingJob(job) { return job?.status === 'running' && (job.phase === 'saving' || !!job.approval); }
     async withLock(fn) {
         if (!this.h.begin()) throw new Error('An operation is already running. Pause or finish it first.');
         try { await this.ensureBranch(); return await fn(); } finally { this.h.end(); }
@@ -424,7 +433,11 @@ export class Workbench {
         const active = !['done', 'canceled'].includes(j.status);
         el.dataset.status = j.status;
         if (!active) { el.replaceChildren(); return; }
-        const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared${j.approvedRecords?.length ? ` · ${j.approvedRecords.length} approved records saved` : ''} · ${j.phase === 'review' ? 'ready for one combined review' : j.phase === 'saving' ? 'saving approved changes' : j.approvedRecords?.length ? 'remaining results await approval' : 'story books unchanged until approval'}` : `${j.cursor}/${j.steps.length} steps saved`;
+        const saving = this.isSavingJob(j);
+        const stage = j.phase === 'saving' || j.approval ? (saving ? 'saving approved changes' : 'approved changes ready to resume')
+            : j.phase === 'review' ? 'ready for one combined review'
+                : j.approvedRecords?.length ? 'remaining results await approval' : 'story books unchanged until approval';
+        const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared${j.approvedRecords?.length ? ` · ${j.approvedRecords.length} approved records saved` : ''} · ${stage}` : `${j.cursor}/${j.steps.length} steps saved`;
         const step = j.steps[j.cursor];
         const recovery = j.status === 'failed' || j.status === 'paused'
             ? (step?.memoryRaw && !step.memoryAudit ? button('skipMemoryAudit', 'Skip audit and review extracted memories') : '') +
@@ -436,7 +449,7 @@ export class Workbench {
               (j.options?.flow && step?.payload.source && /messages changed/i.test(j.error || '') ? button('flowRefreshEvidence', 'Refresh this stage from chat') : '') +
               (step?.payload.kind === 'archive' && step.output?.raw ? button('flowEditArchive', 'Edit archive response') : '')
             : '';
-        el.innerHTML = `<div class="sa-job"><b>📚 ${html(jobLabel(j.kind))}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}${active ? `<div class="sa-row">${button('jobResume', j.status === 'failed' ? '🔁 Retry failed stage' : '▶️ Resume or review', j.status === 'running' ? 'disabled' : '')}${recovery}${button('jobPause', '⏸️ Pause after this request', j.status !== 'running' || j.phase === 'saving' ? 'disabled' : '')}${button('jobCancel', '🗑️ Discard unfinished job', j.phase === 'saving' ? 'disabled' : '')}</div><p class="sa-hint">Discarding ends this job and makes its unapproved results unavailable. Records already written to your lorebooks are kept. Use Resume or review to keep working with prepared results.</p>` : ''}</div>`;
+        el.innerHTML = `<div class="sa-job"><b>📚 ${html(jobLabel(j.kind))}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${j.error ? `<p class="sa-warnline">${html(j.error)}</p>` : ''}<div class="sa-row">${button('jobResume', j.status === 'failed' ? '🔁 Retry failed stage' : '▶️ Resume or review', j.status === 'running' ? 'disabled' : '')}${recovery}${button('jobPause', '⏸️ Pause after this request', j.status !== 'running' || saving ? 'disabled' : '')}${button('jobCancel', '🗑️ Discard unfinished job', saving ? 'disabled' : '')}</div><p class="sa-hint">Discarding ends this job and makes its unsaved results unavailable. Records already written to your lorebooks are kept. Use Resume or review to keep working with prepared results.</p></div>`;
         this.layout?.help.refresh(el);
     }
     renderBudget() { renderMemoryBudget(this); }
@@ -2372,6 +2385,7 @@ ${update.content}`;
         this.externalActivations.clear(); this.explicitReasons.clear(); this.forcedEntries.clear();
         const rangeMemories = this.root?.querySelector('[data-sa-field=rangeMemories]');
         if (rangeMemories) rangeMemories.checked = !!this.h.settings().memoryAuto;
+        await this.recoverInterruptedJob();
         await this.refresh();
         const state = this.state(), last = state.lastOpened ? Date.parse(state.lastOpened) : null;
         state.lastOpened = M.now(); await this.persist();
@@ -2428,10 +2442,16 @@ ${update.content}`;
         if (action === 'continuityFull') return this.startContinuity('', false, true);
         if (action === 'continuity' || action === 'continuityAll') return this.startContinuity(action === 'continuityAll' ? '' : this.value('question'));
         if (action === 'jobResume') { const result = await this.withLock(() => this.queue.resume()); if (result?.status === 'done') await this.continueWorkflow(); return result; }
-        if (action === 'jobPause') return this.queue.pause();
+        if (action === 'jobPause') {
+            if (!this.isSavingJob(this.liveState().job)) return this.queue.pause();
+            return;
+        }
         if (action === 'jobCancel') {
+            const state = this.liveState(), job = state.job;
+            if (!job || this.isSavingJob(job)) return;
             if (!(await this.h.confirmText('Discard the unfinished job and its unsaved results? Changes already saved in lorebooks are kept.', { okButton: 'Discard job' }))) return;
-            this.state().followups = [];
+            if (state !== this.liveState() || job !== state.job || this.isSavingJob(job)) return;
+            state.followups = [];
             return this.queue.cancel();
         }
         if (action === 'exportStory') return this.exportStory();

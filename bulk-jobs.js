@@ -64,7 +64,7 @@ export class BulkRun {
                 books: M.copy(this.w.books), before: M.copy(this.w.books),
                 meta: M.copy({ ...meta, undo: undefined, journals: undefined, workbench: state }),
                 settings: M.copy(this.real.settings()), notices: [], archiveRanges: [],
-                approved: false, undoStarted: false,
+                approved: false,
             };
             restoreDraft(this.job.draft);
             await this.real.saveMeta();
@@ -259,6 +259,7 @@ export class BulkRun {
     }
     async saveApproval() {
         const job = this.job, d = this.data, approval = job.approval;
+        this.w.renderJob();
         this.real.undoStart();
         const archive = this.real.settings().lorebook;
         const ordered = [...Object.entries(approval.books).filter(([name]) => name !== archive), ...Object.entries(approval.books).filter(([name]) => name === archive)];
@@ -458,11 +459,8 @@ export class BulkRun {
             d.approved = true; job.phase = 'saving'; await this.real.saveMeta();
         }
         if (job.status !== 'running') return false;
-        if (!d.undoStarted) {
-            this.real.undoStart();
-            for (const [name, original] of Object.entries(d.before)) await this.real.snapshot(name, original);
-            d.undoStarted = true; await this.real.saveMeta();
-        }
+        w.renderJob();
+        this.real.undoStart();
         const archive = this.real.settings().lorebook;
         if (d.books[archive]?.sceneArchivistStory?.shared) d.books[archive].sceneArchivistStory.books = { ...(d.settings.storyBooks?.[archive] || {}), [archive]: 'archive' };
         const ordered = [...Object.entries(d.books).filter(([name]) => name !== archive), ...Object.entries(d.books).filter(([name]) => name === archive)];
@@ -475,6 +473,7 @@ export class BulkRun {
                 throw new Error(`"${name}" changed before saving this bulk run. No further books were written. Refresh and review before retrying.`);
             }
             if (written) { await this.real.confirmRecovered?.(name, current); continue; }
+            await this.real.snapshot(name, current);
             data.sceneArchivistReceipts = M.unique([...(data.sceneArchivistReceipts || []), job.id]);
             await this.real.save(name, data); this.real.reload(name);
         }

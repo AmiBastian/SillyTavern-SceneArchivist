@@ -1,4 +1,4 @@
-# Scene Archivist 2.1.5
+# Scene Archivist 2.1.6
 
 Your character can remember a grudge from childhood but somehow the brass key you gave them four messages ago is gone. Of course it is.
 
@@ -277,7 +277,7 @@ For an alternate timeline, set the policy under **Maintain → Branches**, then 
 
 **Maintain → Backups and restore → Back up this story** saves the books, source links, settings, revisions, and unfinished work. **Restore a story backup** previews the import and creates separate books. Start a fresh run in the restored destination. **Undo** verifies its writes before restoring them.
 
-When a stage fails, **Review ready results** lets you save completed work, and **Retry failed stage** resumes just the failed stage. **Resume or review** brings back a held result. A World Info edit can put a proposal on hold so you can compare the old entry, current entry, and proposed changes. **Discard unfinished job** clears pending proposals. Already saved work stays in the archive.
+When a stage fails, **Review ready results** lets you save completed work, and **Retry failed stage** resumes just the failed stage. Reopen a chat after an interrupted run, then use **Resume or review** in the job panel to continue with the prepared results or finish saving approved changes. A World Info edit can put a proposal on hold so you can compare the old entry, current entry, and proposed changes. **Discard unfinished job** clears pending proposals. Already saved work stays in the archive.
 
 <details>
 <summary>Sharing, branch settings, and an interrupted run</summary>

@@ -1474,6 +1474,8 @@ async function openPanelPopup() {
     panel.dataset.popped = '1';
     wrap.append(panel);
     try {
+        await workbench?.recoverInterruptedJob();
+        workbench?.renderJob();
         const popup = new Popup(wrap, POPUP_TYPE.TEXT, '', { okButton: 'Close', cancelButton: false, wide: true, large: true, allowVerticalScrolling: true });
         const shown = popup.show();
         workbench?.renderLibrary();
