@@ -183,6 +183,8 @@ Return only JSON in this shape. The names and text below are placeholders that o
 If nobody has a meaningful memory in the excerpt, return {"characters":[],"reason":"brief explanation"}.`;
 
 export const DEFAULT_ARCHIVE_CONDENSE_PROMPT = `Tighten the wording and combine repeated facts. Keep the order of events, who did what, and every distinct story detail. Use as many bullets as you need to keep the result readable.`;
+
+export const DEFAULT_ARCHIVE_RECAP_PROMPT = `Write one chronological recap with a short, specific title drawn from the main events. Group related events under descriptive headings with their dates where known. Use concise paragraphs or bullets and merge repeated accounts of the same event. Give flashbacks and earlier history their own section when that helps the reader follow the timeline. Keep each character's knowledge, changes in relationships, and unresolved commitments clear.`;
 export const DEFAULT_MEMORY_SHORTEN_PROMPT = `Tighten repeated wording within each character’s list. Preserve every distinct memory, full date, event order, and how the character learned it. Keep private knowledge, rumors, beliefs, and changes of mind attributed to the right character. Use natural, readable dated bullets.`;
 
 export const DEFAULT_CONDENSE_PROMPT = `You tidy one character's memory list from a roleplay. Merge duplicates and near-duplicates, and fold a sequence of small related memories into one clear memory, so the list is shorter without losing anything that affects how the character behaves later.
@@ -284,6 +286,7 @@ export const DEFAULT_SETTINGS = {
     condenseAbove: 12,
     condensePrompt: DEFAULT_CONDENSE_PROMPT,
     archiveCondensePrompt: DEFAULT_ARCHIVE_CONDENSE_PROMPT,
+    archiveRecapPrompt: DEFAULT_ARCHIVE_RECAP_PROMPT,
     memoryShortenPrompt: DEFAULT_MEMORY_SHORTEN_PROMPT,
     remindEvery: 0,
     memoryPrompt: DEFAULT_MEMORY_PROMPT,

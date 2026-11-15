@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.7 · November 15, 2026
+
+- Create one titled recap for the selection, with a separate writing prompt and a title you can edit in review. Save the recap inside the log after the opening and legend, with links to the original entries in **Sources**.
+- Rename, move, and remove old source IDs from an existing recap in **Inspect / edit**.
+
 ## 2.1.6 · November 15, 2026
 
 - Make interrupted jobs resumable when the chat reopens. Finish approved saves with the prepared results and keep Undo records for all completed writes.

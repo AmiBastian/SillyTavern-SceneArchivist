@@ -117,6 +117,7 @@ function settings() {
     }
     if (LEGACY_MEMORY_PROMPTS.includes(cur.memoryPrompt)) delete cur.memoryPrompt;
     if (LEGACY_CONDENSE_PROMPTS.includes(cur.condensePrompt)) delete cur.condensePrompt;
+    if (!('archiveRecapPrompt' in cur)) cur.archiveRecapPrompt = Memory.recapWritingPrompt(cur);
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) if (!(k in cur)) cur[k] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
     const units = [cur.unit, ...cur.promptLibrary.map(p => p.unit)].filter(Boolean);
     const unitSignature = JSON.stringify(units);
@@ -131,6 +132,9 @@ function settings() {
             if (CHAT_SETTINGS.has(key)) return chatSettings(target)[key];
             if (presetKeys.has(key)) {
                 const overrides = activeWorkflow(target)?.settings;
+                if (key === 'archiveRecapPrompt' && overrides && 'archiveCondensePrompt' in overrides && !(key in overrides)) {
+                    overrides[key] = Memory.recapWritingPrompt(overrides);
+                }
                 if (overrides && Object.hasOwn(overrides, key)) return overrides[key];
             }
             return target[key];
@@ -198,6 +202,7 @@ function refreshScopedControls() {
         sa_archive_cond_prompt: 'archiveCondensePrompt', sa_mem_shorten_prompt: 'memoryShortenPrompt',
         sa_recall_msgs: 'recallMessages', sa_recall_max: 'recallMax', sa_keepvis: 'keepVisible', sa_tr_days: 'trackerDays' };
     for (const [id, key] of Object.entries(fields)) $('#' + id).val(s[key]);
+    $('#sa_archive_recap_prompt').val(Memory.recapWritingPrompt(s));
     for (const [id, key] of Object.entries({ sa_mem_auto: 'memoryAuto', sa_tr_auto: 'trackerAuto', sa_recall: 'recall', sa_review: 'review', sa_hide: 'hideArchived' })) $('#' + id).prop('checked', s[key]);
     $('.sa-d-outlet').toggle(s.delivery === 'outlet');
     $('.sa-d-depth').toggle(s.delivery === 'depth');
@@ -1566,6 +1571,14 @@ function bindUi() {
         $('#sa_archive_cond_prompt').val(s.archiveCondensePrompt);
         saveSettingsDebounced();
         toastr.info('Archive condense prompt reset to the default.');
+    });
+    bindVal('#sa_archive_recap_prompt', 'archiveRecapPrompt');
+    $('#sa_archive_recap_prompt_reset').on('click', () => {
+        if (busy) return;
+        s.archiveRecapPrompt = DEFAULT_SETTINGS.archiveRecapPrompt;
+        $('#sa_archive_recap_prompt').val(s.archiveRecapPrompt);
+        saveSettingsDebounced();
+        toastr.info('Recap writing prompt reset to the default.');
     });
     refreshProfileList();
     $('#sa_side_profile, #sa_archive_profile').on('change', function () { s[this.id === 'sa_archive_profile' ? 'archiveProfile' : 'sideProfile'] = this.value; saveSettingsDebounced(); workbench?.renderFlow(); });

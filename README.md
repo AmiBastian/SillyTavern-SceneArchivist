@@ -1,4 +1,4 @@
-# Scene Archivist 2.1.6
+# Scene Archivist 2.1.7
 
 Your character can remember a grudge from childhood but somehow the brass key you gave them four messages ago is gone. Of course it is.
 
@@ -201,13 +201,15 @@ Reviewed archive and condensation runs can offer suggestions. Approve the ones y
 | What you want | What to do |
 | --- | --- |
 | A shorter version of a saved scene | Select it in Library, then use **Tools → Maintain → Condense story records** and choose **Shorten individual entries**. |
-| One recap of scenes that belong together | Select the scenes and choose **Create recap**. The recap gets its own entry with links to the full originals. |
+| One recap of scenes that belong together | Select the scenes and choose **Create recap**. Enter a title or let the model suggest one, then review the title and text before saving. |
 | A shorter character memory list | Use **Tools → Maintain → Character memories → Condense character memories**. **Organize saved memories** is a separate reviewed rewrite. |
 | A shorter diary | Use **Characters → Character diaries → Condense diary**. |
 
-The **Token target** is flexible. Use **0** to let the model aim for the shortest faithful wording. The review checks dates, times, quotations, and required structure. Read the comparison for subtler things such as motives, promises, and who did what. If a required detail drops out, Scene Archivist retries with specific feedback. If the retry fails, edit **Archive condense prompt** and choose **Resume**. Your sources are still there.
+The **Token target** is flexible. Use **0** to let the model aim for the shortest faithful wording. The review checks dates, times, quotations, and required structure. Read the comparison for subtler things such as motives, promises, and who did what. If a required detail drops out, Scene Archivist retries with specific feedback. If the retry fails, edit the writing prompt for that mode and choose **Retry failed stage**.
 
-**Archive condense prompt** applies to individual entries and recaps. Character memories have separate **Shorten character memories prompt** and **Organize existing memories prompt** controls under **Maintain → Character memories**.
+Use **Recap writing prompt** for the combined recap's title, sections, and style. Use **Archive condense prompt** for individual entries. If you had customized the shared prompt, its wording is copied into the recap prompt on upgrade. Character memories have separate prompt controls under **Maintain → Character memories**.
+
+Each recap saves as one lorebook entry after the log opening and legend. **Library → Sources** shows the linked originals. To update a saved recap, open **Library → Inspect / edit**, set its title, and select **Place with recaps after the log opening and legend** if you want to move it. **Remove source IDs from text** appears when the editor recognizes old citations. Review the preview and click **Save correction**.
 
 ### Let the AI suggest recap groups
 
@@ -221,7 +223,7 @@ Suggestions survive a reload. If the source text changes or goes missing, an aff
 <details>
 <summary>Condense prompt and recap review</summary>
 
-![Separate controls for shortening entries and creating recaps](docs/media/14-condense-controls.png?v=2.1.4-guide)
+![Recap title and writing prompt in Condense story records](docs/media/14-condense-controls.png?v=2.1.7-guide)
 ![Reviewing which full entries belong in the suggested recap](docs/media/51-recap-suggestions.png?v=2.1.4-guide)
 
 </details>

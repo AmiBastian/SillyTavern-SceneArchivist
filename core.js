@@ -357,6 +357,26 @@ function managed(data) {
     return list;
 }
 
+const logPrelude = ['opening', 'epoch', 'legend', 'recap'];
+
+export function placeRecap(data, entry, opts) {
+    const entries = managed(data).filter(({ e }) => e !== entry && matchesDelivery(e, opts));
+    // World Info orders are numbers. Insert between neighbours without adding
+    // unrelated order changes to a recap's approval or touching its sources.
+    const slot = (value, dir, fallback) => {
+        const ordered = entries.toSorted((a, b) => dir * (value(a.e) - value(b.e)) || a.e.uid - b.e.uid);
+        let last = ordered.findLastIndex(({ cl }) => cl.type !== 'recap' && logPrelude.includes(cl.type));
+        while (ordered[last + 1]?.cl.type === 'recap') last++;
+        const before = ordered[last], after = ordered[last + 1];
+        if (before && after) return (value(before.e) + value(after.e)) / 2;
+        if (before) return Math.max(0, value(before.e) + dir);
+        if (after) return Math.max(0, value(after.e) - dir);
+        return fallback;
+    };
+    entry.order = slot(e => Number(e.order) || 0, deliveryMode(opts) === 'outlet' ? -1 : 1, 100);
+    entry.displayIndex = slot(e => Number(e.displayIndex ?? e.uid), 1, entry.uid);
+}
+
 /** Build the list of changes for the review step. Nothing is modified. */
 export function planChanges(data, parsed, opts) {
     const m = managed(data);
@@ -499,7 +519,7 @@ export function applyPlan(data, plan, parsed, opts, makeEntry) {
     return report;
 }
 
-/** Re-number `order` (descending, because ST outlets list high to low) on managed entries so the outlet reads: opening, epoch, flashbacks by date, Days, states, closing. */
+/** Keep opening and legend ahead of recaps, then order the story units and state. */
 export function reorder(data, newUids, opts) {
     const m = managed(data);
     if (!m.length) return;
@@ -508,8 +528,10 @@ export function reorder(data, newUids, opts) {
     const oldList = m.filter(x => !fresh.has(x.e.uid));
     const newList = m.filter(x => fresh.has(x.e.uid));
     const lo = Math.max(0, Math.min(...(oldList.length ? oldList : m).map(x => Number(x.e.order) || 0)));
-    const rank = (t) => ({ opening: 0, epoch: 1, retro: 2, day: 3, skip: 3, memory: 4, tracker: 4.5, state: 5, closing: 6 })[t];
-    let seq = oldList.slice().sort((a, b) => rank(a.cl.type) - rank(b.cl.type) || dir * (a.e.order - b.e.order) || (a.e.uid - b.e.uid));
+    const front = type => logPrelude.includes(type) ? logPrelude.indexOf(type) : logPrelude.length;
+    const rank = type => ({ retro: 0, day: 1, skip: 1, memory: 2, tracker: 2.5, state: 3, closing: 4 })[type];
+    let seq = oldList.slice().sort((a, b) => front(a.cl.type) - front(b.cl.type) ||
+        rank(a.cl.type) - rank(b.cl.type) || dir * (a.e.order - b.e.order) || (a.e.uid - b.e.uid));
     // states in canonical order
     const stateIdx = seq.map((x, i) => x.cl.type === 'state' ? i : -1).filter(i => i >= 0);
     const states = stateIdx.map(i => seq[i]).sort((a, b) => STATE_NAMES.indexOf(a.cl.name) - STATE_NAMES.indexOf(b.cl.name));
@@ -517,7 +539,9 @@ export function reorder(data, newUids, opts) {
     for (const nw of newList.sort((a, b) => a.e.uid - b.e.uid)) {
         const t = nw.cl.type;
         let at;
-        if (t === 'retro') {
+        if (logPrelude.includes(t)) {
+            at = seq.findLastIndex(x => front(x.cl.type) <= front(t)) + 1;
+        } else if (t === 'retro') {
             const key = retroSortKey(nw.cl.heading);
             const retros = seq.map((x, i) => ({ x, i })).filter(o => o.x.cl.type === 'retro');
             at = -1;
@@ -526,7 +550,7 @@ export function reorder(data, newUids, opts) {
             }
             if (at < 0) {
                 if (retros.length) at = retros[retros.length - 1].i + 1;
-                else { const ep = seq.findIndex(x => x.cl.type === 'epoch' || x.cl.type === 'opening'); at = ep >= 0 ? ep + 1 : 0; if (seq[at - 1]?.cl.type === 'opening' && seq[at]?.cl.type === 'epoch') at += 1; }
+                else at = seq.findLastIndex(x => logPrelude.includes(x.cl.type)) + 1;
             }
         } else if (t === 'day' || t === 'skip') {
             const days = seq.map((x, i) => ({ x, i })).filter(o => o.x.cl.type === 'day' || o.x.cl.type === 'skip');
@@ -545,8 +569,7 @@ export function reorder(data, newUids, opts) {
         } else if (t === 'state') {
             const closing = seq.findIndex(x => x.cl.type === 'closing');
             at = closing >= 0 ? closing : seq.length;
-        } else if (t === 'opening') at = 0;
-        else if (t === 'closing') at = seq.length;
+        } else if (t === 'closing') at = seq.length;
         else at = seq.length;
         seq.splice(at, 0, nw);
     }

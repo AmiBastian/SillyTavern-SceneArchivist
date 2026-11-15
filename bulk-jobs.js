@@ -378,6 +378,7 @@ export class BulkRun {
                         delete change.beforeTokens;
                     }
                     if (r.type === 'recap' && !change.before && r.covers?.length) {
+                        change.recap = true;
                         const compared = job.steps.find(step => step.id === stepId)?.output?.results?.[0]?.before;
                         const sources = r.covers.map(id => current.get(id)?.content);
                         if (compared || sources.every(text => typeof text === 'string')) {
@@ -417,6 +418,10 @@ export class BulkRun {
                         continue;
                     }
                     const e = d.books[c.book].entries[c.uid];
+                    if (c.recap) {
+                        e.comment = M.recapMemo(c.content);
+                        Core.placeRecap(d.books[c.book], e, this.real.options());
+                    }
                     if (e.content !== c.content) {
                         if (M.record(e)) M.revise(e, c.content, 'Review correction', M.chronology(c.content));
                         else e.content = c.content;

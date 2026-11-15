@@ -1,6 +1,12 @@
 import * as M from './memory-engine.js';
 import { diffHtml, escape as html, proposalKey } from './workflow-tools.js';
 
+function reviewedContent(node) {
+    const text = node.querySelector('textarea').value;
+    const title = node.querySelector('[data-review-recap-title]');
+    return title && text.trim() ? M.recapText(title.value.trim() || title.defaultValue, text) : text;
+}
+
 export async function reviewChanges(workbench, changes, title = 'Review changes', note = '', options = {}) {
     if (workbench.bulkRun) return true;
     const root = document.createElement('div'); root.className = 'sa-review';
@@ -46,10 +52,12 @@ export async function reviewChanges(workbench, changes, title = 'Review changes'
             if (!c.conflict) c.include = saved.include;
         }
         const directConflict = c.conflict && Object.hasOwn(c.conflict, 'original');
+        const recap = c.recap ? M.recapParts(c.content) : null;
         const beforeTokens = c.beforeTokens ?? M.tokens(c.before || '');
         const d = document.createElement('details'); d.className = 'sa-proposal'; d.open = changes.length <= 4; d.dataset.reviewSection = c.section || '';
-        d.innerHTML = `<summary>${options.partial || c.optional ? '<input type="checkbox" data-review-include aria-label="Approve this result">' : ''}<b>${html(c.title || 'Proposed result')}</b><span class="sa-badge" data-review-tokens>${beforeTokens} → ${c.afterTokens ?? M.tokens(c.content || '')} estimated tokens</span></summary>
+        d.innerHTML = `<summary>${options.partial || c.optional ? '<input type="checkbox" data-review-include aria-label="Approve this result">' : ''}<b>${html(recap?.title || c.title || 'Proposed result')}</b><span class="sa-badge" data-review-tokens>${beforeTokens} → ${c.afterTokens ?? M.tokens(c.content || '')} estimated tokens</span></summary>
             ${c.evidence ? `<p class="sa-hint">📍 ${html(c.evidence)}</p>` : ''}
+            ${recap ? `<label class="sa-field"><span>Recap title</span><input class="text_pole" type="text" data-review-recap-title maxlength="80" value="${html(recap.title)}" ${c.conflict ? 'readonly' : ''}></label>` : ''}
             <div class="sa-review-compare${c.before || directConflict ? ' sa-has-original' : ''}${directConflict ? ' sa-has-conflict' : ''}">${directConflict ? '<div><b>Original when the job started</b><pre data-review-original></pre></div>' : ''}
                 ${c.before || directConflict ? `<div><b>${html(c.beforeLabel || 'Before')}</b><pre data-review-before></pre></div>` : ''}
                 <label><b>${html(c.afterLabel || 'Proposed')}</b><textarea class="text_pole" rows="${c.note ? 4 : 9}" ${c.note ? 'maxlength="600"' : ''} ${c.conflict ? 'readonly' : ''}></textarea></label></div>
@@ -63,16 +71,20 @@ export async function reviewChanges(workbench, changes, title = 'Review changes'
             const warning = document.createElement('p'); warning.className = 'sa-warnline'; warning.textContent = c.warning;
             d.querySelector('summary').after(warning); d.open = true;
         }
-        const textarea = d.querySelector('textarea'); textarea.value = c.content || '';
+        const textarea = d.querySelector('textarea'); textarea.value = recap?.body ?? (c.content || '');
         if (c.before || directConflict) d.querySelector('[data-review-before]').textContent = c.before || 'No saved entry in this slot.';
         if (directConflict) d.querySelector('[data-review-original]').textContent = c.conflict.original ?? 'No entry before the job started.';
         const check = d.querySelector('[data-review-include]'); if (check) { check.disabled = !!c.conflict; check.checked = !c.conflict && c.include !== false; check.addEventListener('click', e => e.stopPropagation()); }
         const diff = d.querySelector('.sa-diff');
         if (diff) diff.innerHTML = diffHtml(c.before, c.content);
-        textarea.addEventListener('input', () => {
-            d.querySelector('[data-review-tokens]').textContent = `${beforeTokens} → ${M.tokens(textarea.value)} estimated tokens`;
-            if (diff) diff.innerHTML = diffHtml(c.before, textarea.value);
-        });
+        const update = () => {
+            const text = reviewedContent(d);
+            d.querySelector('[data-review-tokens]').textContent = `${beforeTokens} → ${M.tokens(text)} estimated tokens`;
+            if (recap) d.querySelector('summary b').textContent = M.recapParts(text).title;
+            if (diff) diff.innerHTML = diffHtml(c.before, text);
+        };
+        textarea.addEventListener('input', update);
+        d.querySelector('[data-review-recap-title]')?.addEventListener('input', update);
         if (c.settingsAfter && JSON.stringify(c.settingsBefore) !== JSON.stringify(c.settingsAfter)) {
             const settings = document.createElement('details'); settings.innerHTML = '<summary>Entry settings and processing receipts</summary><pre></pre>';
             settings.querySelector('pre').textContent = JSON.stringify({ before: c.settingsBefore, after: c.settingsAfter }, null, 2); d.append(settings);
@@ -81,7 +93,7 @@ export async function reviewChanges(workbench, changes, title = 'Review changes'
     }
     const accepted = await workbench.h.confirm(root, { okButton: options.partial ? '💾 Save selected' : '💾 Save reviewed result', cancelButton: job?.status === 'running' ? 'Review later' : 'Cancel' });
     for (const c of changes) {
-        const editedText = c.node.querySelector('textarea').value;
+        const editedText = reviewedContent(c.node);
         const originalText = String(c.content || '');
         // Accepting an untouched review must preserve source hashes, including
         // existing trailing whitespace and normalized textarea line endings.
