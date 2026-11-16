@@ -731,8 +731,15 @@ async function copyDiagnostics() {
 const modelRouter = createModelRouter({
     describe: flowModelInfo,
     assert: assertCurrentChat,
-    current: req => generateRaw({ prompt: req.assembled ?? req.prompt,
-        systemPrompt: req.assembled ? '' : req.system, responseLength: req.maxTokens }),
+    current: async req => {
+        const options = { prompt: req.assembled ?? req.prompt,
+            systemPrompt: req.assembled ? '' : req.system, responseLength: req.maxTokens };
+        if (req.preserveJson && typeof Host.generateRawData === 'function' && typeof Host.extractMessageFromData === 'function') {
+            const api = main_api;
+            return Host.extractMessageFromData(await Host.generateRawData({ ...options, api }), api);
+        }
+        return generateRaw(options);
+    },
     sendProfile: (profile, messages, maxTokens) => {
         const service = getContext().ConnectionManagerRequestService;
         if (!service?.sendRequest) throw new Error('Connection Manager is unavailable. Re-enable it or choose another connection.');

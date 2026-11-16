@@ -213,6 +213,57 @@ export function parseJSON(raw) {
     try { return JSON.parse(s.slice(a, b + 1)); } catch { return null; }
 }
 
+function readRecapObject(text) {
+    try { return JSON.parse(text); } catch { /* Escape literal whitespace in quoted strings. */ }
+    const escaped = text.replace(/"(?:[^"\\]|\\[\s\S])*"/g, quoted =>
+        quoted.replace(/\\[\s\S]|[\r\n\t]/g, token => token.length === 1 ? JSON.stringify(token).slice(1, -1) : token));
+    if (escaped !== text) {
+        try { return JSON.parse(escaped); } catch { /* Other syntax errors need a corrected reply. */ }
+    }
+    return null;
+}
+
+function jsonObjectEnd(text, start) {
+    let depth = 0, quoted = false;
+    for (let i = start; i < text.length; i++) {
+        const ch = text[i];
+        if (quoted) {
+            if (ch === '\\') i++;
+            else if (ch === '"') quoted = false;
+        } else if (ch === '"') quoted = true;
+        else if (ch === '{') depth++;
+        else if (ch === '}' && --depth === 0) return i;
+    }
+    return -1;
+}
+
+export function parseRecapJSON(raw, { responseBody = false } = {}) {
+    const text = String(raw ?? '').trim().replace(/^(?:<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>\s*)+/i, '')
+        .replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+    if (/^<think(?:ing)?>/i.test(text)) return null;
+    const value = readRecapObject(text);
+    const parsed = typeof value === 'string' ? readRecapObject(value) : value;
+    if (parsed !== null) {
+        if (typeof parsed?.content === 'string') return parsed;
+        const message = responseBody ? parsed?.choices?.[0]?.message?.content : null;
+        return typeof message === 'string' ? parseRecapJSON(message) : null;
+    }
+    // A model can wrap its one recap object in a fence or add surrounding prose.
+    const starts = /\{\s*"/g;
+    let candidate = null;
+    for (let match; (match = starts.exec(text));) {
+        const end = jsonObjectEnd(text, match.index);
+        if (end === -1) continue;
+        const object = readRecapObject(text.slice(match.index, end + 1));
+        if (!object) continue;
+        starts.lastIndex = end + 1;
+        if (typeof object.content !== 'string') continue;
+        if (candidate) return null;
+        candidate = object;
+    }
+    return candidate;
+}
+
 export class CondensationDetailsError extends Error {
     constructor(omissions) {
         const lines = omissions.flatMap(source => source.details.map(({ kind, value }) =>
@@ -227,9 +278,9 @@ export class CondensationDetailsError extends Error {
 }
 
 export function condensationResult(raw, entries, mode, label) {
-    const obj = typeof raw === 'string' ? parseJSON(raw) : raw;
-    if (!obj) throw new Error('No usable condensation JSON was returned.');
     const short = mode === 'shorten';
+    const obj = typeof raw === 'string' ? (short ? parseJSON(raw) : parseRecapJSON(raw)) : raw;
+    if (!obj) throw new Error('No usable condensation JSON was returned.');
     const ensurePreserved = (content, sources) => {
         const presentTimes = new Set(short ? condensationTimes(content).map(time => time.key) : []);
         const omissions = [];

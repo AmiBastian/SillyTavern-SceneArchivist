@@ -33,6 +33,10 @@ import { checkGrounding } from './quality-check.js';
 const listValue = value => M.unique(String(value || '').split(/\s*;\s*/));
 const flat = (it, unit) => it.a == null ? it.text : `[${it.b != null && it.b !== it.a ? unit + 's ' + it.a + '-' + it.b : unit + ' ' + it.a}${it.date ? ', ' + it.date : ''}] ${it.text}`;
 const auditReplyTokens = (tokens, count = 1) => Math.max(3000, Math.min(16000, tokens + 500 * count));
+const recapJSONError = 'Scene Archivist could not read the recap JSON. Use Recover recap JSON to check or paste the reply.';
+const canRecoverRecapJSON = (job, step) => job?.kind === 'condense' && job.options.mode === 'recap' &&
+    step && step.output == null && !step.condenseDraft && ['failed', 'paused'].includes(job.status) &&
+    (step.condenseRaw || step.error === recapJSONError || step.error === 'No usable condensation JSON was returned.');
 
 export const WORKBENCH_DEFAULTS = {
     budget: 6000, requestBudget: 0, modelAwareRequests: true, preciseDelivery: false, auditCondense: false, autoCondense: 'off', trigger: 'units', afterUnits: 10,
@@ -444,6 +448,7 @@ export class Workbench {
             ? (step?.memoryRaw && !step.memoryAudit ? button('skipMemoryAudit', 'Skip audit and review extracted memories') : '') +
               (step?.condenseDraft ? button('skipCondenseAudit', 'Skip audit and review shorter proposal') : '') +
               (step?.condenseRepair ? button('editRecapDraft', 'Edit recap draft') : '') +
+              (canRecoverRecapJSON(j, step) ? button('recoverRecapJSON', 'Recover recap JSON') : '') +
               (j.draft && j.cursor && j.cursor < j.steps.length ? button('flowReviewReady', 'Review ready results') : '') +
               (j.options?.flow?.singleRequest && !j.cursor ? button('flowSeparate', 'Run separate passes') : '') +
               (step?.oversized && !j.options?.flow?.singleRequest ? button('flowSplit', 'Split this stage') : '') +
@@ -1555,40 +1560,56 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
         return await fits(retry) ? retry : request;
     }
 
-    async editRecapDraft() {
+    async editRecapDraft(recoverJSON = false) {
         const job = this.liveState().job;
         const step = job?.steps[job.cursor];
         const saved = step?.condenseRepair;
-        if (!saved || !['failed', 'paused'].includes(job.status)) throw new Error('There is no recap draft awaiting corrections.');
-        await this.loadBooks();
-        const sources = new Map(this.inputs(step).map(source => [M.record(source).id, source]));
-        const omissions = saved.omissions.map(source => ({
-            ...source,
-            details: source.details.filter(detail => detail.kind !== 'time'),
-        })).filter(source => source.details.length);
-        const count = omissions.reduce((sum, source) => sum + source.details.length, 0);
+        const retained = step?.condenseRaw;
+        const available = recoverJSON ? canRecoverRecapJSON(job, step) : saved && ['failed', 'paused'].includes(job.status);
+        if (!available) throw new Error('There is no recap draft awaiting corrections.');
         const root = document.createElement('div'); root.className = 'sa-review';
-        root.innerHTML = `<h3>Edit recap draft</h3><p class="sa-note">Check the draft against the original events before recap review.</p>
-            ${count ? `<details open><summary>${count} missing ${count === 1 ? 'detail' : 'details'}</summary>${omissions.map(source => `
-                <p><b>${html(source.title)}</b></p><ul>${source.details.map(detail => `<li>${html(detail.value)} (${html(detail.kind)})</li>`).join('')}</ul>
-                <details><summary>Read original entry</summary><pre>${html(sources.get(source.id)?.content || '')}</pre></details>`).join('')}</details>` : ''}
-            <label class="sa-field"><span>Recap text</span><textarea class="text_pole" rows="16"></textarea></label>`;
-        const editor = root.querySelector('textarea'); editor.value = saved.reply.content;
-        if (!(await this.h.confirm(root, { okButton: 'Check corrected draft', cancelButton: 'Keep draft' }))) return;
-        const reply = { ...saved.reply, content: editor.value };
+        if (recoverJSON) {
+            root.innerHTML = `<h3>Recover recap JSON</h3><p class="sa-note">Check the retained reply, paste the recap object, or paste the response body copied from Network. The draft is checked against your selected entries before review.</p>
+                <label class="sa-field"><span>Recap JSON</span><textarea class="text_pole" rows="16" spellcheck="false"></textarea></label>`;
+        } else {
+            await this.loadBooks();
+            const sources = new Map(this.inputs(step).map(source => [M.record(source).id, source]));
+            const omissions = saved.omissions.map(source => ({
+                ...source,
+                details: source.details.filter(detail => detail.kind !== 'time'),
+            })).filter(source => source.details.length);
+            const count = omissions.reduce((sum, source) => sum + source.details.length, 0);
+            root.innerHTML = `<h3>Edit recap draft</h3><p class="sa-note">Check the draft against the original events before recap review.</p>
+                ${count ? `<details open><summary>${count} missing ${count === 1 ? 'detail' : 'details'}</summary>${omissions.map(source => `
+                    <p><b>${html(source.title)}</b></p><ul>${source.details.map(detail => `<li>${html(detail.value)} (${html(detail.kind)})</li>`).join('')}</ul>
+                    <details><summary>Read original entry</summary><pre>${html(sources.get(source.id)?.content || '')}</pre></details>`).join('')}</details>` : ''}
+                <label class="sa-field"><span>Recap text</span><textarea class="text_pole" rows="16"></textarea></label>`;
+        }
+        const editor = root.querySelector('textarea'); editor.value = recoverJSON ? retained || '' : saved.reply.content;
+        const okButton = recoverJSON ? 'Check recap JSON' : 'Check corrected draft';
+        if (!(await this.h.confirm(root, { okButton, cancelButton: 'Keep draft' }))) return;
+        const raw = editor.value;
+        const reply = recoverJSON ? M.parseRecapJSON(raw, { responseBody: true }) : { ...saved.reply, content: raw };
         return this.withLock(async () => {
-            if (this.liveState().job !== job || job.steps[job.cursor] !== step || step.condenseRepair !== saved ||
+            if (this.liveState().job !== job || job.steps[job.cursor] !== step || step.condenseRepair !== saved || step.condenseRaw !== retained ||
                 !['failed', 'paused'].includes(job.status)) throw new Error('The recap job changed while the editor was open.');
+            if (!reply) {
+                if (raw.trim()) step.condenseRaw = raw;
+                job.error = step.error = recapJSONError;
+                await this.persist(); this.renderJob(); return job;
+            }
             await this.loadBooks();
             try {
                 M.condensationResult(reply, this.inputs(step), 'recap', job.options.label);
             } catch (error) {
                 if (!(error instanceof M.CondensationDetailsError)) throw error;
+                delete step.condenseRaw;
                 step.condenseRepair = { reply, omissions: error.omissions, count: error.count };
                 job.error = step.error = step.condenseFeedback = error.message;
                 await this.persist(); this.renderJob(); return job;
             }
             step.condenseDraft = { raw: JSON.stringify(reply) };
+            delete step.condenseRaw;
             delete step.condenseRepair;
             delete step.condenseFeedback;
             job.options.automatic = false;
@@ -1606,9 +1627,10 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
                 const proposed = M.condensationResult(prior.reply, inputs, 'recap', job.options.label);
                 const raw = JSON.stringify(prior.reply);
                 step.condenseDraft = { raw };
+                delete step.condenseRaw;
                 delete step.condenseRepair;
                 delete step.condenseFeedback;
-                return { raw, proposed };
+                return { raw, reply: prior.reply, proposed };
             } catch (error) {
                 if (!(error instanceof M.CondensationDetailsError)) throw error;
                 step.condenseRepair = { reply: prior.reply, omissions: error.omissions, count: error.count };
@@ -1622,7 +1644,12 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
             const raw = step.condenseDraft?.raw ?? await this.call(
                 await this.condensationRetryRequest(step, inputs, request, transport),
                 step.condenseFeedback ? 'condensation retry' : 'condensation', null, transport);
-            const reply = M.parseJSON(raw);
+            const reply = recap ? M.parseRecapJSON(raw) : M.parseJSON(raw);
+            if (recap && !reply) {
+                step.condenseRaw = raw;
+                throw new Error(recapJSONError);
+            }
+            delete step.condenseRaw;
             try {
                 const proposed = M.condensationResult(reply, inputs, job.options.mode, job.options.label);
                 for (const item of proposed) if (rewrites.has(item.id)) {
@@ -1631,7 +1658,7 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
                 }
                 delete step.condenseFeedback;
                 delete step.condenseRepair;
-                return { raw, proposed };
+                return { raw: recap ? JSON.stringify(reply) : raw, reply, proposed };
             } catch (error) {
                 delete step.condenseDraft;
                 if (recap && error instanceof M.CondensationDetailsError) {
@@ -1651,7 +1678,7 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
         const legacyRecap = recap && !step.condenseRepair && /^The proposal omitted a required /.test(step.condenseFeedback || '');
         try { return await prepare(); }
         catch (error) {
-            if (!(canRetry || legacyRecap && step.condenseRepair) || !step.condenseFeedback) throw error;
+            if (step.condenseRaw || !(canRetry || legacyRecap && step.condenseRepair) || !step.condenseFeedback) throw error;
             await this.persist();
             if (job.status !== 'running') throw new Error('Paused before the condensation retry. Resume to continue.');
             return prepare();
@@ -1744,7 +1771,8 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
             const maxTokens = this.helperCapacity(model?.output || 6000, model).output;
             const count = async value => Number(await this.h.tokenCount(value)) || M.tokens(value);
             const transport = this.h.sendFlowRequest ? { profile, send: (request, route) => this.h.sendFlowRequest(request, route) } : null;
-            const { raw, proposed } = await this.prepareCondensation(job, step, inputs, { ...req, maxTokens }, transport, rewrites);
+            const { raw, reply, proposed } = await this.prepareCondensation(job, step, inputs,
+                { ...req, maxTokens, preserveJson: job.options.mode === 'recap' }, transport, rewrites);
             const result = [];
             for (const item of proposed) {
                 const before = item.id ? inputs.find(e => M.record(e).id === item.id).content : inputs.map(e => e.content).join('\n\n');
@@ -1752,7 +1780,7 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
                 if (afterTokens < beforeTokens) result.push({ ...item, beforeTokens, afterTokens, before });
             }
             if (!result.length) this.h.notify('The proposed version did not save tokens. The original is kept.', 'info');
-            const notes = job.options.automatic ? [] : Little.proposedLittleThings(M.parseJSON(raw)?.littleThings, item => {
+            const notes = job.options.automatic ? [] : Little.proposedLittleThings(reply?.littleThings, item => {
                 const e = records.get(item?.recordId), r = M.record(e);
                 if (!r) return null;
                 const subject = r.type === 'memory' && (r.subject || Core.classifyEntry(e)?.name);
@@ -2592,6 +2620,7 @@ ${update.content}`;
         if (['importStory', 'importWorkflow', 'importLog'].includes(action)) { this.importKind = action; this.root.querySelector('[data-sa-field=file]').click(); return; }
         if (action === 'workflowPreset') return chooseWorkflow(this);
         if (action === 'editRecapDraft') return this.editRecapDraft();
+        if (action === 'recoverRecapJSON') return this.editRecapDraft(true);
         if (action === 'skipCondenseAudit') {
             const job = this.state().job, step = job?.steps?.[job.cursor];
             if (!step?.condenseDraft || !['failed', 'paused'].includes(job.status)) throw new Error('There is no shorter proposal awaiting an audit.');

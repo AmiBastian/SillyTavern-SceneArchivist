@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.10 · November 16, 2026
+
+- Read recap JSON before chat-output cleanup where supported. Find a complete recap object in wrapped replies and preserve literal line breaks or tabs in its strings.
+- Keep replies with JSON formatting errors available under **Recover recap JSON**. Paste JSON from a previous attempt and check it against the queued sources before review.
+
 ## 2.1.9 · November 15, 2026
 
 - Use full story dates and optional times of day in linked recaps. Keep exact quotations and use clock times when they matter to an event.
