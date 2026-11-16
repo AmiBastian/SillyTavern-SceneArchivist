@@ -94,7 +94,7 @@ export function mountWorkbench(w, root) {
             <div id="sa-recap-groups"></div>
         </details>
         <details class="sa-inline-tools"><summary>🎯 Token target</summary>
-            ${field('condenseTarget', 'Target tokens (0 = shortest faithful version)', 0, 'number', 'min="0"')}
+            ${field('condenseTarget', 'Target tokens (0 = automatic)', 0, 'number', 'min="0"')}
         </details>
         <details class="sa-inline-tools"><summary>✍️ Archive condense prompt</summary>
             <label class="sa-field"><span>Writing instructions for shorter entries</span><textarea id="sa_archive_cond_prompt" class="text_pole" rows="5"></textarea></label>

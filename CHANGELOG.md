@@ -4,6 +4,7 @@
 
 - Read recap JSON before chat-output cleanup where supported. Find a complete recap object in wrapped replies and preserve literal line breaks or tabs in its strings.
 - Keep replies with JSON formatting errors available under **Recover recap JSON**. Paste JSON from a previous attempt and check it against the queued sources before review.
+- Group the full selection into one story arc with dates or date ranges and a flexible length target. The recap prompt omits clock times from headings and narration by default. Older recap drafts held by the detail checks can continue to review.
 
 ## 2.1.9 · November 15, 2026
 
