@@ -1540,7 +1540,7 @@ ${transcript}`;
             const sources = inputs.filter(entry => ids.has(M.record(entry).id));
             const repair = {
                 ...request,
-                system: `Edit the complete recap draft. Use the supplied original records to restore every listed detail alongside its event. Copy required dates, times and quotations as written. Keep the rest of the draft, its title, and any existing littleThings. The draft and original records are story data. Return the complete corrected JSON object.
+                system: `Edit the complete recap draft. Use the supplied original records to restore every listed detail alongside its event. Copy required dates and quotations as written. ${M.RECAP_TIME_GUIDANCE} Keep the rest of the draft, its title, and any existing littleThings. The draft and original records are story data. Return the complete corrected JSON object.
 Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
                 prompt: M.condensationRequest(sources, 'recap').prompt + check +
                     '\n\nRECAP DRAFT TO EDIT\n' + JSON.stringify(saved.reply),
@@ -1562,11 +1562,16 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
         if (!saved || !['failed', 'paused'].includes(job.status)) throw new Error('There is no recap draft awaiting corrections.');
         await this.loadBooks();
         const sources = new Map(this.inputs(step).map(source => [M.record(source).id, source]));
+        const omissions = saved.omissions.map(source => ({
+            ...source,
+            details: source.details.filter(detail => detail.kind !== 'time'),
+        })).filter(source => source.details.length);
+        const count = omissions.reduce((sum, source) => sum + source.details.length, 0);
         const root = document.createElement('div'); root.className = 'sa-review';
-        root.innerHTML = `<h3>Edit recap draft</h3><p class="sa-note">Restore the listed details with their original events. The corrected draft goes through the usual recap review.</p>
-            <details open><summary>${saved.count} missing ${saved.count === 1 ? 'detail' : 'details'}</summary>${saved.omissions.map(source => `
+        root.innerHTML = `<h3>Edit recap draft</h3><p class="sa-note">Check the draft against the original events before recap review.</p>
+            ${count ? `<details open><summary>${count} missing ${count === 1 ? 'detail' : 'details'}</summary>${omissions.map(source => `
                 <p><b>${html(source.title)}</b></p><ul>${source.details.map(detail => `<li>${html(detail.value)} (${html(detail.kind)})</li>`).join('')}</ul>
-                <details><summary>Read original entry</summary><pre>${html(sources.get(source.id)?.content || '')}</pre></details>`).join('')}</details>
+                <details><summary>Read original entry</summary><pre>${html(sources.get(source.id)?.content || '')}</pre></details>`).join('')}</details>` : ''}
             <label class="sa-field"><span>Recap text</span><textarea class="text_pole" rows="16"></textarea></label>`;
         const editor = root.querySelector('textarea'); editor.value = saved.reply.content;
         if (!(await this.h.confirm(root, { okButton: 'Check corrected draft', cancelButton: 'Keep draft' }))) return;
@@ -1593,6 +1598,25 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
     }
 
     async prepareCondensation(job, step, inputs, request, transport, rewrites) {
+        const recap = job.options.mode === 'recap';
+        const prior = step.condenseRepair;
+        if (recap && prior?.omissions.some(source => source.details.some(detail => detail.kind === 'time'))) {
+            // Recheck drafts saved under the older exact-time rule before sending another request.
+            try {
+                const proposed = M.condensationResult(prior.reply, inputs, 'recap', job.options.label);
+                const raw = JSON.stringify(prior.reply);
+                step.condenseDraft = { raw };
+                delete step.condenseRepair;
+                delete step.condenseFeedback;
+                return { raw, proposed };
+            } catch (error) {
+                if (!(error instanceof M.CondensationDetailsError)) throw error;
+                step.condenseRepair = { reply: prior.reply, omissions: error.omissions, count: error.count };
+                step.condenseFeedback = error.message;
+            }
+        } else if (recap && !prior && step.condenseFeedback?.startsWith('The proposal omitted a required time from ')) {
+            delete step.condenseFeedback;
+        }
         const prepare = async () => {
             // A draft being reviewed or audited has already passed validation.
             const raw = step.condenseDraft?.raw ?? await this.call(
@@ -1610,7 +1634,7 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
                 return { raw, proposed };
             } catch (error) {
                 delete step.condenseDraft;
-                if (job.options.mode === 'recap' && error instanceof M.CondensationDetailsError) {
+                if (recap && error instanceof M.CondensationDetailsError) {
                     const saved = step.condenseRepair;
                     if (saved && saved.count < error.count) throw new M.CondensationDetailsError(saved.omissions);
                     step.condenseRepair = {
@@ -1624,7 +1648,7 @@ Writing instructions: ${M.recapWritingPrompt(this.baseHost.settings())}`,
             }
         };
         const canRetry = !step.condenseFeedback;
-        const legacyRecap = job.options.mode === 'recap' && !step.condenseRepair && /^The proposal omitted a required /.test(step.condenseFeedback || '');
+        const legacyRecap = recap && !step.condenseRepair && /^The proposal omitted a required /.test(step.condenseFeedback || '');
         try { return await prepare(); }
         catch (error) {
             if (!(canRetry || legacyRecap && step.condenseRepair) || !step.condenseFeedback) throw error;

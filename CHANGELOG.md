@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.9 · November 15, 2026
+
+- Use full story dates and optional times of day in linked recaps. Keep exact quotations and use clock times when they matter to an event.
+- Recheck saved recap drafts that previously failed on clock times and reuse them when they pass the current checks.
+
 ## 2.1.8 · November 15, 2026
 
 - Check a recap for all missing required dates, times, and quotations in one pass. Use the retained draft and relevant sources for a focused correction when they fit.
