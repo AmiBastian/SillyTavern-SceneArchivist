@@ -7,6 +7,17 @@ export function profileMessages(request) {
     ];
 }
 
+export function completionReply(data, content) {
+    const choice = data?.choices?.[0];
+    const finishReason = choice?.finish_reason ?? choice?.stop_reason ?? data?.finish_reason ??
+        data?.stop_reason ?? data?.stop_type ?? data?.candidates?.[0]?.finishReason;
+    return { content, finishReason };
+}
+
+export function outputLimitReached(reason) {
+    return /^(?:length|max_tokens|max_output_tokens|max_length)$/i.test(reason ?? '');
+}
+
 export function createModelRouter({ current, sendProfile, describe = profile => ({ name: profile || 'Current SillyTavern model' }),
     assert = () => {}, onRoute = () => {}, clock = () => new Date().toISOString() }) {
     let latest = null;
@@ -25,13 +36,15 @@ export function createModelRouter({ current, sendProfile, describe = profile => 
                 route.name = describe(route.profile)?.name || route.name;
                 report(route);
                 const result = route.profile
-                    ? await sendProfile(route.profile, profileMessages(request), request.maxTokens)
+                    ? await sendProfile(route.profile, profileMessages(request), request.maxTokens, request.includeFinishReason)
                     : await current(request);
                 assert();
                 const text = typeof result === 'string' ? result : result?.content;
-                if (typeof text !== 'string' || !text.trim()) throw new Error('The connection returned no text.');
+                const finishReason = request.includeFinishReason ? result?.finishReason : undefined;
+                if ((typeof text !== 'string' || !text.trim()) && !outputLimitReached(finishReason)) throw new Error('The connection returned no text.');
+                if (finishReason) route.finishReason = finishReason;
                 route.state = 'received';
-                return text;
+                return request.includeFinishReason ? { content: typeof text === 'string' ? text : '', finishReason } : text;
             } catch (cause) {
                 route.state = 'failed';
                 if (!route.profile) throw cause;

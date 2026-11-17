@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.11 · November 17, 2026
+
+- If the archive reply is cut off, automatically ask for a shorter summary of the same messages on the same connection. If the shorter reply also gets cut off, use **Split this stage** to summarize the range in smaller parts.
+- When a combined archive request is cut off, continue with separate passes and keep the results together for review. **Retry failed stage** also recovers older archive jobs with incomplete responses.
+
 ## 2.1.10 · November 16, 2026
 
 - Read recap JSON before chat-output cleanup where supported. Find a complete recap object in wrapped replies and preserve literal line breaks or tabs in its strings.

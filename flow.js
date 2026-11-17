@@ -35,13 +35,29 @@ export function uncoveredArchiveMessages(chat, metadata) {
     return uncoveredMemoryMessages(chat, receipts).filter(message => !isSkipped(metadata.rangeControl, chat[message.idx]) && !legacy.some(range => message.idx >= range.from && message.idx <= range.to));
 }
 
-export function archiveAnswer(raw) {
+export class IncompleteArchiveError extends Error {
+    constructor(raw, limited = false) {
+        super(limited ? 'The archive reply hit the connection’s output limit.' : 'The model returned an incomplete archive update.');
+        this.raw = raw;
+    }
+}
+
+export function archiveAnswer(raw, { requireEnd = false } = {}) {
     const obj = M.parseJSON(raw);
     if (typeof obj?.archive !== 'string') {
-        if (/^\s*(?:\x60{3}(?:json)?\s*)?\{/.test(raw)) throw new Error('The archive response was incomplete. Edit it as Markdown or retry the stage.');
+        const text = String(raw ?? '').replace(/^(?:\s*<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>)+/i, '');
+        const missingEnd = requireEnd && /^=== Scene Log ===\s*$/m.test(text) && !/^=== End Scene Log ===\s*$/m.test(text);
+        if (!text.trim() || missingEnd || /^\s*(?:\x60{3}(?:json)?\s*)?\{/i.test(text)) throw new IncompleteArchiveError(raw);
         return { raw, keywords: [] };
     }
+    if (!obj.archive.trim()) throw new IncompleteArchiveError(raw);
     return { raw: obj.archive, keywords: Array.isArray(obj.keywords) ? obj.keywords : [], littleThings: obj.littleThings };
+}
+
+export function archiveRetry(previous, raw) {
+    const text = raw?.trim() ? raw : undefined;
+    const target = text ? Math.floor(M.tokens(text) * 0.65) : 1800;
+    return { raw: text ?? previous?.raw, target: Math.max(160, Math.min(3200, previous?.target ?? Infinity, target)) };
 }
 
 export const archiveOutputId = index => `new-archive-${index + 1}`;

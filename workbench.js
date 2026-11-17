@@ -29,6 +29,7 @@ import { memoryEvidence, mergeMemoryEvidence, memoryRewriteSources, memoryRewrit
     memoryLinkInstructions, memorySourcePositions, memoryEvidenceWarning, memoryEvidencePatch } from './memory-provenance.js';
 import { chooseWorkflow, showForgotten, showDiagnostics } from './release-tools.js';
 import { checkGrounding } from './quality-check.js';
+import { outputLimitReached } from './model-routing.js';
 
 const listValue = value => M.unique(String(value || '').split(/\s*;\s*/));
 const flat = (it, unit) => it.a == null ? it.text : `[${it.b != null && it.b !== it.a ? unit + 's ' + it.a + '-' + it.b : unit + ' ' + it.a}${it.date ? ', ' + it.date : ''}] ${it.text}`;
@@ -442,8 +443,9 @@ export class Workbench {
         const stage = j.phase === 'saving' || j.approval ? (saving ? 'saving approved changes' : 'approved changes ready to resume')
             : j.phase === 'review' ? 'ready for one combined review'
                 : j.approvedRecords?.length ? 'remaining results await approval' : 'story books unchanged until approval';
-        const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared${j.approvedRecords?.length ? ` · ${j.approvedRecords.length} approved records saved` : ''} · ${stage}` : `${j.cursor}/${j.steps.length} steps saved`;
         const step = j.steps[j.cursor];
+        const progress = j.options?.bulk ? `${j.cursor}/${j.steps.length} steps prepared${j.approvedRecords?.length ? ` · ${j.approvedRecords.length} approved records saved` : ''} · ${stage}` : `${j.cursor}/${j.steps.length} steps saved`;
+        const retry = j.status === 'running' && step?.archiveRetry ? ' · requesting a shorter archive' : '';
         const recovery = j.status === 'failed' || j.status === 'paused'
             ? (step?.memoryRaw && !step.memoryAudit ? button('skipMemoryAudit', 'Skip audit and review extracted memories') : '') +
               (step?.condenseDraft ? button('skipCondenseAudit', 'Skip audit and review shorter proposal') : '') +
@@ -451,13 +453,13 @@ export class Workbench {
               (canRecoverRecapJSON(j, step) ? button('recoverRecapJSON', 'Recover recap JSON') : '') +
               (j.draft && j.cursor && j.cursor < j.steps.length ? button('flowReviewReady', 'Review ready results') : '') +
               (j.options?.flow?.singleRequest && !j.cursor ? button('flowSeparate', 'Run separate passes') : '') +
-              (step?.oversized && !j.options?.flow?.singleRequest ? button('flowSplit', 'Split this stage') : '') +
+              ((step?.oversized || step?.archiveRetry && step.payload.messages?.length > 1) && !j.options?.flow?.singleRequest ? button('flowSplit', 'Split this stage') : '') +
               (j.options?.flow && step && /profile|connection|provider|rate limit|timeout|gateway/i.test(j.error || '') ? button('flowUseCurrent', 'Use current model') : '') +
               (j.options?.flow && step?.payload.source && /messages changed/i.test(j.error || '') ? button('flowRefreshEvidence', 'Refresh this stage from chat') : '') +
-              (step?.payload.kind === 'archive' && step.output?.raw ? button('flowEditArchive', 'Edit archive response') : '')
+              (step?.payload.kind === 'archive' && (step.output?.raw || step.archiveRetry?.raw) ? button('flowEditArchive', 'Edit archive response') : '')
             : '';
         const error = step?.condenseRepair ? j.error?.split('\n')[0] : j.error;
-        el.innerHTML = `<div class="sa-job"><b>📚 ${html(jobLabel(j.kind))}</b> · ${html(j.status)} · ${html(progress)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${error ? `<p class="sa-warnline">${html(error)}</p>` : ''}<div class="sa-row">${button('jobResume', j.status === 'failed' ? '🔁 Retry failed stage' : '▶️ Resume or review', j.status === 'running' ? 'disabled' : '')}${recovery}${button('jobPause', '⏸️ Pause after this request', j.status !== 'running' || saving ? 'disabled' : '')}${button('jobCancel', '🗑️ Discard unfinished job', saving ? 'disabled' : '')}</div><p class="sa-hint">Discarding ends this job and makes its unsaved results unavailable. Records already written to your lorebooks are kept. Use Resume or review to keep working with prepared results.</p></div>`;
+        el.innerHTML = `<div class="sa-job"><b>📚 ${html(jobLabel(j.kind))}</b> · ${html(j.status)} · ${html(progress + retry)}<progress max="${Math.max(1, j.steps.length)}" value="${j.cursor}"></progress>${error ? `<p class="sa-warnline">${html(error)}</p>` : ''}<div class="sa-row">${button('jobResume', j.status === 'failed' ? '🔁 Retry failed stage' : '▶️ Resume or review', j.status === 'running' ? 'disabled' : '')}${recovery}${button('jobPause', '⏸️ Pause after this request', j.status !== 'running' || saving ? 'disabled' : '')}${button('jobCancel', '🗑️ Discard unfinished job', saving ? 'disabled' : '')}</div><p class="sa-hint">Discarding ends this job and makes its unsaved results unavailable. Records already written to your lorebooks are kept. Use Resume or review to keep working with prepared results.</p></div>`;
         this.layout?.help.refresh(el);
     }
     renderBudget() { renderMemoryBudget(this); }
@@ -1248,6 +1250,7 @@ export class Workbench {
             throw new Error(`${stage} needs about ${format(input)} input tokens plus ${format(output)} output tokens (model limit ${format(model.context)}).${breakdown} ${hints.join(' ')}`);
         }
         delete step.oversized;
+        if (job.status !== 'running') throw new Error('The job stopped before the next model request.');
         const state = this.liveState(), meter = (state.telemetry ??= { requests: 0, input: 0, output: 0 });
         const last = meter.last = { label: stage, profile, model: model.name, input, at: M.now(), state: 'requesting' };
         job.requestsTotal = (job.requestsTotal || 0) + 1;
@@ -1255,11 +1258,17 @@ export class Workbench {
         meter.input += input;
         await this.persist();
         try {
-            const raw = await this.h.sendFlowRequest(req, profile);
+            if (job.status !== 'running') throw new Error('The job stopped before the next model request.');
+            const reply = await this.h.sendFlowRequest(req, profile);
             this.h.assert();
+            const raw = typeof reply === 'string' ? reply : reply?.content;
+            if (reply?.finishReason) last.finishReason = reply.finishReason;
+            if (typeof raw === 'string' && raw.trim()) {
+                last.output = M.tokens(raw);
+                meter.output += last.output;
+            }
+            if (req.includeFinishReason && outputLimitReached(last.finishReason)) throw new Flow.IncompleteArchiveError(raw, true);
             if (typeof raw !== 'string' || !raw.trim()) throw new Error('The model returned no text.');
-            last.output = M.tokens(raw);
-            meter.output += last.output;
             last.state = 'received';
             return raw;
         } catch (error) {
@@ -1269,6 +1278,37 @@ export class Workbench {
             throw error;
         } finally {
             await this.persist();
+        }
+    }
+
+    async requestArchive(job, step, req) {
+        const chat = this.h.context().chat || [];
+        for (;;) {
+            const retry = step.archiveRetry;
+            if (job.status !== 'running') throw new Error('The job stopped after the archive request. Resume to continue.');
+            if (retry && step.payload.source && !M.checkSource(step.payload.source, this.sourceId(), chat).valid) {
+                throw new Error('The selected messages changed before the archive retry. Refresh this stage from the chat.');
+            }
+            const request = { ...req, includeFinishReason: true };
+            if (retry) {
+                request.system += `\nThe previous archive reply was incomplete. Aim for about ${retry.target} tokens for this entire reply, including the JSON. Read the full selected range and cover its ending. Use compact bullets for consequential events, decisions, dates, and changes in what characters know. Combine repeated beats, keep essential state updates brief, and leave room to close the JSON.`;
+                request.parts = { ...req.parts, system: request.system };
+            }
+            try {
+                const raw = await this.requestFlow(job, step, request, 'archive');
+                Flow.archiveAnswer(raw, { requireEnd: true });
+                delete step.archiveRetry;
+                return raw;
+            } catch (error) {
+                if (!(error instanceof Flow.IncompleteArchiveError)) throw error;
+                step.archiveRetry = Flow.archiveRetry(retry, error.raw);
+                await this.persist();
+                if (retry) {
+                    const next = step.payload.messages?.length > 1 ? ' Use Split this stage to summarize the same messages in smaller parts.' : '';
+                    throw new Error(`${error.message} The shorter attempt also ended early. You can retry with a working connection.${next}`);
+                }
+                this.renderJob();
+            }
         }
     }
 
@@ -1300,9 +1340,8 @@ Start new ${s.unit} entries at ${highest + 1}. Preserve the actual story dates.`
             if (!job.options.automatic) req.system += Little.notePrompt('message');
             req.prompt = reference + '\n\n' + req.prompt;
             req.parts = { references: flow.referenceText, log, transcript, system: req.system };
-            const decode = raw => ({ raw, at: M.now() });
-            if (prepareOnly) return { req, decode };
-            return decode(step.combinedRaw || await this.requestFlow(job, step, req, 'archive'));
+            if (prepareOnly) return { req, decode: raw => Flow.archiveAnswer(raw, { requireEnd: true }) };
+            return { raw: step.combinedRaw || await this.requestArchive(job, step, req), at: M.now() };
         }
 
         if (payload.kind === 'memories') {
@@ -1440,8 +1479,10 @@ ${transcript}`;
             log: plans.map(({ req }) => req.parts?.log || '').filter(Boolean).join('\n\n'),
             system: [system, ...requests.map(request => request.instructions)].join('\n\n'),
         };
-        const raw = await this.requestFlow(job, first, { system, prompt, parts }, stage);
+        const withArchive = first.payload.kind === 'archive';
+        const raw = await this.requestFlow(job, first, { system, prompt, parts, includeFinishReason: withArchive }, stage);
         const results = M.parseJSON(raw)?.stages;
+        if (!results && withArchive) throw new Flow.IncompleteArchiveError(raw);
         if (!results || plans.some(plan => !results[stageName(plan.step)])) throw new Error('The combined response did not contain every stage. Retry or run separate passes.');
         const markdown = results.archive?.archive;
         const archiveIds = new Map(citeNewUnits && typeof markdown === 'string'
@@ -1482,6 +1523,7 @@ ${transcript}`;
             if (!messages.length) throw new Error('There are no messages left in this selection.');
             Object.assign(step.payload, { messages, from: messages[0].idx, to: messages.at(-1).idx, source: this.source(Flow.messageRuns(messages)) });
             delete step.output;
+            delete step.archiveRetry;
         }
         await this.persist();
         return this.withLock(() => this.queue.resume());
@@ -1489,33 +1531,37 @@ ${transcript}`;
 
     async editFailedArchive() {
         const job = this.liveState().job, step = job?.steps[job.cursor];
-        if (step?.payload.kind !== 'archive' || !step.output?.raw || this.queue.running) return;
+        const raw = step?.output?.raw || step?.archiveRetry?.raw;
+        if (step?.payload.kind !== 'archive' || !raw || this.queue.running) return;
         const root = document.createElement('div'); root.className = 'sa-review';
         const label = document.createElement('label'); label.textContent = 'Correct the archive response';
         const input = document.createElement('textarea'); input.className = 'text_pole'; input.rows = 15;
-        try { input.value = Flow.archiveAnswer(step.output.raw).raw; }
-        catch { input.value = step.output.raw; }
+        try { input.value = Flow.archiveAnswer(raw).raw; }
+        catch { input.value = raw; }
         const previous = input.value;
         label.append(input); root.append(label);
         if (!(await this.h.confirm(root, { okButton: 'Use edited archive' })) || !input.value.trim()) return;
+        if (this.liveState().job !== job || job.steps[job.cursor] !== step || this.queue.running || job.status === 'canceled') return;
         if (input.value !== previous && step.combinedRaw) {
             // A manually replaced archive invalidates downstream output based on the old text.
             job.options.flow.singleRequest = false;
             for (const next of job.steps.slice(job.cursor + 1)) delete next.combinedRaw;
         }
-        step.output.raw = input.value;
+        step.output = { raw: input.value, at: M.now() };
+        delete step.archiveRetry;
         await this.persist();
         return this.withLock(() => this.queue.resume());
     }
 
     async splitFlowStage() {
         const job = this.state().job, step = job?.steps[job.cursor];
-        if (!job?.options.flow || job.status !== 'failed' || !step?.oversized) return;
+        if (!job?.options.flow || this.queue.running || !['failed', 'paused'].includes(job.status) || !(step?.oversized || step?.archiveRetry)) return;
         const payload = step.payload;
         const key = payload.kind === 'tracker-pass' ? 'trackers' : payload.messages?.length > 1 ? 'messages' : 'ids';
         const parts = Flow.halve(payload[key]);
         if (!parts) throw new Error('This stage contains one indivisible item. Choose a model with more context or shorten its input.');
         if (!(await this.h.confirmText('Split only this stage into two requests? Finished results are retained.', { okButton: 'Split stage' }))) return;
+        if (this.liveState().job !== job || job.steps[job.cursor] !== step || this.queue.running || !['failed', 'paused'].includes(job.status)) return;
         const replacements = parts.map(items => {
             const next = { ...M.copy(payload), [key]: items };
             if (key === 'messages') Object.assign(next, { from: items[0].idx, to: items.at(-1).idx, source: this.source(Flow.messageRuns(items)) });
@@ -1649,7 +1695,15 @@ ${transcript}`;
         }
         const kind = step.payload.kind || job.kind;
         if (job.options.flow && ['archive', 'memories', 'tracker-pass'].includes(kind)) {
-            if (job.options.flow.singleRequest && job.cursor === 0 && !step.combinedRaw) await this.prepareCombined(job, step);
+            if (job.options.flow.singleRequest && job.cursor === 0 && !step.combinedRaw) {
+                try { await this.prepareCombined(job, step); }
+                catch (error) {
+                    if (!(error instanceof Flow.IncompleteArchiveError) || kind !== 'archive') throw error;
+                    job.options.flow.singleRequest = false;
+                    await this.persist();
+                    if (job.status === 'running') this.baseHost.notify('The combined reply was incomplete. Preparing the stages separately.', 'info');
+                }
+            }
             return this.performFlow(job, step);
         }
         if (kind === 'archive') {
@@ -1845,7 +1899,28 @@ ${transcript}`;
         }
         if (kind === 'archive') {
             if (!this.bulkRun && !M.checkSource(step.payload.source, this.sourceId(), this.h.context().chat || []).valid) throw new Error('The selected transcript changed while the result was waiting for review.');
-            const res = this.bulkRun ? await this.bulkRun.acceptArchive(step.output.raw, step.payload.source, step.id, job.options.flow ? { mode: step.payload.sharedMode, number: step.payload.sharedUnit, unit: this.h.settings().unit } : null, !!(job.options.flow?.singleRequest && step.combinedRaw)) : await this.h.acceptArchive(step.output.raw, step.payload.source, step.id);
+            const placement = job.options.flow ? { mode: step.payload.sharedMode, number: step.payload.sharedUnit, unit: this.h.settings().unit } : null;
+            const accept = () => this.bulkRun
+                ? this.bulkRun.acceptArchive(step.output.raw, step.payload.source, step.id, placement, !!(job.options.flow?.singleRequest && step.combinedRaw))
+                : this.h.acceptArchive(step.output.raw, step.payload.source, step.id);
+            let res;
+            try { res = await accept(); }
+            catch (error) {
+                if (!job.options.flow || !(error instanceof Flow.IncompleteArchiveError)) throw error;
+                // Older jobs kept unvalidated output in the review slot.
+                step.archiveRetry = Flow.archiveRetry(step.archiveRetry, error.raw);
+                if (step.combinedRaw) {
+                    job.options.flow.singleRequest = false;
+                    for (const pending of job.steps.slice(job.cursor)) delete pending.combinedRaw;
+                }
+                delete step.output;
+                await this.persist();
+                this.renderJob();
+                step.output = await this.performFlow(job, step);
+                await this.persist();
+                if (job.status !== 'running') return false;
+                res = await accept();
+            }
             if (!res) return false;
             await this.h.afterArchive({ from: step.payload.from, to: step.payload.to, ranges: step.payload.source?.ranges, source: step.payload.source, stepId: step.id, ids: res.ids }, res.days, job.options.hide, res.archiveIds);
             const data = await this.h.load(archiveBook); data.sceneArchivistReceipts = M.unique([...(data.sceneArchivistReceipts ?? []), step.id]); await this.h.save(archiveBook, data);

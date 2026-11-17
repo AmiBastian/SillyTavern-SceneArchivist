@@ -22,7 +22,7 @@ import { Workbench } from './workbench.js';
 import { ChatControls } from './chat-controls.js';
 import { addReviewHandle } from './review-window.js';
 import { VERSION } from './version.js';
-import { createModelRouter } from './model-routing.js';
+import { completionReply, createModelRouter } from './model-routing.js';
 import { entryReasons } from './vector-diagnostics.js';
 import { readReferenceEntries as collectReferenceEntries, referenceText } from './reference-context.js';
 import { createWorldInfoIO } from './world-info-io.js';
@@ -728,21 +728,32 @@ async function copyDiagnostics() {
     catch { await callGenericPopup(text, POPUP_TYPE.TEXT, '', { wide: true, large: true }); }
 }
 
+function extractCompletion(data, api) {
+    const text = typeof data?.content === 'string' ? data.content : Host.extractMessageFromData(data, api);
+    return completionReply(data, text);
+}
+
 const modelRouter = createModelRouter({
     describe: flowModelInfo,
     assert: assertCurrentChat,
     current: async req => {
         const options = { prompt: req.assembled ?? req.prompt,
             systemPrompt: req.assembled ? '' : req.system, responseLength: req.maxTokens };
-        if (req.preserveJson && typeof Host.generateRawData === 'function' && typeof Host.extractMessageFromData === 'function') {
+        if ((req.preserveJson || req.includeFinishReason) && typeof Host.generateRawData === 'function' && typeof Host.extractMessageFromData === 'function') {
             const api = main_api;
-            return Host.extractMessageFromData(await Host.generateRawData({ ...options, api }), api);
+            const reply = extractCompletion(await Host.generateRawData({ ...options, api }), api);
+            return req.includeFinishReason ? reply : reply.content;
         }
         return generateRaw(options);
     },
-    sendProfile: (profile, messages, maxTokens) => {
+    sendProfile: async (profile, messages, maxTokens, includeFinishReason) => {
         const service = getContext().ConnectionManagerRequestService;
         if (!service?.sendRequest) throw new Error('Connection Manager is unavailable. Re-enable it or choose another connection.');
+        if (includeFinishReason && typeof Host.extractMessageFromData === 'function') {
+            const { api } = flowModelInfo(profile);
+            const data = await service.sendRequest(profile, messages, maxTokens, { extractData: false });
+            return extractCompletion(data, api);
+        }
         return service.sendRequest(profile, messages, maxTokens);
     },
 });
@@ -795,7 +806,7 @@ function flowModelInfo(profile) {
     const preset = current.getPresetManager?.(api)?.getCompletionPresetByName?.(selected.preset);
     const context = api === 'textgenerationwebui' ? preset?.max_length : preset?.openai_max_context;
     const output = api === 'textgenerationwebui' ? preset?.genamt : preset?.openai_max_tokens;
-    return { name: selected.name, context: Number(context || selected.context_length) || 0,
+    return { name: selected.name, api, context: Number(context || selected.context_length) || 0,
         output: Number(output || selected.max_tokens) || 0 };
 }
 
